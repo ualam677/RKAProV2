@@ -12,3 +12,6 @@ export const HAND_TRAPS_SECOND = [42141493, 84192580, 87126721];
 const all = new Set([...HAND_TRAPS, ...HAND_TRAPS_SECOND]);
 /** `alias`: the card an alternate artwork is an artwork of */
 export const isHandTrap = (code: number, alias = 0) => all.has(code) || (alias !== 0 && all.has(alias));
+const first = new Set(HAND_TRAPS);
+/** a hand trap that still works on the opponent's turn after you went first (not the Mulcharmy cards) */
+export const isFirstTurnHandTrap = (code: number) => first.has(code);

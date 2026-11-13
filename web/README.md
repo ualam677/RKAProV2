@@ -69,6 +69,15 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   "This worked" at the end makes its board a target. Optimiser: Find a line per start or for every start, and a fourth
   number, "Engine reached your full board". Delta Wing + 4 hand traps: Full Armor, Tachyon Primal, Seventh Tachyon in
   about 100 tries / 5 s. Galaxy Wizard + 3 Ash + Droll: every line tried (71), nothing left on the field.
+- Interruptions (`src/engine/interruptions.ts`): read from each card's script. An interruption is an effect usable on
+  the opponent's turn (Quick Effect, Trap, Quick-Play Spell) that negates or removes; searches and summons don't
+  count, nor anything only usable in battle (by event, or a condition like Galaxy-Eyes Photon Dragon's Battle Phase
+  check). Xyz Materials to detach are checked (Photon Howling needs 3), and so are conditions on your own field
+  (Tachyon Transmigration: Set with a "Galaxy-Eyes" monster, from the hand with a "Galaxy-Eyes Tachyon Dragon").
+  Traps in hand count as Set while there is room. Only what the line built counts, not the hand traps it started with.
+  The route search aims for the most interruptions (negates first); "full board" is a per-deck setting (default 3).
+  Galaxy list, each start + 4 hand traps, 69 s for all seven: Infinity Dragon 3 (Photon Howling, Number 38, Set
+  Transmigration); Delta Wing, Orbital 7, Soldier, Seventh Tachyon, Photon Orbital 2; Wizard 0.
 - "Ignore hand traps" now holds back only known hand traps (src/engine/handtraps.ts); other effects from the hand,
   like Galaxy War Drake summoning itself, stay available in tests and in the search.
   Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it

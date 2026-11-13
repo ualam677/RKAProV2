@@ -180,7 +180,7 @@ export type ToWorker =
   // the engine probe: what every Main Deck card starts, alone and in pairs (see probe.ts)
   | { type: "probe"; id: number; main: number[]; extra: number[] }
   // route search from `hand` (the rest of `main` is the Deck) toward `targets`, your full boards
-  | { type: "route"; id: number; main: number[]; extra: number[]; hand: number[]; targets: number[][]; prior: string[] };
+  | { type: "route"; id: number; main: number[]; extra: number[]; hand: number[]; targets: number[][]; prior: string[]; goal: number };
 
 export type FromWorker =
   | { type: "progress"; text: string }

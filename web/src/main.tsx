@@ -180,7 +180,7 @@ function App() {
           all.map((one) => {
             if (one.id !== job.deckId) return one;
             const aimed = (one.tests ?? []).some((test) => test.worked && test.board?.length);
-            const saved = { board: route.board, coverage: route.coverage, full: route.full, aimed, tried: route.tried, date: Date.now(), signature: deckSignature(one), record: line };
+            const saved = { board: route.board, interruptions: route.interruptions, coverage: route.coverage, full: route.full, aimed, tried: route.tried, date: Date.now(), signature: deckSignature(one), record: line };
             return { ...one, routes: { ...one.routes, [job.code]: saved } };
           }),
         );
@@ -275,7 +275,7 @@ function App() {
     const worked = (target.tests ?? []).filter((one) => one.worked);
     const targets = worked.flatMap((one) => (one.board?.length ? [one.board] : []));
     const prior = [...new Set(worked.flatMap((one) => one.steps.filter((step) => step.idle && step.code).map((step) => `${step.text.split(/[ :]/)[0]}:${step.code}`)))];
-    post({ type: "route", id, main: target.main, extra: target.extra, hand, targets, prior });
+    post({ type: "route", id, main: target.main, extra: target.extra, hand, targets, prior, goal: target.fullAt ?? 3 });
   };
   const findLines = (target: SavedDeck, starts: { code: number; hand: number[] }[]) => {
     if (!starts.length) return;

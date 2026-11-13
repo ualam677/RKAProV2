@@ -25,6 +25,7 @@ import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { probeDeck, routeSearch } from "./probe";
 import { isHandTrap } from "./handtraps";
+import { readEffects, readSetConstants, type QuickEffect } from "./interruptions";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
 
 // Folder holding cards.cdb and the release / pre-release databases, and a listing of that folder.
@@ -964,7 +965,15 @@ async function runProbe(id: number, main: number[], extra: number[]) {
 // Route search, between other requests like the probe. The line found comes back as a test the duel screen replays:
 // the same deck order, seed and settings the search played with, and its choices as the screen takes them.
 let routeJob = 0;
-async function runRoute(id: number, main: number[], extra: number[], hand: number[], targets: number[][], prior: string[]) {
+// what each card can do on the opponent's turn, read once from its script
+const quickEffects = new Map<number, QuickEffect[]>();
+let setConstants: Map<string, number> | null = null;
+function effectsOf(code: number): QuickEffect[] {
+  setConstants ??= readSetConstants(readScript("archetype_setcode_constants.lua") ?? "", readScript("constant.lua") ?? "");
+  if (!quickEffects.has(code)) quickEffects.set(code, readEffects(readScript(`c${code}.lua`) ?? "", cards.get(code)?.type ?? 0, setConstants));
+  return quickEffects.get(code)!;
+}
+async function runRoute(id: number, main: number[], extra: number[], hand: number[], targets: number[][], prior: string[], goal: number) {
   routeJob = id;
   const canonical = (code: number) => {
     const known = knownCode(code);
@@ -976,8 +985,8 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
   for (const code of handCodes) deck.splice(deck.indexOf(code), 1);
   const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
   await prefetchScripts([...handCodes, ...deck, ...extraCodes]);
-  const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf };
-  const steps = routeSearch(env, handCodes, deck, extraCodes, { targets: targets.map((board) => board.map(canonical)), prior: new Set(prior) });
+  const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
+  const steps = routeSearch(env, handCodes, deck, extraCodes, { goal, targets: targets.map((board) => board.map(canonical)), prior: new Set(prior) });
   let last = 0;
   for (;;) {
     if (routeJob !== id) return;
@@ -1043,7 +1052,7 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
     } else if (message.type === "probe") {
       void runProbe(message.id, message.main, message.extra).catch((error) => send({ type: "error", text: `Engine check stopped: ${error instanceof Error ? error.message : error}` }));
     } else if (message.type === "route") {
-      void runRoute(message.id, message.main, message.extra, message.hand, message.targets, message.prior).catch((error) =>
+      void runRoute(message.id, message.main, message.extra, message.hand, message.targets, message.prior, message.goal).catch((error) =>
         send({ type: "error", text: `Route search stopped: ${error instanceof Error ? error.message : error}` }),
       );
     } else if (message.type === "text") {

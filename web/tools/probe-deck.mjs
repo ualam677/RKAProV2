@@ -20,7 +20,7 @@ for (const r of db.prepare("select d.id, d.alias, cast(d.setcode as text) setcod
     attack: r.atk, defense: link ? 0 : r.def, lscale: (r.level >> 24) & 0xff, rscale: (r.level >> 16) & 0xff, link_marker: link ? r.def : 0 });
   names.set(r.id, r.name);
 }
-const known = (code) => { if (cards.has(code)) return code; for (let o = 1; o < 10; o++) { const c = cards.get(code - o); if (c) return c.alias && cards.has(c.alias) ? c.alias : code - o; } return code; };
+const known = (code) => { const c0 = cards.get(code); if (c0) return c0.alias && Math.abs(c0.alias - code) < 20 && cards.has(c0.alias) ? c0.alias : code; for (let o = 1; o < 10; o++) { const c = cards.get(code - o); if (c) return c.alias && cards.has(c.alias) ? c.alias : code - o; } return code; };
 const scriptCache = new Map();
 const script = (name) => {
   name = path.basename(name);
@@ -48,7 +48,14 @@ if (process.env.OVERLAY) {
     return messages;
   };
 }
-const env = { core, card: (code) => cards.get(code) ?? null, script, name: (code) => names.get(code) ?? `#${code}` };
+const { readEffects, readSetConstants } = await import(new URL("../src/engine/interruptions.ts", import.meta.url));
+const sets = readSetConstants(script("archetype_setcode_constants.lua"), script("constant.lua"));
+const effectCache = new Map();
+const env = {
+  core, card: (code) => cards.get(code) ?? null, script, name: (code) => names.get(code) ?? `#${code}`,
+  effects: (code) => { if (!effectCache.has(code)) effectCache.set(code, readEffects(script(`c${code}.lua`), cards.get(code)?.type ?? 0, sets)); return effectCache.get(code); },
+  setcodes: (code) => cards.get(code)?.setcodes ?? [],
+};
 
 const raw = zlib.inflateRawSync(Buffer.from(fs.readFileSync(OMEGA, "utf8").trim().split(/\s+/).pop(), "base64"));
 const all = Array.from({ length: raw[0] }, (_, i) => known(raw.readUInt32LE(2 + 4 * i)));
@@ -98,6 +105,7 @@ if (process.env.ROUTE) {
   while (!(next = steps.next()).done);
   const r = next.value;
   console.log(`ROUTE ${(performance.now() - t) / 1000 | 0} s, ${r.tried} tried, full ${r.full}, coverage ${(r.coverage * 100).toFixed(0)}%`);
+  console.log("  interruptions:", r.interruptions.map((i) => `${names.get(i.code)} (${i.kind}, ${i.from})`).join("; ") || "none");
   console.log("  board:", r.board.map((c) => names.get(c)).join(", "));
   console.log("  steps:", r.steps.join(" > "));
   console.log("  ui picks:", JSON.stringify(r.ui));

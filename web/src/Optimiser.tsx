@@ -115,17 +115,21 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const odds = second ? secondOdds : first;
   const everyStartProven = useMemo(() => allProven(main), [main]);
   const proven = useMemo(() => computeOdds(provenOnly(main), second ? 6 : 5), [main, second]);
+  const startCardsAll = main.filter((card) => card.tag.role === "starter" || card.tag.role === "pair");
   // the lines the route search found, for the deck as it is now
   const routes = deck.routes ?? {};
   const routeOf = (code: number) => (routes[code]?.signature === signature ? routes[code] : undefined);
   const fullBoards = (deck.tests ?? []).filter((one) => one.worked && one.board?.length).length;
+  // a full board: at least this many interruptions on the opponent's turn
+  const fullAt = deck.fullAt ?? 3;
+  const isFull = (route?: SavedRoute) => !!route && (route.interruptions?.length ?? 0) >= fullAt;
   const reached = useMemo(() => {
-    if (!fullBoards) return null;
+    if (!startCardsAll.some((card) => routeOf(card.code))) return null;
     const checked = main.map((card) =>
-      (card.tag.role === "starter" || card.tag.role === "pair") && !(routeOf(card.code)?.full) ? { ...card, tag: { role: "other" as Role } } : card,
+      (card.tag.role === "starter" || card.tag.role === "pair") && !isFull(routeOf(card.code)) ? { ...card, tag: { role: "other" as Role } } : card,
     );
     return computeOdds(checked, second ? 6 : 5);
-  }, [main, second, deck.routes, fullBoards]);
+  }, [main, second, deck.routes, fullAt]);
   const startCards = main.filter((card) => card.tag.role === "starter" || card.tag.role === "pair");
   const handFor = (card: DeckCard) => testHand(card, main)?.map((code) => held.get(code) ?? code) ?? null;
   const findAll = () => onFindLines(startCards.flatMap((card) => { const hand = handFor(card); return hand ? [{ code: card.code, hand }] : []; }));
@@ -280,8 +284,8 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               <b>{engineChecked ? pct(engineChecked.combo) : "…"}</b>
             </li>
             {reached && (
-              <li title="Starts from which the route search reached one of the boards you marked as working">
-                <span>Engine reached your full board</span>
+              <li title="Starts from which the route search reached a board with enough interruptions">
+                <span>Engine reached a full board ({fullAt}+ interruptions)</span>
                 <b>{pct(reached.combo)}</b>
               </li>
             )}
@@ -295,10 +299,20 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               <button className="button small" onClick={findAll} disabled={!!routing}>
                 {routing ? `Finding lines… ${routing.waiting.length + 1} start${routing.waiting.length ? "s" : ""} to go` : "Find a line for every start"}
               </button>
+              <span className="opt-fullat">
+                Full board: at least
+                <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.max(1, fullAt - 1), updated: Date.now() })} aria-label="Fewer">
+                  −
+                </button>
+                <b>{fullAt}</b>
+                <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.min(8, fullAt + 1), updated: Date.now() })} aria-label="More">
+                  +
+                </button>
+                interruptions
+              </span>
               <span className="muted">
-                {fullBoards
-                  ? `Aims for your ${fullBoards} working board${fullBoards > 1 ? "s" : ""}.`
-                  : 'No working boards yet: it aims for the most it can gather. Mark a test "This worked" to give it a target.'}
+                An interruption: an effect usable on the opponent's turn that negates or removes (Quick Effects, Set Traps), read from the card scripts.
+                {fullBoards ? ` Lines close to your ${fullBoards} working board${fullBoards > 1 ? "s" : ""} are preferred.` : ""}
               </span>
             </div>
           )}
@@ -476,6 +490,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                   {(card.tag.role === "starter" || card.tag.role === "pair") && (
                     <RouteLine
                       route={routes[card.code]}
+                      full={isFull(routes[card.code])}
                       fresh={!!routeOf(card.code)}
                       searching={routing?.code === card.code ? routing.tried : null}
                       waiting={!!routing?.waiting.includes(card.code)}
@@ -534,15 +549,20 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
 }
 
 // What the route search found from this start's test hand
-function RouteLine({ route, fresh, searching, waiting, nameOf, onWatch }: { route?: SavedRoute; fresh: boolean; searching: number | null; waiting: boolean; nameOf: (code: number) => string; onWatch: () => void }) {
+function RouteLine({ route, full, fresh, searching, waiting, nameOf, onWatch }: { route?: SavedRoute; full: boolean; fresh: boolean; searching: number | null; waiting: boolean; nameOf: (code: number) => string; onWatch: () => void }) {
   if (searching !== null) return <span className="opt-engine">Searching for a line… {searching} tried</span>;
   if (waiting) return <span className="opt-engine">Waiting to search</span>;
   if (!route) return null;
   const board = route.board.length ? route.board.map(nameOf).join(", ") : "nothing on the field";
+  const stops = route.interruptions ?? [];
+  const where = { field: "", hand: " from the hand", set: " Set", gy: " in the GY" };
   return (
-    <span className={`opt-engine route ${route.full ? "full" : ""}`}>
-      Engine line ({route.tried} tried): ends on {board}
-      {route.aimed && (route.full ? " · ✓ one of your full boards" : ` · ${Math.round(route.coverage * 100)}% of your closest full board`)}
+    <span className={`opt-engine route ${full ? "full" : ""}`}>
+      Engine line ({route.tried} tried): ends on {board}. {full ? "✓ " : ""}
+      {stops.length
+        ? `${stops.length} interruption${stops.length > 1 ? "s" : ""}: ${stops.map((one) => `${nameOf(one.code)} (${one.kind}${where[one.from]})`).join(", ")}`
+        : "No interruptions"}
+      {route.aimed && route.coverage > 0 && ` · ${Math.round(route.coverage * 100)}% of your closest working board`}
       {!fresh && " · deck changed since"}{" "}
       <button className="opt-link" onClick={onWatch}>
         Watch

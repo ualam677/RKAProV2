@@ -20,13 +20,17 @@ import {
   type OcgMessage,
   type OcgResponse,
 } from "ocgcore-wasm";
-import { isHandTrap } from "./handtraps.ts";
+import { isFirstTurnHandTrap, isHandTrap } from "./handtraps.ts";
+import { interruptionsOf, type Interruption, type Piece, type QuickEffect } from "./interruptions.ts";
 
 export interface ProbeEnv {
   core: OcgCoreSync;
   card: (code: number) => OcgCardData | null;
   script: (name: string) => string;
   name: (code: number) => string;
+  // for counting interruptions: a card's effects usable on the opponent's turn, and its archetypes
+  effects?: (code: number) => QuickEffect[];
+  setcodes?: (code: number) => number[];
 }
 
 export interface ProbeResult {
@@ -59,6 +63,8 @@ interface Stop {
   // your monsters and Spells/Traps now, and every choice so far as the duel screen would have taken it
   board: number[];
   ui: (number[] | null)[];
+  // everything that can matter on the opponent's turn: field (with Xyz Materials), hand, GY
+  pieces: Piece[];
   failed?: boolean;
 }
 
@@ -140,8 +146,15 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
       [OcgLocation.MZONE, OcgLocation.SZONE].flatMap((location) =>
         core.duelQueryLocation(duel, { flags: QUERY_CODE, controller: 0, location }).flatMap((card) => (card?.code ? [card.code] : [])),
       );
-    const stop = (options: Option[]): Stop => ({ options: options.map((option) => option.label), codes: options.map((option) => option.code ?? 0), measure: measure(), key: stateKey(), board: board(), ui: [...ui] });
-    const failed = (): Stop => ({ options: [], codes: [], measure: measure(), key: "failed:" + path.join(";"), board: [], ui: [], failed: true });
+    const pieces = (): Piece[] => {
+      const out: Piece[] = [];
+      for (const location of [OcgLocation.MZONE, OcgLocation.SZONE, OcgLocation.HAND, OcgLocation.GRAVE])
+        for (const card of core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location }))
+          if (card?.code) out.push({ code: card.code, location, materials: card.overlayCards?.length ?? 0 });
+      return out;
+    };
+    const stop = (options: Option[]): Stop => ({ options: options.map((option) => option.label), codes: options.map((option) => option.code ?? 0), measure: measure(), key: stateKey(), board: board(), ui: [...ui], pieces: pieces() });
+    const failed = (): Stop => ({ options: [], codes: [], measure: measure(), key: "failed:" + path.join(";"), board: [], ui: [], pieces: [], failed: true });
 
     for (let guard = 0; guard < 3000; guard++) {
       const status = core.duelProcess(duel);
@@ -217,8 +230,9 @@ interface Option {
 function idleOptions(env: ProbeEnv, message: Extract<OcgMessage, { type: OcgMessageType.SELECT_IDLECMD }>): Option[] {
   const options: Option[] = [];
   const seen = new Set<string>();
-  const add = (verb: string, action: SelectIdleCMDAction, list: { code: number; location: number; description?: bigint }[], offset: number) =>
+  const add = (verb: string, action: SelectIdleCMDAction, list: { code: number; location: number; description?: bigint }[], offset: number, keep = (_card: { code: number }) => true) =>
     list.forEach((card, index) => {
+      if (!keep(card)) return;
       // two copies of a card in the hand offer the same thing: try one
       const label = `${verb} ${env.name(card.code)}${card.description !== undefined ? `#${card.description}` : ""}@${card.location}`;
       if (seen.has(label)) return;
@@ -227,7 +241,8 @@ function idleOptions(env: ProbeEnv, message: Extract<OcgMessage, { type: OcgMess
     });
   // the duel screen lists summons, Special Summons, position changes, Sets, then activations (worker.ts buildPrompt)
   const m = message;
-  add("Normal Summon", SelectIdleCMDAction.SELECT_SUMMON, m.summons, 0);
+  // Normal Summoning a hand trap only spends the turn's Normal Summon
+  add("Normal Summon", SelectIdleCMDAction.SELECT_SUMMON, m.summons, 0, (card) => !isHandTrap(card.code));
   add("Special Summon", SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, m.special_summons, m.summons.length);
   add("Activate", SelectIdleCMDAction.SELECT_ACTIVATE, m.activates, m.summons.length + m.special_summons.length + m.pos_changes.length + m.monster_sets.length + m.spell_sets.length);
   return options;
@@ -515,6 +530,8 @@ export function* probeDeck(env: ProbeEnv, main: number[], extra: number[]): Gene
 
 export interface Route {
   board: number[];
+  // what that board can do on the opponent's turn
+  interruptions: Interruption[];
   // how much of your closest full board this board holds (1 = all of it), and which of your boards that was
   coverage: number;
   target: number[] | null;
@@ -528,7 +545,9 @@ export interface Route {
 }
 
 export interface RouteOptions {
-  // your full boards: the search stops at the first board holding all of one
+  // a full board: at least this many interruptions (the search stops at the first one)
+  goal?: number;
+  // your working boards: a board close to one of them is preferred
   targets: number[][];
   // "verb:code" of actions in your working lines, preferred when choosing what to try
   prior?: Set<string>;
@@ -555,10 +574,26 @@ export const verbOf = (label: string) => label.split(/[ :]/)[0];
 
 /** Pauses (yields) after every duel tried; returns the best line found. */
 export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extra: number[], options: RouteOptions): Generator<{ tried: number; best: Route | null } | undefined, Route> {
-  const budget = options.budget ?? 1500;
-  const width = options.width ?? 6;
+  const budget = options.budget ?? 2500;
+  const width = options.width ?? 10;
   const depth = options.depth ?? 80;
   const prior = options.prior ?? new Set<string>();
+  const goal = options.goal ?? 3;
+  // only what the line built: cards still in the hand it started with are not part of the board
+  // (hand traps held are counted by the optimiser's "combo + hand trap" odds, not here)
+  const count = (stop: Stop): Interruption[] => {
+    if (!env.effects || !env.setcodes) return [];
+    const left = [...hand];
+    const built = stop.pieces.filter((piece) => {
+      if (piece.location !== OcgLocation.HAND) return true;
+      const at = left.indexOf(piece.code);
+      if (at < 0) return true;
+      left.splice(at, 1);
+      return false;
+    });
+    const spells = stop.pieces.filter((piece) => piece.location === OcgLocation.SZONE).length;
+    return interruptionsOf(built, env.effects, env.setcodes, isFirstTurnHandTrap, Math.max(0, 5 - spells));
+  };
   type Node = { plan: number[]; stop: Stop; steps: string[]; liked: number; value: number; route: Route };
   const judge = (stop: Stop, steps: string[], liked: number, tried: number): { value: number; route: Route } => {
     let coverage = 0;
@@ -567,9 +602,12 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
       const covered = overlap(stop.board, one);
       if (covered > coverage) [coverage, target] = [covered, one];
     }
-    const route: Route = { board: stop.board, coverage, target, full: coverage >= 1, steps, ui: stop.ui, deck: stop.measure.deck, extra: stop.measure.extra, tried };
-    // closeness to your boards first; then what the line has gathered; then how much it looks like your own lines
-    const value = coverage * 100 + stop.measure.deck * 4 + stop.measure.extra * 3 + stop.board.length * 2 + liked * 1.5;
+    const interruptions = count(stop);
+    const negates = interruptions.filter((one) => one.kind === "negate").length;
+    const route: Route = { board: stop.board, interruptions, coverage, target, full: interruptions.length >= goal, steps, ui: stop.ui, deck: stop.measure.deck, extra: stop.measure.extra, tried };
+    // what the board can stop on their turn first (negates above removal); then closeness to your working boards;
+    // then what the line has gathered to keep going; then how much it looks like your own lines
+    const value = interruptions.length * 50 + negates * 10 + coverage * 20 + stop.measure.deck * 4 + stop.measure.extra * 3 + stop.board.length * 2 + liked * 1.5;
     return { value, route };
   };
   let tried = 0;

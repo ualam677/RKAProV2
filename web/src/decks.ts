@@ -4,6 +4,7 @@ import { parseYdk, type Deck } from "./deck";
 import type { Tag } from "./optimiser";
 import type { CardEvidence } from "./engine/probe";
 import type { TestRecord } from "./engine/protocol";
+import type { Interruption } from "./engine/interruptions";
 
 // A hand test kept with its deck: enough to replay it exactly, and what it ended on if you said it worked
 export interface SavedTest extends TestRecord {
@@ -34,10 +35,13 @@ export interface SavedDeck extends Deck {
   tests?: SavedTest[];
   // the line the route search found from each start's test hand, for the deck as it was (`signature`)
   routes?: Record<string, SavedRoute>;
+  // a full board: at least this many interruptions (default 3)
+  fullAt?: number;
 }
 
 export interface SavedRoute {
   board: number[];
+  interruptions?: Interruption[];
   coverage: number;
   full: boolean;
   // whether you had marked any full boards when it searched (without them it aims for the most resources)

@@ -459,3 +459,5 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-find .muted { margin: 0; font-size: 12px; flex: 1; min-width: 180px; }
 .opt-engine.route { color: #9cc8ff; }
 .opt-engine.route.full { color: #7fd18b; }
+.opt-fullat { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.opt-fullat .button { min-height: 30px; width: 30px; padding: 0; }
