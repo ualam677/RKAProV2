@@ -288,3 +288,16 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 @keyframes draw-in { from { transform: translate(38vw, -26vh) scale(0.55) rotate(8deg); opacity: 0.4; } }
 .duel.wide .hand-card.drawn { animation-name: draw-in-wide; }
 @keyframes draw-in-wide { from { transform: translate(30vw, -40vh) scale(0.6); opacity: 0.4; } }
+
+/* ---- more moments: negation, reveals, coins and dice, attacks ---- */
+.cue-negated { display: grid; justify-items: center; gap: 8px; animation: cue-in 120ms ease-out; }
+.cue-card.small { width: min(34vw, 150px); filter: grayscale(0.6) brightness(0.7); box-shadow: 0 0 30px 6px rgba(255, 80, 80, 0.5); border-color: #ff8f8f; animation: none; }
+.cue-stamp { padding: 4px 14px; border: 2px solid #ff6b6b; border-radius: var(--radius); background: rgba(40, 6, 10, 0.92); color: #ff8f8f; font-size: 16px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; transform: rotate(-6deg); animation: stamp 180ms cubic-bezier(0.3, 1.6, 0.5, 1); }
+@keyframes stamp { from { transform: rotate(-6deg) scale(1.8); opacity: 0; } }
+.cue-note { font-size: 15px; font-weight: 600; animation: cue-in 120ms ease-out; }
+.zone.cue-attack .tile { animation: attack-lunge 360ms ease-in-out; }
+@keyframes attack-lunge { 40% { transform: translateY(-14px) scale(1.08); filter: brightness(1.5); } }
+.zone.cue-attacked::after { content: ""; position: absolute; inset: -3px; border: 2px solid #ff6b6b; border-radius: 6px; box-shadow: 0 0 16px #ff6b6b; pointer-events: none; animation: summon-ring 380ms ease-out forwards; }
+.zone-counters { position: absolute; top: 1px; right: 1px; z-index: 3; min-width: 15px; padding: 0 3px; border-radius: 8px; background: #6a3fd0; color: #fff; font-size: 9px; font-weight: 800; line-height: 1.5; text-align: center; pointer-events: none; }
+.stepper { display: grid; grid-template-columns: 1fr auto 28px auto; align-items: center; gap: 8px; }
+.stepper b { text-align: center; }

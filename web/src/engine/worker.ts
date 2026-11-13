@@ -4,6 +4,7 @@
 
 import createCore, {
   OcgDuelMode,
+  OcgHintType,
   OcgLocation,
   OcgMessageType,
   OcgOpCode,
@@ -38,6 +39,7 @@ const names = new Map<number, string>();
 const texts = new Map<number, string>();
 const cardStrings = new Map<number, string[]>(); // effect descriptions, str1..str16
 const systemStrings = new Map<number, string>();
+const counterNames = new Map<number, string>();
 const scripts = new Map<string, string | null>();
 
 // cards.cdb first, then every newer set: release-*.cdb and prerelease-*.cdb (no Rush, Skill or unofficial cards).
@@ -108,6 +110,8 @@ async function loadCards() {
     for (const line of conf.split(/\r?\n/)) {
       const match = /^!system (\d+) (.*)$/.exec(line);
       if (match) systemStrings.set(Number(match[1]), match[2]);
+      const counter = /^!counter (0x[0-9a-fA-F]+) (.*)$/.exec(line);
+      if (counter) counterNames.set(Number(counter[1]), counter[2]);
     }
   } catch {
     // prompts fall back to plain labels
@@ -218,7 +222,7 @@ async function prefetchScripts(codes: number[]): Promise<number[]> {
 const PHASES: Record<number, string> = { 1: "Draw", 2: "Standby", 4: "Main 1", 8: "Battle", 16: "Battle", 32: "Damage", 64: "Damage", 128: "Battle", 256: "Main 2", 512: "End" };
 // What the core is asked about each card. Never TYPE: ocgcore-wasm's reader does not handle that field and does not
 // skip it, so everything after it comes back shifted. The card's type is read from the database instead.
-const QUERY = (OcgQueryFlags.CODE | OcgQueryFlags.POSITION | OcgQueryFlags.LEVEL | OcgQueryFlags.RANK | OcgQueryFlags.ATTACK | OcgQueryFlags.DEFENSE | OcgQueryFlags.LINK) as OcgQueryFlags;
+const QUERY = (OcgQueryFlags.CODE | OcgQueryFlags.POSITION | OcgQueryFlags.LEVEL | OcgQueryFlags.RANK | OcgQueryFlags.ATTACK | OcgQueryFlags.DEFENSE | OcgQueryFlags.LINK | OcgQueryFlags.OVERLAY_CARD | OcgQueryFlags.COUNTERS) as OcgQueryFlags;
 
 let duel: OcgDuelHandle | null = null;
 let lp = [8000, 8000];
@@ -229,6 +233,14 @@ let ended = false;
 let prompt: Prompt | null = null;
 let events: DuelEvent[] = [];
 let ignoreHandTraps = false;
+let winner: number | null = null;
+// what the next selection is for ("Select the card to add to your hand"), sent by the core just before it
+let selectHint = "";
+const hinted = (fallback: string) => {
+  const text = selectHint || fallback;
+  selectHint = "";
+  return text;
+};
 // cards in the current chain, link 1 first
 let chain: (CardRef & { code: number })[] = [];
 // turns the player's picks into the core's response for the prompt on screen
@@ -453,7 +465,7 @@ function buildPrompt(message: OcgMessage): boolean {
       const cancel = message.can_cancel;
       prompt = {
         kind: "multi",
-        title: tribute ? "Select the monsters to Tribute" : "Select",
+        title: hinted(tribute ? system(500, "Select the monsters to Tribute") : "Select"),
         choices: message.selects.map((card) => cardChoice(nameOf(card.code), card)),
         min: message.min,
         max: message.max,
@@ -474,7 +486,7 @@ function buildPrompt(message: OcgMessage): boolean {
       ];
       const count = message.min === message.max ? `${message.min}` : `${message.min}-${message.max}`;
       return one(
-        `Select ${count}`,
+        `${hinted("Select")} (${count})`,
         choices,
         finish ? (message.can_finish ? "Done" : "Cancel") : null,
         (index) => ({ type: OcgResponseType.SELECT_UNSELECT_CARD, index }),
@@ -485,7 +497,7 @@ function buildPrompt(message: OcgMessage): boolean {
       const zones = freeZones(message.player, message.field_mask);
       const count = Math.max(1, message.count);
       const type = message.type === OcgMessageType.SELECT_PLACE ? OcgResponseType.SELECT_PLACE : OcgResponseType.SELECT_DISFIELD;
-      prompt = { kind: "multi", title: "Select a zone", choices: zones, min: count, max: count, cancel: false };
+      prompt = { kind: "multi", title: hinted("Select a zone"), choices: zones, min: count, max: count, cancel: false };
       respond = (picks) =>
         picks && {
           type,
@@ -507,6 +519,58 @@ function buildPrompt(message: OcgMessage): boolean {
         null,
         (index) => ({ type: OcgResponseType.SELECT_POSITION, position: allowed[index!][0] as OcgPosition }),
       );
+    }
+    case OcgMessageType.SELECT_SUM: {
+      const both = (amount: number): [number, number] => [amount & 0xffff, (amount >>> 16) & 0xffff];
+      const sum = { target: message.amount, exact: message.select_max === 0, values: message.selects.map((card) => both(card.amount)), must: message.selects_must.map((card) => both(card.amount)) };
+      const must = message.selects_must.map((card) => nameOf(card.code));
+      prompt = {
+        kind: "multi",
+        title: `${hinted("Select")}: total ${message.amount}${must.length ? ` (with ${must.join(", ")})` : ""}`,
+        choices: message.selects.map((card) => cardChoice(nameOf(card.code), card)),
+        // the core sends 0 for "no limit" on how many cards
+        min: Math.max(1, message.min - must.length),
+        max: message.max > 0 ? Math.max(1, message.max - must.length) : 99,
+        cancel: false,
+        sum,
+      };
+      respond = (picks) => picks && { type: OcgResponseType.SELECT_SUM, indicies: picks };
+      return true;
+    }
+    case OcgMessageType.SELECT_COUNTER: {
+      const name = counterNames.get(message.counter_type) ?? "counter";
+      prompt = {
+        kind: "counter",
+        title: `Remove ${message.count} ${name}${message.count > 1 ? "s" : ""}`,
+        choices: message.cards.map((card) => cardChoice(nameOf(card.code), card)),
+        available: message.cards.map((card) => card.count),
+        total: message.count,
+      };
+      respond = (picks) => picks && { type: OcgResponseType.SELECT_COUNTER, counters: picks };
+      return true;
+    }
+    case OcgMessageType.ANNOUNCE_RACE:
+    case OcgMessageType.ANNOUNCE_ATTRIB: {
+      const race = message.type === OcgMessageType.ANNOUNCE_RACE;
+      const bits: bigint[] = [];
+      const available = BigInt(message.available);
+      for (let bit = 0; bit < (race ? 30 : 7); bit++) if (available & (1n << BigInt(bit))) bits.push(1n << BigInt(bit));
+      // EDOPro's names: Attributes are system strings 1010+, Types 1020+, one per bit
+      const label = (bit: bigint) => system((race ? 1020 : 1010) + bit.toString(2).length - 1, `#${bit}`);
+      prompt = {
+        kind: "multi",
+        title: hinted(race ? `Declare ${message.count > 1 ? `${message.count} Types` : "a Type"}` : `Declare ${message.count > 1 ? `${message.count} Attributes` : "an Attribute"}`),
+        choices: bits.map((bit) => ({ label: label(bit) })),
+        min: message.count,
+        max: message.count,
+        cancel: false,
+      };
+      respond = (picks) =>
+        picks &&
+        (race
+          ? { type: OcgResponseType.ANNOUNCE_RACE, races: picks.map((pick) => bits[pick]) as never }
+          : { type: OcgResponseType.ANNOUNCE_ATTRIB, attributes: picks.map((pick) => Number(bits[pick])) as never });
+      return true;
     }
     case OcgMessageType.ANNOUNCE_NUMBER:
       return one(
@@ -557,6 +621,10 @@ function cardsIn(controller: 0 | 1, location: OcgLocation, hidden = false): (Car
       level,
       position,
       materials: 0,
+      overlay: info.overlayCards ?? [],
+      counters: Object.entries(info.counters ?? {})
+        .filter(([, count]) => count > 0)
+        .map(([kind, count]) => ({ name: counterNames.get(Number(kind)) ?? "Counter", count })),
     };
   });
 }
@@ -584,7 +652,7 @@ function sendView() {
       if (card && zone) card.materials = zone.materials;
     });
   }
-  const view: DuelView = { events, turn, turnPlayer, phase, players, prompt, ended };
+  const view: DuelView = { events, turn, turnPlayer, phase, players, prompt, ended, winner };
   events = [];
   send({ type: "view", view });
 }
@@ -639,6 +707,52 @@ function advance() {
             for (const card of message.drawn)
               events.push({ kind: "draw", code: card.code, name: nameOf(card.code), controller: 0, location: OcgLocation.HAND, sequence: -1 });
           break;
+        case OcgMessageType.HINT:
+          if (message.hint_type === OcgHintType.SELECTMSG && message.player === 0) selectHint = describe(message.hint);
+          else if (message.hint_type === OcgHintType.MESSAGE && message.player === 0) {
+            const text = describe(message.hint);
+            if (text) events.push({ kind: "message", code: 0, name: "", controller: 0, location: 0, sequence: 0, text });
+          }
+          break;
+        case OcgMessageType.CHAIN_NEGATED:
+        case OcgMessageType.CHAIN_DISABLED: {
+          const link = chain[message.chain_size - 1];
+          if (link)
+            events.push({
+              kind: "negated",
+              ...link,
+              name: nameOf(link.code),
+              chain: message.chain_size,
+              text: message.type === OcgMessageType.CHAIN_NEGATED ? "Activation negated" : "Effect negated",
+            });
+          break;
+        }
+        case OcgMessageType.CONFIRM_CARDS:
+        case OcgMessageType.CONFIRM_DECKTOP:
+          for (const card of message.cards)
+            if (card.code) events.push({ kind: "reveal", code: card.code, name: nameOf(card.code), controller: card.controller, location: card.location, sequence: card.sequence });
+          break;
+        case OcgMessageType.TOSS_COIN:
+          events.push({ kind: "coin", code: 0, name: "", controller: 0, location: 0, sequence: 0, text: `Coin: ${message.results.map((heads) => (heads ? "Heads" : "Tails")).join(", ")}` });
+          break;
+        case OcgMessageType.TOSS_DICE:
+          events.push({ kind: "dice", code: 0, name: "", controller: 0, location: 0, sequence: 0, text: `Die: ${message.results.join(", ")}` });
+          break;
+        case OcgMessageType.ATTACK:
+          events.push({
+            kind: "attack",
+            code: 0,
+            name: "",
+            controller: message.card.controller,
+            location: message.card.location,
+            sequence: message.card.sequence,
+            target: message.target ? { controller: message.target.controller, location: message.target.location, sequence: message.target.sequence } : undefined,
+          });
+          break;
+        case OcgMessageType.WIN:
+          winner = message.player;
+          ended = true;
+          break;
         case OcgMessageType.CHAIN_END:
           chain = [];
           break;
@@ -671,6 +785,8 @@ async function start(options: StartOptions) {
   turnPlayer = 0;
   phase = "";
   ended = false;
+  winner = null;
+  selectHint = "";
   events = [];
   ignoreHandTraps = options.ignoreHandTraps;
   chain = [];

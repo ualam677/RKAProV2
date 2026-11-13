@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CardArt } from "./CardArt";
-import { LOCATION, POSITION, TYPE, type CardRef, type CardText, type CardView, type Choice, type DuelEvent, type DuelView, type PlayerView } from "./engine/protocol";
+import { LOCATION, POSITION, TYPE, sumReady, sumSoFar, type CardRef, type CardText, type CardView, type Choice, type DuelEvent, type DuelView, type PlayerView } from "./engine/protocol";
 
 interface Props {
   view: DuelView;
@@ -14,7 +14,19 @@ interface Props {
 }
 
 // How long each moment stays on screen, close to EDOPro's own pacing.
-const CUE_MS: Record<DuelEvent["kind"], number> = { activate: 650, resolve: 420, summon: 320, added: 520, draw: 300 };
+const CUE_MS: Record<DuelEvent["kind"], number> = {
+  activate: 650,
+  resolve: 420,
+  summon: 320,
+  added: 520,
+  draw: 300,
+  negated: 650,
+  reveal: 750,
+  coin: 900,
+  dice: 900,
+  attack: 380,
+  message: 1400,
+};
 export const cueTime = (events: DuelEvent[]) => events.reduce((longest, event) => Math.max(longest, CUE_MS[event.kind]), 0);
 
 type Pile = "grave" | "banished" | "extra";
@@ -175,7 +187,7 @@ function LifeBar({ name, lp, extra, mine, active, children }: { name: string; lp
 }
 
 // card picture, name, stats line and text: the detail sheet on phones, the left panel on wide screens
-function CardInfo({ card, text, children }: { card: CardView | null; text?: CardText; children?: ReactNode }) {
+function CardInfo({ card, text, materials, children }: { card: CardView | null; text?: CardText; materials?: string[]; children?: ReactNode }) {
   if (!card) return <p className="muted info-empty">Tap or point at a card to read it.</p>;
   return (
     <>
@@ -184,8 +196,18 @@ function CardInfo({ card, text, children }: { card: CardView | null; text?: Card
         <div>
           <h2>{card.code ? card.name : "Face-down card"}</h2>
           {text?.line && <p className="muted">{text.line}</p>}
+          {card.counters.map((counter) => (
+            <p className="muted" key={counter.name}>
+              {counter.name}: <b>{counter.count}</b>
+            </p>
+          ))}
         </div>
       </div>
+      {materials && materials.length > 0 && (
+        <p className="muted">
+          Materials: <b>{materials.join(", ")}</b>
+        </p>
+      )}
       {children}
       {text?.text && <p className="card-text">{text.text}</p>}
     </>
@@ -200,13 +222,17 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   const activate = events.filter((event) => event.kind === "activate").pop();
   const resolve = events.filter((event) => event.kind === "resolve").pop();
   const added = events.filter((event) => event.kind === "added");
+  const negated = events.filter((event) => event.kind === "negated").pop();
+  const revealed = events.filter((event) => event.kind === "reveal");
+  // coins, dice and the core's messages are a line of text
+  const notes = events.filter((event) => event.kind === "coin" || event.kind === "dice" || event.kind === "message");
   // the last view of a play keeps its events, so the cue hides itself once it has been seen
   const [shown, setShown] = useState(true);
   useEffect(() => {
     const hide = window.setTimeout(() => setShown(false), cueTime(events));
     return () => window.clearTimeout(hide);
   }, [events]);
-  if (!shown || (!activate && !resolve && !added.length)) return null;
+  if (!shown || (!activate && !resolve && !negated && !added.length && !revealed.length && !notes.length)) return null;
   return (
     <div className="cues" onClick={(event) => (event.stopPropagation(), onSkip())}>
       {activate && (
@@ -219,7 +245,16 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
           <span className="cue-label">{activate.text || "Activate"}</span>
         </div>
       )}
-      {!activate && resolve && (
+      {!activate && negated && (
+        <div className="cue-negated" key={`n${negated.chain}-${negated.code}`}>
+          <div className="cue-card small">
+            <CardArt code={negated.code} />
+            <span className="cue-card-name">{negated.name}</span>
+          </div>
+          <span className="cue-stamp">{negated.text}</span>
+        </div>
+      )}
+      {!activate && !negated && resolve && (
         <div className="cue-resolve" key={`r${resolve.chain}-${resolve.code}`}>
           <div className="cue-thumb">
             <CardArt code={resolve.code} />
@@ -242,6 +277,22 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
           <span className="cue-label">Added to hand</span>
         </div>
       )}
+      {revealed.length > 0 && (
+        <div className="cue-added">
+          {revealed.map((card, index) => (
+            <div className="cue-thumb" key={index}>
+              <CardArt code={card.code} />
+              <span className="cue-card-name">{card.name}</span>
+            </div>
+          ))}
+          <span className="cue-label">Revealed</span>
+        </div>
+      )}
+      {notes.map((note, index) => (
+        <span className="cue-label cue-note" key={index}>
+          {note.text}
+        </span>
+      ))}
     </div>
   );
 }
@@ -271,7 +322,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
   const zonePrompt = prompt?.kind === "multi" && choices.length > 0 && choices.every((choice) => choice.zone);
   const cardPrompt = !!prompt && !idle && choices.length > 0 && choices.every((choice) => choice.card);
   // how a prompt is shown: on the board itself, as a grid of cards, or as a small dialog of buttons
-  const promptMode: "none" | "board" | "grid" | "dialog" | "announce" = !prompt || idle ? "none" : prompt.kind === "announce" ? "announce" : zonePrompt || (cardPrompt && choices.every((choice) => onBoard(choice.card!))) ? "board" : cardPrompt ? "grid" : "dialog";
+  const promptMode: "none" | "board" | "grid" | "dialog" | "announce" = !prompt || idle ? "none" : prompt.kind === "announce" ? "announce" : prompt.kind === "counter" ? "dialog" : zonePrompt || (cardPrompt && choices.every((choice) => onBoard(choice.card!))) ? "board" : cardPrompt ? "grid" : "dialog";
 
   const actionsFor = (card: CardRef) => choices.map((choice, index) => ({ choice, index })).filter(({ choice }) => choice.card && same(choice.card, card));
   const hasAction = (card: CardRef) => !!prompt && !zonePrompt && choices.some((choice) => choice.card && same(choice.card, card));
@@ -287,13 +338,21 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
     if (prompt?.kind !== "multi") return;
     const next = picks.includes(index) ? picks.filter((pick) => pick !== index) : [...picks, index];
     if (next.length > prompt.max) return;
+    // adding up to a total: sent as soon as the total is right (any more cards would be one too many)
+    if (prompt.sum) {
+      if (sumReady(prompt.sum, next) && next.length >= prompt.min) answer(next);
+      else setPicks(next);
+      return;
+    }
     // nothing left to decide: send it without a confirm tap
     if (next.length === prompt.max && prompt.min === prompt.max) answer(next);
     else setPicks(next);
   };
 
+  const materialNames = (card: CardView) => card.overlay.map((code) => texts.get(code)?.name ?? "…");
   const inspect = (card: CardView) => {
     if (card.code) requestText(card.code);
+    card.overlay.forEach(requestText);
     setInfo(card);
   };
 
@@ -346,7 +405,9 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
     const card = (location === LOCATION.MZONE ? player.monsters : player.spells)[sequence] ?? null;
     const ref = { controller, location, sequence };
     const index = zoneIndex(ref);
-    const cue = view.events.find((event) => same(event, ref) && event.kind !== "added");
+    const cue =
+      view.events.find((event) => same(event, ref) && event.kind !== "added" && event.kind !== "reveal") ??
+      (view.events.some((event) => event.kind === "attack" && event.target && same(event.target, ref)) ? { kind: "attacked" } : undefined);
     return (
       <div
         className={`zone ${extraClass} ${index >= 0 ? "open" : ""} ${picks.includes(index) ? "picked" : ""} ${cue ? `cue-${cue.kind}` : ""}`}
@@ -357,6 +418,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
         {card && card.code !== 0 && (card.type & TYPE.MONSTER) !== 0 && location === LOCATION.MZONE ? (
           <>
             <span className="zone-level">{levelLabel(card)}</span>
+            {card.counters.length > 0 && <span className="zone-counters">{card.counters.reduce((sum, counter) => sum + counter.count, 0)}</span>}
             <span className="zone-stats">
               {card.attack}
               {(card.type & TYPE.LINK) === 0 && <span className="def">/{card.defense}</span>}
@@ -434,12 +496,20 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
     setFloatPos({ left, top });
   }, [focus]);
 
-  const ready = prompt?.kind === "multi" && picks.length >= prompt.min && picks.length <= prompt.max;
+  const ready =
+    prompt?.kind === "multi" && picks.length >= prompt.min && picks.length <= prompt.max && (!prompt.sum || sumReady(prompt.sum, picks));
   const cancelLabel = prompt?.kind === "choice" ? prompt.cancel : prompt?.kind === "multi" && prompt.cancel ? "Cancel" : null;
-  const count = prompt?.kind === "multi" ? (prompt.min === prompt.max ? `${prompt.min}` : `${prompt.min}-${prompt.max}`) : "";
+  const count =
+    prompt?.kind === "multi"
+      ? prompt.sum
+        ? `${sumSoFar(prompt.sum, picks)}/${prompt.sum.target}`
+        : prompt.min === prompt.max
+          ? `${prompt.min}`
+          : `${prompt.min}-${prompt.max}`
+      : "";
   const promptButtons = (
     <>
-      {prompt?.kind === "multi" && prompt.min !== prompt.max && (
+      {prompt?.kind === "multi" && (prompt.min !== prompt.max || !!prompt.sum) && (
         <button className="button primary" disabled={!ready} onClick={(event) => (event.stopPropagation(), answer(picks))}>
           Confirm{picks.length ? ` (${picks.length})` : ""}
         </button>
@@ -486,7 +556,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
       <div className="card-grid">
         {choices.map((choice, index) => {
           const ref = choice.card!;
-          const card: CardView = { ...ref, type: ref.type ?? 0, attack: 0, defense: 0, level: 0, position: POSITION.FACEUP_ATTACK, materials: 0, location: ref.location };
+          const card: CardView = { ...ref, type: ref.type ?? 0, attack: 0, defense: 0, level: 0, position: POSITION.FACEUP_ATTACK, materials: 0, overlay: [], counters: [], location: ref.location };
           const label = choice.label && choice.label !== ref.name ? choice.label.replace(`${ref.name}: `, "") : "";
           return (
             <CardTile
@@ -544,7 +614,44 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
     </div>
   );
 
-  const promptDialog = promptMode === "dialog" && !promptHidden && (
+  // removing counters: a stepper per card, sent when the count is right
+  const [removing, setRemoving] = useState<number[]>([]);
+  useEffect(() => setRemoving(prompt?.kind === "counter" ? prompt.available.map(() => 0) : []), [prompt]);
+  const removed = removing.reduce((sum, count) => sum + count, 0);
+  const counterDialog = prompt?.kind === "counter" && !promptHidden && (
+    <div className="dialog" onClick={(event) => event.stopPropagation()}>
+      <h2>
+        {prompt.title} ({removed}/{prompt.total})
+      </h2>
+      <div className="actions">
+        {prompt.choices.map((choice, index) => (
+          <div className="stepper" key={index}>
+            <span>
+              {choice.label} <span className="muted">({prompt.available[index]})</span>
+            </span>
+            <button className="button small" disabled={!removing[index]} onClick={() => setRemoving(removing.map((count, at) => (at === index ? count - 1 : count)))}>
+              −
+            </button>
+            <b>{removing[index] ?? 0}</b>
+            <button
+              className="button small"
+              disabled={removing[index] >= prompt.available[index] || removed >= prompt.total}
+              onClick={() => setRemoving(removing.map((count, at) => (at === index ? count + 1 : count)))}
+            >
+              +
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="prompt-actions">
+        <button className="button primary" disabled={removed !== prompt.total} onClick={() => answer(removing)}>
+          Confirm
+        </button>
+      </div>
+    </div>
+  );
+
+  const promptDialog = prompt?.kind === "counter" ? counterDialog : promptMode === "dialog" && !promptHidden && (
     <div className="dialog" onClick={(event) => event.stopPropagation()}>
       <h2>{prompt!.title}</h2>
       <div className="actions">
@@ -570,7 +677,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
       const actions = prompt?.kind === "choice" ? actionsFor(sheet.card) : [];
       return (
         <>
-          <CardInfo card={sheet.card} text={texts.get(sheet.card.code)}>
+          <CardInfo card={sheet.card} text={texts.get(sheet.card.code)} materials={materialNames(sheet.card)}>
             {actions.length > 0 && <div className="actions">{actions.map(({ choice, index }) => pickButton(choice, index))}</div>}
           </CardInfo>
           <button className="button ghost" onClick={() => setSheet(null)}>
@@ -690,7 +797,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
           {opponentBar}
           {myBar}
           <div className="info-panel">
-            <CardInfo card={info} text={info ? texts.get(info.code) : undefined} />
+            <CardInfo card={info} text={info ? texts.get(info.code) : undefined} materials={info ? materialNames(info) : undefined} />
           </div>
           <div className="side-menu">{menu}</div>
         </aside>
@@ -732,7 +839,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
           {phaseControl}
         </div>
 
-        {view.ended && <p className="banner">The duel has ended.</p>}
+        {view.ended && <p className="banner">{view.winner === 0 ? "You win" : view.winner === 1 ? "You lose" : "The duel has ended."}</p>}
         {promptDialog}
       </div>
 

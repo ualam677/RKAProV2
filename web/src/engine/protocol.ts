@@ -16,6 +16,9 @@ export interface CardView extends CardRef {
   level: number;
   position: number;
   materials: number;
+  // attached Xyz materials, by passcode
+  overlay: number[];
+  counters: { name: string; count: number }[];
 }
 
 export interface PlayerView {
@@ -45,17 +48,56 @@ export type Prompt =
   // pick exactly one (index into choices), or null when cancel is allowed
   | { kind: "choice"; idle: boolean; title: string; choices: Choice[]; cancel: string | null }
   // pick between min and max
-  | { kind: "multi"; title: string; choices: Choice[]; min: number; max: number; cancel: boolean }
+  | { kind: "multi"; title: string; choices: Choice[]; min: number; max: number; cancel: boolean; sum?: SumRule }
+  // remove counters: picks[i] is how many to take from choices[i]
+  | { kind: "counter"; title: string; choices: Choice[]; available: number[]; total: number }
   // declare a card name (Crossout Designator, Prohibition); picks[0] is an index into options
   | { kind: "announce"; title: string; choices: Choice[]; options: { code: number; name: string }[] };
 
+// Picking cards whose values add up to a number (Synchro and Ritual materials). Each card counts as one of two
+// values (the second is 0 when it has only one); "must" cards are always part of the total.
+export interface SumRule {
+  target: number;
+  exact: boolean; // false: at least the target, without a card to spare
+  values: [number, number][];
+  must: [number, number][];
+}
+
+// every total the chosen cards can make
+function totals(values: [number, number][]): Set<number> {
+  let sums = new Set([0]);
+  for (const [a, b] of values) {
+    const next = new Set<number>();
+    for (const sum of sums) {
+      next.add(sum + a);
+      if (b) next.add(sum + b);
+    }
+    sums = next;
+  }
+  return sums;
+}
+
+export function sumReady(rule: SumRule, picks: number[]): boolean {
+  const chosen = [...rule.must, ...picks.map((pick) => rule.values[pick])];
+  if (rule.exact) return totals(chosen).has(rule.target);
+  const low = (value: [number, number]) => (value[1] && value[1] < value[0] ? value[1] : value[0]);
+  const least = chosen.reduce((sum, value) => sum + low(value), 0);
+  const smallest = Math.min(...picks.map((pick) => low(rule.values[pick])));
+  return least >= rule.target && least - smallest < rule.target;
+}
+
+export function sumSoFar(rule: SumRule, picks: number[]): number {
+  return [...rule.must, ...picks.map((pick) => rule.values[pick])].reduce((sum, [a]) => sum + a, 0);
+}
+
 // Moments shown on screen before play goes on, like EDOPro's animations.
 export interface DuelEvent extends CardRef {
-  kind: "summon" | "activate" | "resolve" | "added" | "draw";
+  kind: "summon" | "activate" | "resolve" | "added" | "draw" | "negated" | "reveal" | "coin" | "dice" | "attack" | "message";
   code: number;
   name: string;
   chain?: number; // chain link number, for activate and resolve
-  text?: string; // the effect being activated
+  text?: string; // the effect being activated, or what a coin, die or message says
+  target?: CardRef; // the monster being attacked
 }
 
 export interface DuelView {
@@ -67,6 +109,8 @@ export interface DuelView {
   players: [PlayerView, PlayerView];
   prompt: Prompt | null;
   ended: boolean;
+  // who won, once the duel is over (0 = you)
+  winner: number | null;
 }
 
 export interface CardText {
