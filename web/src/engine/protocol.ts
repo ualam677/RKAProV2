@@ -51,7 +51,7 @@ export type Prompt =
 
 // Moments shown on screen before play goes on, like EDOPro's animations.
 export interface DuelEvent extends CardRef {
-  kind: "summon" | "activate" | "resolve" | "added";
+  kind: "summon" | "activate" | "resolve" | "added" | "draw";
   code: number;
   name: string;
   chain?: number; // chain link number, for activate and resolve
@@ -82,6 +82,8 @@ export interface StartOptions {
   hand: number;
   // cards to open with; the rest of the hand is drawn at random
   chosen: number[];
+  // hand traps in the player's hand never ask to be chained (testing a combo without Ash or Fuwalos popping up)
+  ignoreHandTraps: boolean;
   seed: number;
 }
 

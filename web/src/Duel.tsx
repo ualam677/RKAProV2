@@ -14,7 +14,7 @@ interface Props {
 }
 
 // How long each moment stays on screen, close to EDOPro's own pacing.
-const CUE_MS: Record<DuelEvent["kind"], number> = { activate: 650, resolve: 420, summon: 320, added: 520 };
+const CUE_MS: Record<DuelEvent["kind"], number> = { activate: 650, resolve: 420, summon: 320, added: 520, draw: 300 };
 export const cueTime = (events: DuelEvent[]) => events.reduce((longest, event) => Math.max(longest, CUE_MS[event.kind]), 0);
 
 type Pile = "grave" | "banished" | "extra";
@@ -377,7 +377,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
     return (
       <button
         key={`${controller}-${name}`}
-        className={`zone pile pile-${name} ${cards.some(hasAction) ? "glow" : ""}`}
+        className={`zone pile pile-${name} ${count === 0 ? "empty" : ""} ${cards.some(hasAction) ? "glow" : ""}`}
         onClick={open && ((event) => (event.stopPropagation(), open()))}
         disabled={!open}
         aria-label={`${label} ${count}`}
@@ -628,6 +628,8 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
   }, [wide]);
   const cardWidth = wide ? 96 : Math.min(108, Math.max(72, handWidth / 4.2));
   const handCount = me.hand.length;
+  // the cards just drawn are the last ones in the hand; they slide in from the Deck
+  const drawn = view.events.filter((event) => event.kind === "draw").length;
   const step = handCount > 1 ? Math.min(cardWidth * (wide ? 1.06 : 0.92), (handWidth - cardWidth - 28) / (handCount - 1)) : 0;
 
   const focusActions = focus ? actionsFor(focus.card) : [];
@@ -747,8 +749,8 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
             <CardTile
               key={card.sequence}
               card={card}
-              className="hand-card"
-              style={{ width: cardWidth, left: `calc(50% + ${offset * step - cardWidth / 2}px)`, transform, zIndex: lifted ? 50 : i + 1 }}
+              className={`hand-card ${i >= handCount - drawn ? "drawn" : ""}`}
+              style={{ animationDelay: i >= handCount - drawn ? `${(i - (handCount - drawn)) * 50}ms` : undefined, width: cardWidth, left: `calc(50% + ${offset * step - cardWidth / 2}px)`, transform, zIndex: lifted ? 50 : i + 1 }}
               glow={hasAction(card)}
               pulse={pickPrompt && hasAction(card)}
               picked={isPicked(card)}

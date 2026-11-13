@@ -228,6 +228,7 @@ let phase = "";
 let ended = false;
 let prompt: Prompt | null = null;
 let events: DuelEvent[] = [];
+let ignoreHandTraps = false;
 // cards in the current chain, link 1 first
 let chain: (CardRef & { code: number })[] = [];
 // turns the player's picks into the core's response for the prompt on screen
@@ -428,17 +429,22 @@ function buildPrompt(message: OcgMessage): boolean {
         (index) => ({ type: OcgResponseType.SELECT_OPTION, index: index! }),
       );
     case OcgMessageType.SELECT_CHAIN: {
-      if (message.selects.length === 0) return answer({ type: OcgResponseType.SELECT_CHAIN, index: null });
+      // with hand traps switched off, effects of cards in the hand are never offered
+      const offered = message.selects
+        .map((card, index) => ({ card, index }))
+        .filter(({ card }) => !(ignoreHandTraps && card.location === OcgLocation.HAND));
+      if (offered.length === 0 && !message.forced) return answer({ type: OcgResponseType.SELECT_CHAIN, index: null });
       // the side with nobody on it never chains
       if (message.player !== 0) return answer({ type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null });
+      const list = offered.length ? offered : message.selects.map((card, index) => ({ card, index }));
       return one(
         "Chain an effect?",
-        message.selects.map((card) => {
+        list.map(({ card }) => {
           const text = describe(card.description);
           return cardChoice(text ? `${nameOf(card.code)}: ${text}` : nameOf(card.code), card);
         }),
         message.forced ? null : "Don't chain",
-        (index) => ({ type: OcgResponseType.SELECT_CHAIN, index }),
+        (pick) => ({ type: OcgResponseType.SELECT_CHAIN, index: pick === null ? null : list[pick].index }),
       );
     }
     case OcgMessageType.SELECT_CARD:
@@ -628,6 +634,11 @@ function advance() {
           if (link) events.push({ kind: "resolve", ...link, name: nameOf(link.code), chain: message.chain_size });
           break;
         }
+        case OcgMessageType.DRAW:
+          if (message.player === 0)
+            for (const card of message.drawn)
+              events.push({ kind: "draw", code: card.code, name: nameOf(card.code), controller: 0, location: OcgLocation.HAND, sequence: -1 });
+          break;
         case OcgMessageType.CHAIN_END:
           chain = [];
           break;
@@ -661,6 +672,7 @@ async function start(options: StartOptions) {
   phase = "";
   ended = false;
   events = [];
+  ignoreHandTraps = options.ignoreHandTraps;
   chain = [];
   duel = core.createDuel({
     // the page shuffles the deck itself, so the cards asked for can be put on top

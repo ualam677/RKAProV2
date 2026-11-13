@@ -6,6 +6,10 @@ import { CardArt } from "./CardArt";
 import type { CardText, DuelView, FromWorker, ToWorker } from "./engine/protocol";
 import "./style.css";
 
+// EDOPro's card back, from Project Ignis like the scripts and card data; every face-down card uses it
+const COVER_URL = import.meta.env.VITE_COVER_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/Distribution/master/textures/cover.png";
+document.documentElement.style.setProperty("--cover", `url("${COVER_URL}")`);
+
 // remembered on this device only, so the phone opens straight to the last deck
 const SAVED = "rka.handtest";
 interface Saved {
@@ -13,6 +17,7 @@ interface Saved {
   deckName: string;
   hand: number;
   chosen: number[];
+  ignoreHandTraps: boolean;
 }
 function loadSaved(): Partial<Saved> {
   try {
@@ -38,6 +43,7 @@ function App() {
   const [deckName, setDeckName] = useState(saved.deckName ?? "");
   const [hand, setHand] = useState(saved.hand ?? 5);
   const [chosen, setChosen] = useState<number[]>(saved.chosen ?? []);
+  const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
   const [view, setView] = useState<DuelView | null>(null);
   const [texts, setTexts] = useState(new Map<number, CardText>());
   const [error, setError] = useState("");
@@ -94,7 +100,7 @@ function App() {
     return () => instance.terminate();
   }, []);
 
-  useEffect(() => save({ deckText, deckName, hand, chosen }), [deckText, deckName, hand, chosen]);
+  useEffect(() => save({ deckText, deckName, hand, chosen, ignoreHandTraps }), [deckText, deckName, hand, chosen, ignoreHandTraps]);
 
   // errors clear themselves so they never sit over the field for long
   useEffect(() => {
@@ -134,8 +140,8 @@ function App() {
     window.clearTimeout(timer.current);
     timer.current = 0;
     queue.current = [];
-    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, hand, chosen, seed: Math.floor(Math.random() * 2 ** 31) });
-  }, [deck, hand, chosen]);
+    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, hand, chosen, ignoreHandTraps, seed: Math.floor(Math.random() * 2 ** 31) });
+  }, [deck, hand, chosen, ignoreHandTraps]);
 
   const requestText = useCallback(
     (code: number) => {
@@ -187,6 +193,19 @@ function App() {
                 </button>
               ))}
             </div>
+          </section>
+
+          <section className="box">
+            <h2>Hand traps in my hand</h2>
+            <div className="segmented two">
+              <button className={`button ${!ignoreHandTraps ? "on" : ""}`} onClick={() => setIgnoreHandTraps(false)}>
+                Ask to chain
+              </button>
+              <button className={`button ${ignoreHandTraps ? "on" : ""}`} onClick={() => setIgnoreHandTraps(true)}>
+                Ignore
+              </button>
+            </div>
+            <p className="muted">Ignore: cards in your hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos.</p>
           </section>
 
           <section className="box">

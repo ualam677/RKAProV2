@@ -110,7 +110,7 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .tile.synchro { background: #e8e8e8; }
 .tile.xyz { background: #3a3f4a; color: #f1f4fa; }
 .tile.link { background: #3d7fd6; color: #f1f4fa; }
-.tile.back { background: repeating-linear-gradient(45deg, #17325f, #17325f 5px, #0f2344 5px, #0f2344 10px); border-color: #2a4f8a; }
+.tile.back { background: var(--cover) center / 100% 100% no-repeat, repeating-linear-gradient(45deg, #17325f, #17325f 5px, #0f2344 5px, #0f2344 10px); border-color: #2a4f8a; }
 .tile.set { filter: brightness(0.6) saturate(0.6); }
 /* on the field a card keeps a real card's shape, so its picture is never cropped */
 .zone .tile { width: 100%; height: 100%; }
@@ -264,12 +264,14 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 /* ---- piles: the top card (or a card back) fills the box, the count sits in a bar along the bottom ---- */
 .pile { overflow: hidden; padding: 0; }
 .pile-face { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 3px; border-radius: 3px; color: #10141c; font-size: 9px; font-weight: 600; line-height: 1.1; text-align: center; pointer-events: none; }
-.pile-face.back { background: repeating-linear-gradient(45deg, #17325f, #17325f 5px, #0f2344 5px, #0f2344 10px); }
+.pile-face.back { background: var(--cover) center / 100% 100% no-repeat, repeating-linear-gradient(45deg, #17325f, #17325f 5px, #0f2344 5px, #0f2344 10px); }
+/* a few cards' edges under the top one, so a pile reads as a stack */
+.pile:not(.empty) { box-shadow: 1px 1px 0 #0a1428, 2px 2px 0 #1c3560, 3px 3px 0 #0a1428; }
 .pile-face.monster { background: #d9a760; } .pile-face.spell { background: #3fb39a; } .pile-face.trap { background: #c9609b; }
 .pile-face.fusion { background: #a878d0; } .pile-face.synchro { background: #e8e8e8; } .pile-face.xyz { background: #3a3f4a; color: #f1f4fa; } .pile-face.link { background: #3d7fd6; color: #f1f4fa; }
 .pile-face-name { position: relative; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pile-info { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; display: flex; align-items: baseline; justify-content: center; gap: 4px; padding: 2px 0; background: rgba(3, 8, 18, 0.82); line-height: 1.1; }
-.pile:disabled .pile-info { inset: 0; flex-direction: column; align-items: center; justify-content: center; background: none; }
+.pile.empty .pile-info { inset: 0; flex-direction: column; align-items: center; justify-content: center; background: none; }
 .pile-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .pile-count { font-size: 14px; font-weight: 800; color: var(--text); }
 .duel.wide .pile-label { font-size: 11px; } .duel.wide .pile-count { font-size: 17px; }
@@ -279,3 +281,10 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .zone-stats { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; padding: 1px 0; border-radius: 0 0 3px 3px; background: rgba(0, 0, 0, 0.78); color: #fff; font-size: 9px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; text-align: center; white-space: nowrap; pointer-events: none; }
 .zone-stats .def { color: #b9c9e4; }
 .duel.wide .zone-level, .duel.wide .zone-stats { font-size: 11px; }
+.segmented.two { grid-template-columns: 1fr 1fr; }
+
+/* a drawn card slides from the Deck (bottom right) into its place in the hand */
+.hand-card.drawn { animation: draw-in 260ms cubic-bezier(0.2, 0.7, 0.3, 1) backwards; }
+@keyframes draw-in { from { transform: translate(38vw, -26vh) scale(0.55) rotate(8deg); opacity: 0.4; } }
+.duel.wide .hand-card.drawn { animation-name: draw-in-wide; }
+@keyframes draw-in-wide { from { transform: translate(30vw, -40vh) scale(0.6); opacity: 0.4; } }
