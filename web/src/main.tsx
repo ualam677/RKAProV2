@@ -8,6 +8,8 @@ import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, sto
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
 import type { Piece } from "./engine/interruptions";
 import { Tests } from "./Tests";
+import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
+import { toYdk } from "./decks";
 import "./style.css";
 
 // EDOPro's card back, from Project Ignis like the scripts and card data; every face-down card uses it
@@ -270,19 +272,84 @@ function App() {
     return made;
   };
 
+  // a deck from any of the formats, Main and Extra split by card type when the format keeps them together (Omega)
+  const readDeck = async (text: string, fileName = "") => {
+    const imported = await importDeck(text, fileName);
+    const name = fileName.replace(/\.(ydk|txt)$/i, "") || "Imported deck";
+    if ("deck" in imported) return { ...imported.deck, name };
+    const found = await info([...imported.unsplit.mainAndExtra, ...imported.unsplit.side]);
+    const known = new Map(found.map((card) => [card.asked, card]));
+    const isExtra = (code: number) => ((known.get(code)?.type ?? 0) & EXTRA_TYPES) !== 0;
+    return { name, main: imported.unsplit.mainAndExtra.filter((code) => !isExtra(code)), extra: imported.unsplit.mainAndExtra.filter(isExtra), side: imported.unsplit.side };
+  };
   const importText = async (text: string, fileName = "") => {
     try {
-      const imported = await importDeck(text, fileName);
-      const name = fileName.replace(/\.(ydk|txt)$/i, "") || "Imported deck";
-      if ("deck" in imported) return addDeck({ ...imported.deck, name });
-      // YGO Omega keeps Main and Extra together: split them by card type
-      const found = await info([...imported.unsplit.mainAndExtra, ...imported.unsplit.side]);
-      const known = new Map(found.map((card) => [card.asked, card]));
-      const isExtra = (code: number) => ((known.get(code)?.type ?? 0) & EXTRA_TYPES) !== 0;
-      addDeck({ name, main: imported.unsplit.mainAndExtra.filter((code) => !isExtra(code)), extra: imported.unsplit.mainAndExtra.filter(isExtra), side: imported.unsplit.side });
+      addDeck(await readDeck(text, fileName));
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));
     }
+  };
+
+  // ---- keeping decks elsewhere: backup file, a linked deck folder, Google Drive ----
+  const [syncNote, setSyncNote] = useState("");
+  const [folderName, setFolderName] = useState<string | null>(null);
+  useEffect(() => void linkedFolder().then((handle) => setFolderName(handle?.name ?? null)), []);
+  const note = (text: string) => setSyncNote(text);
+  const failed = (problem: unknown) => setError(problem instanceof Error ? problem.message : String(problem));
+  const restore = (text: string) => {
+    const merged = mergeBackup(text, decksRef.current);
+    setDecks(merged);
+    note(`Restored: ${merged.length} deck${merged.length === 1 ? "" : "s"}`);
+  };
+  // the folder's deck files come in (new or changed there); decks changed here go out as .ydk
+  const syncFolder = async (relink = false) => {
+    try {
+      const handle = !relink && (await linkedFolder()) ? (await linkedFolder())! : await linkFolder();
+      setFolderName(handle.name);
+      const files = await readFolder(handle);
+      let next = [...decksRef.current];
+      let came = 0, went = 0;
+      for (const file of files) {
+        const mine = next.find((one) => one.file === file.name);
+        if (mine && !(file.modified > (mine.fileSynced ?? 0) && mine.updated <= (mine.fileSynced ?? 0))) continue;
+        const read = await readDeck(file.text, file.name).catch(() => null);
+        if (!read) continue;
+        came++;
+        next = mine
+          ? next.map((one) => (one.id === mine.id ? { ...one, main: read.main, extra: read.extra, side: read.side, updated: Date.now(), fileSynced: Date.now() } : one))
+          : [{ ...read, id: newId(), updated: file.modified, file: file.name, fileSynced: Date.now() }, ...next];
+      }
+      const taken = new Set(next.map((one) => one.file).filter(Boolean));
+      for (const one of next) {
+        if (one.file && one.fileSynced && one.updated <= one.fileSynced) continue;
+        if (!one.file) {
+          let name = `${(one.name || "deck").replace(/[\\/:*?"<>|]/g, "")}.ydk`;
+          for (let n = 2; taken.has(name); n++) name = `${(one.name || "deck").replace(/[\\/:*?"<>|]/g, "")} (${n}).ydk`;
+          taken.add(name);
+          one.file = name;
+        }
+        await writeFolderFile(handle, one.file, toYdk(one));
+        one.fileSynced = Date.now();
+        went++;
+      }
+      setDecks(next.map((one) => ({ ...one })));
+      note(`Deck folder "${handle.name}": ${came} deck${came === 1 ? "" : "s"} in, ${went} written`);
+    } catch (problem) {
+      if (!(problem instanceof DOMException && problem.name === "AbortError")) failed(problem);
+    }
+  };
+  const openMany = async (files: FileList) => {
+    let count = 0;
+    for (const file of Array.from(files)) {
+      try {
+        const read = await readDeck(await file.text(), file.name);
+        setDecks((all) => [{ ...read, id: newId(), updated: Date.now() }, ...all]);
+        count++;
+      } catch {
+        // not a deck: skipped
+      }
+    }
+    note(`${count} deck${count === 1 ? "" : "s"} opened`);
   };
 
   const copies = (code: number) => deck?.main.filter((card) => card === code).length ?? 0;
@@ -577,6 +644,64 @@ function App() {
           </div>
         )}
       </section>
+
+      <details className="box sync">
+        <summary>
+          <h2>Sync</h2>
+          {syncNote && <span className="muted">{syncNote}</span>}
+        </summary>
+        <div className="row wrap">
+          <button className="button small" onClick={downloadBackup}>
+            Back up everything
+          </button>
+          <label className="button small">
+            Restore a backup
+            <input type="file" accept=".json" hidden onChange={async (event) => { const file = event.target.files?.[0]; if (file) try { restore(await file.text()); } catch (problem) { failed(problem); } event.target.value = ""; }} />
+          </label>
+        </div>
+        <p className="muted">One file with your decks and everything learned about them (tags, tests, lines, save states). Restoring merges it in: the newer copy of each deck wins.</p>
+        {canLinkFolder() ? (
+          <>
+            <div className="row wrap">
+              <button className="button small" onClick={() => syncFolder()}>
+                {folderName ? `Sync "${folderName}"` : "Link a deck folder"}
+              </button>
+              {folderName && (
+                <>
+                  <button className="button small ghost" onClick={() => syncFolder(true)}>
+                    Change folder
+                  </button>
+                  <button className="button small ghost" onClick={() => (unlinkFolder(), setFolderName(null))}>
+                    Unlink
+                  </button>
+                </>
+              )}
+            </div>
+            <p className="muted">A folder of .ydk files, like YGO Omega's or EDOPro's deck folder: its decks come in, and decks you change here are written back as .ydk.</p>
+          </>
+        ) : (
+          <>
+            <label className="button small">
+              Open several deck files
+              <input type="file" accept=".ydk,.txt" multiple hidden onChange={async (event) => { if (event.target.files) await openMany(event.target.files); event.target.value = ""; }} />
+            </label>
+            <p className="muted">Linking a whole deck folder works in Chrome or Edge on a computer. Here, pick several .ydk files at once.</p>
+          </>
+        )}
+        <div className="row wrap">
+          <button className="button small" disabled={!driveReady()} onClick={async () => { try { await driveUpload(JSON.stringify(makeBackup())); note("Saved to Google Drive"); } catch (problem) { failed(problem); } }}>
+            Save to Google Drive
+          </button>
+          <button className="button small" disabled={!driveReady()} onClick={async () => { try { const text = await driveDownload(); if (text) restore(text); else note("Nothing saved in Google Drive yet"); } catch (problem) { failed(problem); } }}>
+            Load from Google Drive
+          </button>
+        </div>
+        <p className="muted">
+          {driveReady()
+            ? "Kept in this app's own hidden folder in your Drive, so your other files stay private to it."
+            : "Google Drive needs a one-time setup for this site (a Google sign-in ID, see the README). Until then, back up to a file and keep it in Drive yourself."}
+        </p>
+      </details>
 
       {deck && (
         <>

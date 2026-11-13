@@ -28,6 +28,9 @@ jobs:
         cache-dependency-path: web/package-lock.json
     - name: Build
       working-directory: web
+      env:
+        # Google Drive sync: the site's Google sign-in ID (a repository variable; empty until set up, see web/README.md)
+        VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
       run: |
         npm ci
         npm run build

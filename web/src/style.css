@@ -484,3 +484,8 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-chokes ul { margin: 4px 0; padding-left: 16px; display: grid; gap: 3px; color: var(--muted); }
 .opt-chokes b { color: var(--text); }
 .test-board.warn { color: #ffb36b; }
+.sync summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
+.sync summary::-webkit-details-marker { display: none; }
+.sync summary::before { content: "›"; color: var(--accent-strong); font-size: 18px; transition: transform var(--fast); }
+.sync[open] summary::before { transform: rotate(90deg); }
+.row.wrap { flex-wrap: wrap; }

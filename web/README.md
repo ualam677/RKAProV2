@@ -96,6 +96,14 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   trap counts every hand exactly: a start that plays through it, or two different full-board starts. Galaxy list:
   52.9% through Ash going first (each line alone is stopped by Ash on its starter), 65.4% going second.
 - Working tests count their own board's interruptions (field with Xyz Materials, hand, GY, read from the scripts).
+- Sync (start screen): "Back up everything" / "Restore a backup" (decks with tags, tests, lines and save states, tag
+  defaults, settings; restoring merges, the newer copy of each deck wins). Desktop Chrome/Edge: link a deck folder (e.g.
+  YGO Omega's or EDOPro's): its .ydk / .txt decks come in, decks changed here are written back as .ydk. Phones: open
+  several deck files at once. Google Drive: the same backup in the app's hidden Drive folder, once the site has a
+  Google sign-in ID. One-time setup: Google Cloud console > APIs & Services > enable the Google Drive API; OAuth
+  consent screen (External, scope drive.appdata, add yourself as a test user); Credentials > Create OAuth client ID >
+  Web application, authorised JavaScript origin https://ualam677.github.io; then in the GitHub repository Settings >
+  Secrets and variables > Actions > Variables, add VITE_GOOGLE_CLIENT_ID with that client ID and re-run the Web build.
 - Phases as EDOPro shows them: a DP SP M1 BP M2 EP bar lit in your colour or the opponent's, and a banner at every
   phase change on both turns. Chances to respond say what to ("Respond to Seventh Tachyon?", "Respond to the summon
   of Galaxy Wizard?", "Opponent's End Phase: activate an effect?").

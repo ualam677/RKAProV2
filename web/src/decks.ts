@@ -43,6 +43,9 @@ export interface SavedDeck extends Deck {
   fullAt?: number;
   // save states from the duel menu: the duel's start and every choice up to that moment
   saves?: SavedState[];
+  // the file it is kept as in a linked deck folder, and when the two were last the same
+  file?: string;
+  fileSynced?: number;
 }
 
 export interface SavedState {
