@@ -104,6 +104,9 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   consent screen (External, scope drive.appdata, add yourself as a test user); Credentials > Create OAuth client ID >
   Web application, authorised JavaScript origin https://ualam677.github.io; then in the GitHub repository Settings >
   Secrets and variables > Actions > Variables, add VITE_GOOGLE_CLIENT_ID with that client ID and re-run the Web build.
+- Save as video (saved tests): the worker replays the test out of sight and sends every moment; the page draws each on
+  a portrait canvas (both fields, hands, LP, a caption for what happened) for as long as the duel screen holds it, and
+  records it with the browser's encoder (MP4 where supported, otherwise WebM). Works on phones.
 - Phases as EDOPro shows them: a DP SP M1 BP M2 EP bar lit in your colour or the opponent's, and a banner at every
   phase change on both turns. Chances to respond say what to ("Respond to Seventh Tachyon?", "Respond to the summon
   of Galaxy Wizard?", "Opponent's End Phase: activate an effect?").

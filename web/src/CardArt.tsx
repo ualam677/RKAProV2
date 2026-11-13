@@ -2,7 +2,7 @@ import { useState } from "react";
 
 // Card pictures are fetched one card at a time, when the card first shows up, so new cards
 // need no update: the first source is the picture server EDOPro itself downloads from.
-const SOURCES = [
+export const SOURCES = [
   (code: number) => `https://pics.projectignis.org:2096/pics/${code}.jpg`,
   (code: number) => `https://images.ygoprodeck.com/images/cards_small/${code}.jpg`,
 ];

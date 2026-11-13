@@ -918,6 +918,8 @@ let lastPicked: number[] = [];
 let lastHint = 0;
 let promptHint = 0;
 let quiet = false;
+// collecting every moment of a replay (for a video) instead of sending it to the screen
+let collect: DuelView[] | null = null;
 
 // "Normal Summon Galaxy Wizard", "Select a card to add to your hand: Galaxy Defense Robot Orbital 7"
 function describePick(shown: Prompt, picks: number[] | null): string {
@@ -943,7 +945,8 @@ function sendView() {
   }
   const view: DuelView = { events, turn, turnPlayer, phase, players, prompt, ended, winner };
   events = [];
-  send({ type: "view", view });
+  if (collect) collect.push(view);
+  else send({ type: "view", view });
 }
 
 const isPrompt = (type: number) => (type >= 10 && type <= 26 && type !== 17) || type === 132 || (type >= 140 && type <= 143);
@@ -1151,11 +1154,13 @@ async function start(options: StartOptions) {
     for (const code of options.opponent.extra) theirs(knownCode(code), OcgLocation.EXTRA);
   }
   core.startDuel(handle);
-  record = { options: { ...options }, picks: [], steps: [], startHand: [] };
+  // the duel's settings only (a "start" request also carries its type, which must not travel with a saved test)
+  const { type: _type, ...settings } = options as StartOptions & { type?: string };
+  record = { options: settings, picks: [], steps: [], startHand: [] };
   advance();
   record.startHand = cardsIn(0, OcgLocation.HAND).flatMap((card) => (card ? [card.code] : []));
   // the page keeps the duel's start straight away, so a state can be saved before the first choice
-  if (!quiet) send({ type: "record", record });
+  if (!quiet && !collect) send({ type: "record", record });
 }
 
 // Makes a choice on the prompt on screen, records it, and plays on. False if the core's prompt doesn't take it.
@@ -1174,7 +1179,7 @@ function choose(picks: number[] | null): boolean {
   record?.steps.push({ text: describePick(shown, picks), idle: shown.kind === "choice" && !!shown.idle, code: acted, hint: promptHint || undefined });
   core.duelSetResponse(duel!, response);
   advance();
-  if (record && !quiet) send({ type: "record", record });
+  if (record && !quiet && !collect) send({ type: "record", record });
   return true;
 }
 
@@ -1305,6 +1310,16 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       await start(message);
     } else if (message.type === "answer") {
       choose(message.picks);
+    } else if (message.type === "views") {
+      const { picks, type: _type, id, ...options } = message;
+      collect = [];
+      try {
+        await start(options);
+        for (const pick of picks) if (!choose(pick)) break;
+        send({ type: "views", id, views: collect });
+      } finally {
+        collect = null;
+      }
     } else if (message.type === "jump") {
       const { picks, type: _type, ...options } = message;
       quiet = true;

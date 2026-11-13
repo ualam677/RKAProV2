@@ -10,6 +10,7 @@ import type { Piece } from "./engine/interruptions";
 import { Tests } from "./Tests";
 import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
 import { toYdk } from "./decks";
+import { recordVideo } from "./video";
 import "./style.css";
 
 // EDOPro's card back, from Project Ignis like the scripts and card data; every face-down card uses it
@@ -211,6 +212,9 @@ function App() {
         // every line found: now where hand traps hurt each of them
         const done = decksRef.current.find((one) => one.id === job.deckId);
         if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "views") {
+        videoWaiting.current.get(message.id)?.(message.views);
+        videoWaiting.current.delete(message.id);
       } else if (message.type === "interruptions") {
         // a working test's board, counted: kept with the test
         setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list } : test)) } : one)));
@@ -468,6 +472,30 @@ function App() {
     const state = (test.current ? decks.find((one) => one.id === test.current!.deckId) : deck)?.saves?.find((one) => one.id === id);
     if (state) watch({ ...state.record, id: newId(), date: Date.now() }, state.record.picks.length);
   };
+  // a saved test as a video file: the worker replays it out of sight, the page draws and records every moment
+  const [video, setVideo] = useState<{ id: string; share: number } | null>(null);
+  const videoWaiting = useRef(new Map<string, (views: DuelView[]) => void>());
+  const saveVideo = async (saved: SavedTest) => {
+    const id = newId();
+    setVideo({ id: saved.id, share: 0 });
+    try {
+      const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false };
+      const views = await new Promise<DuelView[]>((resolve) => {
+        videoWaiting.current.set(id, resolve);
+        // the request's own type last: a saved duel's settings must never turn it into something else
+        post({ ...options, picks: saved.picks, type: "views", id });
+      });
+      const { blob, extension } = await recordVideo(views, (share) => setVideo({ id: saved.id, share }));
+      const url = URL.createObjectURL(blob);
+      const name = `${deck?.name ?? "RKAPro"} ${new Date(saved.date).toISOString().slice(0, 16).replace("T", " ").replace(":", "-")}.${extension}`;
+      Object.assign(document.createElement("a"), { href: url, download: name }).click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setVideo(null);
+    }
+  };
   const watch = (saved: SavedTest, from = 0) => {
     setError("");
     newTest(saved.testOf, from > 0 ? from : saved.picks.length);
@@ -479,10 +507,10 @@ function App() {
     const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false };
     // "from": jump straight to that choice and carry on from there yourself; otherwise watch it play
     lastRecord.current = null;
-    if (from > 0) post({ type: "jump", ...options, picks: saved.picks.slice(0, from) });
+    if (from > 0) post({ ...options, picks: saved.picks.slice(0, from), type: "jump" });
     else {
       setReplay({ picks: saved.picks, at: 0 });
-      post({ type: "start", ...options });
+      post({ ...options, type: "start" });
     }
   };
   // the next recorded choice, once the prompt it answers is on screen and the animations before it have played
@@ -806,7 +834,7 @@ function App() {
             </div>
           </section>
 
-          {deck.tests && deck.tests.length > 0 && <Tests tests={deck.tests} nameOf={nameOf} onWatch={watch} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />}
+          {deck.tests && deck.tests.length > 0 && <Tests tests={deck.tests} nameOf={nameOf} onWatch={watch} onVideo={saveVideo} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />}
         </>
       )}
     </main>
