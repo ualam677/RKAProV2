@@ -271,7 +271,6 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .pile-face.fusion { background: #a878d0; } .pile-face.synchro { background: #e8e8e8; } .pile-face.xyz { background: #3a3f4a; color: #f1f4fa; } .pile-face.link { background: #3d7fd6; color: #f1f4fa; }
 .pile-face-name { position: relative; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pile-info { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; display: flex; align-items: baseline; justify-content: center; gap: 4px; padding: 2px 0; background: rgba(3, 8, 18, 0.82); line-height: 1.1; }
-.pile.empty .pile-info { inset: 0; flex-direction: column; align-items: center; justify-content: center; background: none; }
 .pile-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .pile-count { font-size: 14px; font-weight: 800; color: var(--text); }
 .duel.wide .pile-label { font-size: 11px; } .duel.wide .pile-count { font-size: 17px; }
@@ -301,3 +300,4 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .zone-counters { position: absolute; top: 1px; right: 1px; z-index: 3; min-width: 15px; padding: 0 3px; border-radius: 8px; background: #6a3fd0; color: #fff; font-size: 9px; font-weight: 800; line-height: 1.5; text-align: center; pointer-events: none; }
 .stepper { display: grid; grid-template-columns: 1fr auto 28px auto; align-items: center; gap: 8px; }
 .stepper b { text-align: center; }
+.pile.empty .pile-info { background: none; }
