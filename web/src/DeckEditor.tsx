@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CardArt } from "./CardArt";
 import { Optimiser } from "./Optimiser";
 import { EXTRA_TYPES, toOmega, toYdk, toYdke, type SavedDeck } from "./decks";
-import type { CardInfo, CardSearch, CardText } from "./engine/protocol";
+import type { CardInfo, CardSearch, CardText, TestRecord } from "./engine/protocol";
 
 interface Props {
   deck: SavedDeck;
@@ -19,6 +19,9 @@ interface Props {
   onTest: (chosen?: number[]) => void;
   engineProgress: { done: number; total: number } | null;
   onCheck: () => void;
+  routing: { code: number; tried: number; waiting: number[] } | null;
+  onFindLines: (starts: { code: number; hand: number[] }[]) => void;
+  onWatchLine: (line: TestRecord, code: number) => void;
 }
 
 type Section = "main" | "extra" | "side";
@@ -75,14 +78,29 @@ function Thumb({ code, card, limit, onTap, onHold }: { code: number; card?: Card
   );
 }
 
-export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestText, search, onChange, onClose, onTest, engineProgress, onCheck }: Props) {
+export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestText, search, onChange, onClose, onTest, engineProgress, onCheck, routing, onFindLines, onWatchLine }: Props) {
   const [query, setQuery] = useState<CardSearch>({});
   const [results, setResults] = useState<{ results: CardInfo[]; more: boolean }>({ results: [], more: false });
   const [filters, setFilters] = useState(false);
   const [detail, setDetail] = useState<{ code: number; from?: Section } | null>(null);
   const [notice, setNotice] = useState("");
   const [menu, setMenu] = useState(false);
-  const [optimising, setOptimising] = useState(false);
+  // remembered for this visit, so coming back from a test or a watched line returns to the optimiser
+  const [optimising, setOptimisingState] = useState(() => {
+    try {
+      return sessionStorage.getItem("rka.optimising") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setOptimising = (on: boolean) => {
+    setOptimisingState(on);
+    try {
+      sessionStorage.setItem("rka.optimising", on ? "1" : "0");
+    } catch {
+      // the editor just opens on the deck next time
+    }
+  };
 
   // everything in the deck needs its type (to split Main / Extra and sort) and name
   useEffect(() => {
@@ -280,7 +298,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
         <div className="deck-area">{(["main", "extra", "side"] as Section[]).map(section)}</div>
 
         {optimising ? (
-          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} />
+          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} routing={routing} onFindLines={onFindLines} onWatchLine={onWatchLine} />
         ) : (
         <div className="search-area">
           <div className="search-bar">

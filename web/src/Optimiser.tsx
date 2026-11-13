@@ -2,9 +2,9 @@
 // turns, and apply the swaps it finds with one tap (and undo them just as fast).
 import { useEffect, useMemo, useState } from "react";
 import { CardArt } from "./CardArt";
-import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck } from "./decks";
+import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
 import type { CardEvidence } from "./engine/probe";
-import type { CardInfo } from "./engine/protocol";
+import type { CardInfo, TestRecord } from "./engine/protocol";
 import {
   GOALS, ROLES, allProven, normalLimit, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
@@ -21,6 +21,9 @@ interface Props {
   onTest: (chosen: number[]) => void;
   engineProgress: { done: number; total: number } | null;
   onCheck: () => void;
+  routing: { code: number; tried: number; waiting: number[] } | null;
+  onFindLines: (starts: { code: number; hand: number[] }[]) => void;
+  onWatchLine: (line: TestRecord, code: number) => void;
 }
 
 const ATTRIBUTE_NAMES = ["EARTH", "WATER", "FIRE", "WIND", "LIGHT", "DARK", "DIVINE"];
@@ -28,7 +31,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck }: Props) {
+export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, onFindLines, onWatchLine }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -112,6 +115,21 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const odds = second ? secondOdds : first;
   const everyStartProven = useMemo(() => allProven(main), [main]);
   const proven = useMemo(() => computeOdds(provenOnly(main), second ? 6 : 5), [main, second]);
+  // the lines the route search found, for the deck as it is now
+  const routes = deck.routes ?? {};
+  const routeOf = (code: number) => (routes[code]?.signature === signature ? routes[code] : undefined);
+  const fullBoards = (deck.tests ?? []).filter((one) => one.worked && one.board?.length).length;
+  const reached = useMemo(() => {
+    if (!fullBoards) return null;
+    const checked = main.map((card) =>
+      (card.tag.role === "starter" || card.tag.role === "pair") && !(routeOf(card.code)?.full) ? { ...card, tag: { role: "other" as Role } } : card,
+    );
+    return computeOdds(checked, second ? 6 : 5);
+  }, [main, second, deck.routes, fullBoards]);
+  const startCards = main.filter((card) => card.tag.role === "starter" || card.tag.role === "pair");
+  const handFor = (card: DeckCard) => testHand(card, main)?.map((code) => held.get(code) ?? code) ?? null;
+  const findAll = () => onFindLines(startCards.flatMap((card) => { const hand = handFor(card); return hand ? [{ code: card.code, hand }] : []; }));
+
   // only the starts the engine saw work, with the partners it found
   const engineChecked = useMemo(() => {
     if (!evidence.size) return null;
@@ -261,11 +279,29 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               </span>
               <b>{engineChecked ? pct(engineChecked.combo) : "…"}</b>
             </li>
+            {reached && (
+              <li title="Starts from which the route search reached one of the boards you marked as working">
+                <span>Engine reached your full board</span>
+                <b>{pct(reached.combo)}</b>
+              </li>
+            )}
             <li title="Starts you played to your full board with Test, then ticked Proven">
               <span>Proven to a full board</span>
               <b className={everyStartProven ? "" : "warn"}>{pct(everyStartProven ? odds.combo : proven.combo)}</b>
             </li>
           </ul>
+          {startCards.length > 0 && (
+            <div className="opt-find">
+              <button className="button small" onClick={findAll} disabled={!!routing}>
+                {routing ? `Finding lines… ${routing.waiting.length + 1} start${routing.waiting.length ? "s" : ""} to go` : "Find a line for every start"}
+              </button>
+              <span className="muted">
+                {fullBoards
+                  ? `Aims for your ${fullBoards} working board${fullBoards > 1 ? "s" : ""}.`
+                  : 'No working boards yet: it aims for the most it can gather. Mark a test "This worked" to give it a target.'}
+              </span>
+            </div>
+          )}
           {engineProgress && engineProgress.total > 0 && (
             <span className="opt-bar opt-progress">
               <i style={{ width: `${(engineProgress.done / engineProgress.total) * 100}%` }} />
@@ -425,6 +461,9 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                       >
                         Test
                       </button>
+                      <button className="button small" disabled={!!routing || !handFor(card)} onClick={() => { const hand = handFor(card); if (hand) onFindLines([{ code: card.code, hand }]); }}>
+                        Find a line
+                      </button>
                       <button
                         className={`button small ${card.tag.proven ? "on" : "ghost"}`}
                         disabled={card.tag.provenByTest}
@@ -433,6 +472,16 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                         {card.tag.provenByTest ? "✓ Proven by your test" : card.tag.proven ? "✓ Proven" : "Proven?"}
                       </button>
                     </span>
+                  )}
+                  {(card.tag.role === "starter" || card.tag.role === "pair") && (
+                    <RouteLine
+                      route={routes[card.code]}
+                      fresh={!!routeOf(card.code)}
+                      searching={routing?.code === card.code ? routing.tried : null}
+                      waiting={!!routing?.waiting.includes(card.code)}
+                      nameOf={nameOf}
+                      onWatch={() => routes[card.code] && onWatchLine(routes[card.code].record, card.code)}
+                    />
                   )}
                 </div>
                 <select value={card.tag.role} onChange={(event) => setRole(card.code, event.target.value as Role)} aria-label={`Role of ${nameOf(card.code)}`}>
@@ -481,6 +530,24 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
         />
       )}
     </div>
+  );
+}
+
+// What the route search found from this start's test hand
+function RouteLine({ route, fresh, searching, waiting, nameOf, onWatch }: { route?: SavedRoute; fresh: boolean; searching: number | null; waiting: boolean; nameOf: (code: number) => string; onWatch: () => void }) {
+  if (searching !== null) return <span className="opt-engine">Searching for a line… {searching} tried</span>;
+  if (waiting) return <span className="opt-engine">Waiting to search</span>;
+  if (!route) return null;
+  const board = route.board.length ? route.board.map(nameOf).join(", ") : "nothing on the field";
+  return (
+    <span className={`opt-engine route ${route.full ? "full" : ""}`}>
+      Engine line ({route.tried} tried): ends on {board}
+      {route.aimed && (route.full ? " · ✓ one of your full boards" : ` · ${Math.round(route.coverage * 100)}% of your closest full board`)}
+      {!fresh && " · deck changed since"}{" "}
+      <button className="opt-link" onClick={onWatch}>
+        Watch
+      </button>
+    </span>
   );
 }
 

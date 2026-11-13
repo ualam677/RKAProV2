@@ -61,13 +61,24 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   board. Start screen "Saved tests": Watch (choices made one by one at play speed; any choice of yours takes over as a
   new test) and "Play from here" on any step (fast-forwards to just before it). A working test that opened with one
   start ticks that start Proven in the optimiser. Working tests are kept; of the rest, the newest 30.
+- Route search (`routeSearch` in probe.ts): a beam search over the engine from a start's test hand, branching on Main
+  Phase actions and on every card picked from the Deck, Extra Deck or hand (one at a time for groups like Orbital 7's).
+  It aims for the boards of your working tests (stops at the first board holding all of one), prefers actions from
+  your working lines, and otherwise gathers the most it can. The line comes back as a saved-test record (same deck
+  order and seed, choices numbered as the duel screen numbers them), so Watch replays it in the duel screen exactly;
+  "This worked" at the end makes its board a target. Optimiser: Find a line per start or for every start, and a fourth
+  number, "Engine reached your full board". Delta Wing + 4 hand traps: Full Armor, Tachyon Primal, Seventh Tachyon in
+  about 100 tries / 5 s. Galaxy Wizard + 3 Ash + Droll: every line tried (71), nothing left on the field.
+- "Ignore hand traps" now holds back only known hand traps (src/engine/handtraps.ts); other effects from the hand,
+  like Galaxy War Drake summoning itself, stay available in tests and in the search.
   Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it
   matches v1's own code (93.34% / 96.48%), a separate naive evaluator over every hand, and a 1M-hand simulation.
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order
-1. Route search to a full board (target: the boards of working tests), then the opponent: hand traps (easy / smart), then plays its own turn with board breakers
+1. Choke points: replay lines with the opponent holding one hand trap, at every moment the engine allows it, then the
+   opponent: hand traps (easy / smart), then plays its own turn with board breakers
    (Veiler / Imperm on the player's turn, Imperm at the start of its turn, Lightning Storm, Cosmic Cyclone-style cards).
 2. Routes learned from saved replays, then end-board suggestion from a random hand (beam search over the core, scored
    against learned end boards).

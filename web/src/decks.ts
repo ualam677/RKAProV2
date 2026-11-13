@@ -32,6 +32,20 @@ export interface SavedDeck extends Deck {
   // what the engine found each card starts, for the deck as it was (`signature`)
   engine?: { signature: string; evidence: CardEvidence[] };
   tests?: SavedTest[];
+  // the line the route search found from each start's test hand, for the deck as it was (`signature`)
+  routes?: Record<string, SavedRoute>;
+}
+
+export interface SavedRoute {
+  board: number[];
+  coverage: number;
+  full: boolean;
+  // whether you had marked any full boards when it searched (without them it aims for the most resources)
+  aimed: boolean;
+  tried: number;
+  date: number;
+  signature: string;
+  record: TestRecord;
 }
 
 // Changes whenever the cards the engine checks change (Main and Extra, any order)

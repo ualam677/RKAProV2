@@ -87,3 +87,28 @@ if (process.env.HAND) {
   const r = probe(env, hand, rest(hand), extra, { budget: 60, depth: 6, untilDeck: true });
   console.log("HAND", process.env.HAND, JSON.stringify({ ...r, taken: r.taken.map((c) => names.get(c)) }));
 }
+
+if (process.env.ROUTE) {
+  const { routeSearch } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const hand = process.env.ROUTE.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const targets = process.env.TARGET ? [process.env.TARGET.split(",").map((n) => [...names].find(([, name]) => name === n)[0])] : [];
+  const t = performance.now();
+  const steps = routeSearch(env, hand, rest(hand), extra, { targets, budget: Number(process.env.BUDGET ?? 600) });
+  let next;
+  while (!(next = steps.next()).done);
+  const r = next.value;
+  console.log(`ROUTE ${(performance.now() - t) / 1000 | 0} s, ${r.tried} tried, full ${r.full}, coverage ${(r.coverage * 100).toFixed(0)}%`);
+  console.log("  board:", r.board.map((c) => names.get(c)).join(", "));
+  console.log("  steps:", r.steps.join(" > "));
+  console.log("  ui picks:", JSON.stringify(r.ui));
+}
+
+if (process.env.PLAN) {
+  const { play } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const hand = process.env.HAND2.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const plan = process.env.PLAN ? process.env.PLAN.split(",").filter(Boolean).map(Number) : [];
+  for (let n = 0; n <= plan.length; n++) {
+    const s = play(env, hand, rest(hand), extra, plan.slice(0, n));
+    console.log(`after ${n}: failed=${!!s.failed} board=[${s.board.map((c) => names.get(c))}] options=${JSON.stringify(s.options)}`);
+  }
+}

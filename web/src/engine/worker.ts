@@ -23,7 +23,8 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import { probeDeck } from "./probe";
+import { probeDeck, routeSearch } from "./probe";
+import { isHandTrap } from "./handtraps";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
 
 // Folder holding cards.cdb and the release / pre-release databases, and a listing of that folder.
@@ -511,10 +512,10 @@ function buildPrompt(message: OcgMessage): boolean {
         (index) => ({ type: OcgResponseType.SELECT_OPTION, index: index! }),
       );
     case OcgMessageType.SELECT_CHAIN: {
-      // with hand traps switched off, effects of cards in the hand are never offered
+      // with hand traps switched off, known hand traps in the hand are never offered (other hand effects are)
       const offered = message.selects
         .map((card, index) => ({ card, index }))
-        .filter(({ card }) => !(ignoreHandTraps && card.location === OcgLocation.HAND));
+        .filter(({ card }) => !(ignoreHandTraps && card.location === OcgLocation.HAND && isHandTrap(card.code, cards.get(card.code)?.alias)));
       if (offered.length === 0 && !message.forced) return answer({ type: OcgResponseType.SELECT_CHAIN, index: null });
       // the side with nobody on it never chains
       if (message.player !== 0) return answer({ type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null });
@@ -917,7 +918,8 @@ function choose(picks: number[] | null): boolean {
   const response = duel && respond ? respond(picks) : null;
   if (!response || !shown) return false;
   record?.picks.push(picks);
-  record?.steps.push({ text: describePick(shown, picks), idle: shown.kind === "choice" && !!shown.idle });
+  const acted = shown.kind === "choice" && picks?.length === 1 ? shown.choices[picks[0]]?.card?.code : undefined;
+  record?.steps.push({ text: describePick(shown, picks), idle: shown.kind === "choice" && !!shown.idle, code: acted });
   core.duelSetResponse(duel!, response);
   advance();
   if (record && !quiet) send({ type: "record", record });
@@ -953,6 +955,41 @@ async function runProbe(id: number, main: number[], extra: number[]) {
     if (done >= total) return send({ type: "probe", id, done, total, evidence: [...evidence.values()] });
     if (performance.now() - last > 200) {
       send({ type: "probe", id, done, total });
+      last = performance.now();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+// Route search, between other requests like the probe. The line found comes back as a test the duel screen replays:
+// the same deck order, seed and settings the search played with, and its choices as the screen takes them.
+let routeJob = 0;
+async function runRoute(id: number, main: number[], extra: number[], hand: number[], targets: number[][], prior: string[]) {
+  routeJob = id;
+  const canonical = (code: number) => {
+    const known = knownCode(code);
+    const card = cards.get(known);
+    return card?.alias && Math.abs(card.alias - known) < 20 && cards.has(card.alias) ? card.alias : known;
+  };
+  const handCodes = hand.map(canonical);
+  const deck = main.map(canonical).filter((code) => cards.has(code));
+  for (const code of handCodes) deck.splice(deck.indexOf(code), 1);
+  const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
+  await prefetchScripts([...handCodes, ...deck, ...extraCodes]);
+  const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf };
+  const steps = routeSearch(env, handCodes, deck, extraCodes, { targets: targets.map((board) => board.map(canonical)), prior: new Set(prior) });
+  let last = 0;
+  for (;;) {
+    if (routeJob !== id) return;
+    const next = steps.next();
+    if (next.done) {
+      const route = next.value;
+      const options: StartOptions = { main: [...handCodes, ...[...deck].reverse()], extra: extraCodes, hand: handCodes.length, chosen: [], ignoreHandTraps: true, seed: 1 };
+      const record: TestRecord = { options, picks: route.ui, steps: route.steps.map((text) => ({ text, idle: !text.startsWith("pick ") && !text.startsWith("finish") })), startHand: handCodes };
+      return send({ type: "route", id, tried: route.tried, done: { route, record } });
+    }
+    if (next.value && performance.now() - last > 250) {
+      send({ type: "route", id, tried: next.value.tried });
       last = performance.now();
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1005,6 +1042,10 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       send({ type: "info", cards: found });
     } else if (message.type === "probe") {
       void runProbe(message.id, message.main, message.extra).catch((error) => send({ type: "error", text: `Engine check stopped: ${error instanceof Error ? error.message : error}` }));
+    } else if (message.type === "route") {
+      void runRoute(message.id, message.main, message.extra, message.hand, message.targets, message.prior).catch((error) =>
+        send({ type: "error", text: `Route search stopped: ${error instanceof Error ? error.message : error}` }),
+      );
     } else if (message.type === "text") {
       send({ type: "text", card: { code: message.code, name: nameOf(message.code), line: cardLine(message.code), text: texts.get(message.code) ?? "" } });
     }

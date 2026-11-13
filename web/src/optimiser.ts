@@ -1,3 +1,4 @@
+import { HAND_TRAPS, HAND_TRAPS_SECOND } from "./engine/handtraps.ts";
 // Deck Optimiser: what every card in the Main Deck is for, turned into exact opening-hand odds and swaps worth making.
 // v2's roles and exact maths (gframe/deck_optimizer.h) with v1's two-card starts (RKAPro lines.json): a card that only
 // starts a combo together with a partner (Galaxy Soldier + a LIGHT monster) counts only when the partner is there too,
@@ -333,16 +334,9 @@ export function bestCuts(cards: DeckCard[], goal: Goal, size = 40): { cuts: numb
 // ---- guesses, so a fresh deck is not a wall of "Not tagged" ----
 const LIGHT = 16;
 const GUESSES: Record<number, Tag> = {
-  // hand traps (v2's list, gframe/deck_optimizer.h)
-  14558127: { role: "handtrap" }, 97268402: { role: "handtrap" }, 10045474: { role: "handtrap" }, 27204311: { role: "handtrap" },
-  94145021: { role: "handtrap" }, 59438930: { role: "handtrap" }, 73642296: { role: "handtrap" }, 23434538: { role: "handtrap" },
-  24508238: { role: "handtrap" }, 52038441: { role: "handtrap" }, 91800273: { role: "handtrap" }, 34267821: { role: "handtrap" },
-  33854624: { role: "handtrap" }, 6637331: { role: "handtrap" }, 60242223: { role: "handtrap" }, 72656408: { role: "handtrap" },
-  67750322: { role: "handtrap" }, 38814750: { role: "handtrap" }, 40366667: { role: "handtrap" }, 97045737: { role: "handtrap" },
-  60643553: { role: "handtrap" }, 62015408: { role: "handtrap" }, 46502744: { role: "handtrap" }, 87170768: { role: "handtrap" },
-  58655504: { role: "handtrap" }, 78661338: { role: "handtrap" },
+  ...Object.fromEntries(HAND_TRAPS.map((code) => [code, { role: "handtrap" } as Tag])),
   // "If you control no cards": dead going first
-  42141493: { role: "handtrap2" }, 84192580: { role: "handtrap2" }, 87126721: { role: "handtrap2" },
+  ...Object.fromEntries(HAND_TRAPS_SECOND.map((code) => [code, { role: "handtrap2" } as Tag])),
   // board breakers
   14532163: { role: "breaker" }, 12580477: { role: "breaker" }, 54693926: { role: "breaker" }, 15693423: { role: "breaker" },
   18144506: { role: "breaker" }, 24299458: { role: "breaker" }, 102380: { role: "breaker" }, 55063751: { role: "breaker" },

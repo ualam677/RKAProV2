@@ -20,6 +20,7 @@ import {
   type OcgMessage,
   type OcgResponse,
 } from "ocgcore-wasm";
+import { isHandTrap } from "./handtraps.ts";
 
 export interface ProbeEnv {
   core: OcgCoreSync;
@@ -50,10 +51,14 @@ interface Measure {
 }
 
 interface Stop {
-  // the branch point after the plan: what can be chosen there
+  // the branch point after the plan: what can be chosen there (and the card each acts on)
   options: string[];
+  codes: number[];
   measure: Measure;
   key: string;
+  // your monsters and Spells/Traps now, and every choice so far as the duel screen would have taken it
+  board: number[];
+  ui: (number[] | null)[];
   failed?: boolean;
 }
 
@@ -66,7 +71,7 @@ const isPrompt = (type: number) => (type >= 10 && type <= 26 && type !== 17) || 
  * Plays one branch: the hand on top of the deck, `plan` the choices made at each branch point so far.
  * Branch points are Main Phase actions and single picks from the Deck or Extra Deck (what to search, what to summon).
  */
-function play(env: ProbeEnv, hand: number[], deck: number[], extra: number[], plan: number[]): Stop {
+export function play(env: ProbeEnv, hand: number[], deck: number[], extra: number[], plan: number[]): Stop {
   const { core } = env;
   const duel: OcgDuelHandle | null = core.createDuel({
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
@@ -94,6 +99,7 @@ function play(env: ProbeEnv, hand: number[], deck: number[], extra: number[], pl
     const chain: number[] = [];
     let solving: number | null = null;
     const path: string[] = [];
+    const ui: (number[] | null)[] = [];
     let step = 0;
     let started = false;
 
@@ -130,8 +136,12 @@ function play(env: ProbeEnv, hand: number[], deck: number[], extra: number[], pl
       // the same cards in the same places after the same actions in another order is the same position
       return [OcgLocation.HAND, OcgLocation.MZONE, OcgLocation.SZONE, OcgLocation.GRAVE, OcgLocation.REMOVED].map(codes).join("|") + "#" + [...path].sort().join(";");
     };
-    const stop = (options: string[]): Stop => ({ options, measure: measure(), key: stateKey() });
-    const failed = (): Stop => ({ options: [], measure: measure(), key: "failed:" + path.join(";"), failed: true });
+    const board = () =>
+      [OcgLocation.MZONE, OcgLocation.SZONE].flatMap((location) =>
+        core.duelQueryLocation(duel, { flags: QUERY_CODE, controller: 0, location }).flatMap((card) => (card?.code ? [card.code] : [])),
+      );
+    const stop = (options: Option[]): Stop => ({ options: options.map((option) => option.label), codes: options.map((option) => option.code ?? 0), measure: measure(), key: stateKey(), board: board(), ui: [...ui] });
+    const failed = (): Stop => ({ options: [], codes: [], measure: measure(), key: "failed:" + path.join(";"), board: [], ui: [], failed: true });
 
     for (let guard = 0; guard < 3000; guard++) {
       const status = core.duelProcess(duel);
@@ -161,20 +171,27 @@ function play(env: ProbeEnv, hand: number[], deck: number[], extra: number[], pl
             if (message.type === OcgMessageType.SELECT_IDLECMD && message.player === 0) {
               started = true;
               const options = idleOptions(env, message);
-              if (step >= plan.length) return stop(options.map((option) => option.label));
+              if (step >= plan.length) return stop(options);
               const pick = options[plan[step++]];
               if (!pick) return failed();
               path.push(pick.label);
+              ui.push(pick.ui!);
               response = pick.response;
             } else {
               const branch = deckPick(env, message);
               if (branch && started) {
-                if (step >= plan.length) return stop(branch.map((option) => option.label));
+                if (step >= plan.length) return stop(branch);
                 const pick = branch[plan[step++]];
                 if (!pick) return failed();
                 path.push(pick.label);
+                ui.push(pick.ui!);
                 response = pick.response;
-              } else response = autoAnswer(message);
+              } else {
+                response = autoAnswer(message);
+                // the duel screen asks for this one too: record the same answer the way it would take it
+                const shown = response && uiPicks(message, response);
+                if (shown !== undefined) ui.push(shown);
+              }
             }
             if (!response) return failed();
         }
@@ -191,23 +208,28 @@ function play(env: ProbeEnv, hand: number[], deck: number[], extra: number[], pl
 interface Option {
   label: string;
   response: OcgResponse;
+  // the same choice as the duel screen numbers it, and the card it acts on
+  ui?: number[] | null;
+  code?: number;
 }
 
 // Main Phase actions worth trying: summons and activations (not Set, position changes or moving to another phase)
 function idleOptions(env: ProbeEnv, message: Extract<OcgMessage, { type: OcgMessageType.SELECT_IDLECMD }>): Option[] {
   const options: Option[] = [];
   const seen = new Set<string>();
-  const add = (verb: string, action: SelectIdleCMDAction, list: { code: number; location: number; description?: bigint }[]) =>
+  const add = (verb: string, action: SelectIdleCMDAction, list: { code: number; location: number; description?: bigint }[], offset: number) =>
     list.forEach((card, index) => {
       // two copies of a card in the hand offer the same thing: try one
       const label = `${verb} ${env.name(card.code)}${card.description !== undefined ? `#${card.description}` : ""}@${card.location}`;
       if (seen.has(label)) return;
       seen.add(label);
-      options.push({ label, response: { type: OcgResponseType.SELECT_IDLECMD, action, index } });
+      options.push({ label, response: { type: OcgResponseType.SELECT_IDLECMD, action, index }, ui: [offset + index], code: card.code });
     });
-  add("Normal Summon", SelectIdleCMDAction.SELECT_SUMMON, message.summons);
-  add("Special Summon", SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, message.special_summons);
-  add("Activate", SelectIdleCMDAction.SELECT_ACTIVATE, message.activates);
+  // the duel screen lists summons, Special Summons, position changes, Sets, then activations (worker.ts buildPrompt)
+  const m = message;
+  add("Normal Summon", SelectIdleCMDAction.SELECT_SUMMON, m.summons, 0);
+  add("Special Summon", SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, m.special_summons, m.summons.length);
+  add("Activate", SelectIdleCMDAction.SELECT_ACTIVATE, m.activates, m.summons.length + m.special_summons.length + m.pos_changes.length + m.monster_sets.length + m.spell_sets.length);
   return options;
 }
 
@@ -215,6 +237,19 @@ function idleOptions(env: ProbeEnv, message: Extract<OcgMessage, { type: OcgMess
 // or put back): branch on it. Picks from the field keep the first legal card.
 const PICKED_FROM: number[] = [OcgLocation.DECK, OcgLocation.EXTRA, OcgLocation.HAND];
 function deckPick(env: ProbeEnv, message: OcgMessage): Option[] | null {
+  // a group picked one card at a time ("1 Photon and 1 Galaxy monster from your Deck"): branch on each card picked
+  if (message.type === OcgMessageType.SELECT_UNSELECT_CARD && message.player === 0 && message.select_cards.length) {
+    if (!message.select_cards.every((card) => PICKED_FROM.includes(card.location))) return null;
+    const options: Option[] = [];
+    const seen = new Set<number>();
+    message.select_cards.forEach((card, index) => {
+      if (seen.has(card.code)) return;
+      seen.add(card.code);
+      options.push({ label: `pick ${env.name(card.code)}`, response: { type: OcgResponseType.SELECT_UNSELECT_CARD, index } as OcgResponse, ui: [index], code: card.code });
+    });
+    if (message.can_finish) options.push({ label: "finish picking", response: { type: OcgResponseType.SELECT_UNSELECT_CARD, index: null } as OcgResponse, ui: null });
+    return options.length > 1 ? options : null;
+  }
   if (message.type !== OcgMessageType.SELECT_CARD || message.player !== 0 || message.min !== 1 || message.max !== 1) return null;
   if (!message.selects.length || !message.selects.every((card) => PICKED_FROM.includes(card.location))) return null;
   const options: Option[] = [];
@@ -222,9 +257,71 @@ function deckPick(env: ProbeEnv, message: OcgMessage): Option[] | null {
   message.selects.forEach((card, index) => {
     if (seen.has(card.code)) return;
     seen.add(card.code);
-    options.push({ label: `pick ${env.name(card.code)}`, response: { type: OcgResponseType.SELECT_CARD, indicies: [index] } });
+    options.push({ label: `pick ${env.name(card.code)}`, response: { type: OcgResponseType.SELECT_CARD, indicies: [index] }, ui: [index], code: card.code });
   });
   return options.length > 1 ? options : null;
+}
+
+// what the duel screen holds back with "Ignore hand traps" on (worker.ts SELECT_CHAIN)
+const heldBack = (card: { code: number; location: number }) => card.location === OcgLocation.HAND && isHandTrap(card.code);
+
+// The duel screen's numbering of the zones it offers (worker.ts freeZones): own then opponent's, Monster then S/T zones
+function zoneList(player: number, mask: number) {
+  const zones: { player: number; location: OcgLocation; sequence: number }[] = [];
+  for (let side = 0; side < 2; side++) {
+    const bits = (mask >>> (side * 16)) & 0xffff;
+    const controller = side === 0 ? player : 1 - player;
+    for (let sequence = 0; sequence < 7; sequence++) if (!(bits & (1 << sequence))) zones.push({ player: controller, location: OcgLocation.MZONE, sequence });
+    for (let sequence = 0; sequence < 8; sequence++) if (!(bits & (0x100 << sequence))) zones.push({ player: controller, location: OcgLocation.SZONE, sequence });
+  }
+  return zones;
+}
+
+/**
+ * The picks the duel screen would send for this answer (worker.ts buildPrompt, hand traps held back), so a line found
+ * here replays there exactly. undefined: the screen answers this prompt by itself and records nothing.
+ */
+function uiPicks(message: OcgMessage, response: OcgResponse): number[] | null | undefined {
+  const r = response as unknown as Record<string, unknown>;
+  switch (message.type) {
+    case OcgMessageType.SELECT_IDLECMD:
+    case OcgMessageType.SELECT_BATTLECMD:
+      return message.player === 0 ? null : undefined;
+    case OcgMessageType.SELECT_EFFECTYN:
+    case OcgMessageType.SELECT_YESNO:
+      return [r.yes ? 0 : 1];
+    case OcgMessageType.SELECT_OPTION:
+      return [r.index as number];
+    case OcgMessageType.SELECT_CHAIN: {
+      const offered = message.selects.map((card, index) => ({ card, index })).filter(({ card }) => !heldBack(card));
+      if (message.player !== 0 || (!offered.length && !message.forced)) return undefined;
+      const list = offered.length ? offered : message.selects.map((card, index) => ({ card, index }));
+      return r.index === null ? null : [list.findIndex((entry) => entry.index === r.index)];
+    }
+    case OcgMessageType.SELECT_CARD:
+    case OcgMessageType.SELECT_TRIBUTE:
+    case OcgMessageType.SELECT_SUM:
+      return r.indicies as number[];
+    case OcgMessageType.SELECT_UNSELECT_CARD:
+      return r.index === null ? null : [r.index as number];
+    case OcgMessageType.SELECT_PLACE:
+    case OcgMessageType.SELECT_DISFIELD: {
+      const zones = zoneList(message.player, message.field_mask);
+      return (r.places as { player: number; location: number; sequence: number }[]).map((place) => zones.findIndex((zone) => zone.player === place.player && zone.location === place.location && zone.sequence === place.sequence));
+    }
+    case OcgMessageType.SELECT_POSITION: {
+      const allowed: number[] = [OcgPosition.FACEUP_ATTACK, OcgPosition.FACEUP_DEFENSE, OcgPosition.FACEDOWN_DEFENSE, OcgPosition.FACEDOWN_ATTACK].filter((one) => message.positions & one);
+      return [allowed.indexOf(r.position as number)];
+    }
+    case OcgMessageType.SELECT_COUNTER:
+      return r.counters as number[];
+    case OcgMessageType.ANNOUNCE_RACE:
+    case OcgMessageType.ANNOUNCE_ATTRIB:
+    case OcgMessageType.ANNOUNCE_NUMBER:
+      return [0];
+    default:
+      return undefined;
+  }
 }
 
 // Everything else gets the plain answer: yes to optional effects, the first legal cards, the first free zone.
@@ -241,9 +338,9 @@ function autoAnswer(message: OcgMessage): OcgResponse | null {
     case OcgMessageType.SELECT_OPTION:
       return { type: OcgResponseType.SELECT_OPTION, index: 0 };
     case OcgMessageType.SELECT_CHAIN: {
-      // triggers on the field or in the GY go off; cards in the hand stay there (a hand trap would only stop our own play)
+      // every effect of ours goes off, except hand traps in the hand (they would only stop our own play)
       if (message.player !== 0) return { type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null };
-      const at = message.selects.findIndex((card) => card.location !== OcgLocation.HAND);
+      const at = message.selects.findIndex((card) => !heldBack(card));
       return { type: OcgResponseType.SELECT_CHAIN, index: at >= 0 ? at : message.forced ? 0 : null };
     }
     case OcgMessageType.SELECT_CARD:
@@ -410,4 +507,99 @@ export function* probeDeck(env: ProbeEnv, main: number[], extra: number[]): Gene
     done++;
     yield { done, total, evidence };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Route search: from a hand toward a full board, the boards of tests you marked as working. A beam search: from
+// each position kept, try every choice, and keep the few most promising positions for the next step.
+
+export interface Route {
+  board: number[];
+  // how much of your closest full board this board holds (1 = all of it), and which of your boards that was
+  coverage: number;
+  target: number[] | null;
+  full: boolean;
+  steps: string[];
+  // the line as the duel screen takes it: replays in the app as a saved test
+  ui: (number[] | null)[];
+  deck: number;
+  extra: number;
+  tried: number;
+}
+
+export interface RouteOptions {
+  // your full boards: the search stops at the first board holding all of one
+  targets: number[][];
+  // "verb:code" of actions in your working lines, preferred when choosing what to try
+  prior?: Set<string>;
+  budget?: number;
+  width?: number;
+  depth?: number;
+}
+
+const overlap = (board: number[], target: number[]) => {
+  const left = [...board];
+  let found = 0;
+  for (const code of target) {
+    const at = left.indexOf(code);
+    if (at >= 0) {
+      left.splice(at, 1);
+      found++;
+    }
+  }
+  return target.length ? found / target.length : 0;
+};
+
+// "Normal Summon X" -> "Normal", "Activate: Tribute this card X" -> "Activate"
+export const verbOf = (label: string) => label.split(/[ :]/)[0];
+
+/** Pauses (yields) after every duel tried; returns the best line found. */
+export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extra: number[], options: RouteOptions): Generator<{ tried: number; best: Route | null } | undefined, Route> {
+  const budget = options.budget ?? 1500;
+  const width = options.width ?? 6;
+  const depth = options.depth ?? 80;
+  const prior = options.prior ?? new Set<string>();
+  type Node = { plan: number[]; stop: Stop; steps: string[]; liked: number; value: number; route: Route };
+  const judge = (stop: Stop, steps: string[], liked: number, tried: number): { value: number; route: Route } => {
+    let coverage = 0;
+    let target: number[] | null = null;
+    for (const one of options.targets) {
+      const covered = overlap(stop.board, one);
+      if (covered > coverage) [coverage, target] = [covered, one];
+    }
+    const route: Route = { board: stop.board, coverage, target, full: coverage >= 1, steps, ui: stop.ui, deck: stop.measure.deck, extra: stop.measure.extra, tried };
+    // closeness to your boards first; then what the line has gathered; then how much it looks like your own lines
+    const value = coverage * 100 + stop.measure.deck * 4 + stop.measure.extra * 3 + stop.board.length * 2 + liked * 1.5;
+    return { value, route };
+  };
+  let tried = 0;
+  const first = play(env, hand, deck, extra, []);
+  tried++;
+  const root: Node = { plan: [], stop: first, steps: [], liked: 0, ...judge(first, [], 0, tried) };
+  let best = root;
+  const seen = new Set<string>([first.key]);
+  let beam: Node[] = [root];
+  for (let level = 0; level < depth && beam.length && tried < budget; level++) {
+    const children: Node[] = [];
+    for (const node of beam) {
+      for (let index = 0; index < node.stop.options.length && tried < budget; index++) {
+        const label = node.stop.options[index];
+        const child = play(env, hand, deck, extra, [...node.plan, index]);
+        tried++;
+        yield;
+        if (child.failed || seen.has(child.key)) continue;
+        seen.add(child.key);
+        const liked = node.liked + (prior.has(`${verbOf(label)}:${node.stop.codes[index]}`) ? 1 : 0);
+        const steps = [...node.steps, label.replace(/#\d+/, "").replace(/@\d+$/, "")];
+        const next: Node = { plan: [...node.plan, index], stop: child, steps, liked, ...judge(child, steps, liked, tried) };
+        children.push(next);
+        if (next.value > best.value) best = next;
+        if (next.route.full) return { ...next.route, tried };
+      }
+      yield { tried, best: best.route };
+    }
+    children.sort((a, b) => b.value - a.value);
+    beam = children.slice(0, width);
+  }
+  return { ...best.route, tried };
 }

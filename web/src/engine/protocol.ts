@@ -1,6 +1,6 @@
 // Messages between the page and the duel worker. The worker turns everything
 // the duel core says into these plain shapes, so the page knows nothing about the core.
-import type { CardEvidence } from "./probe";
+import type { CardEvidence, Route } from "./probe";
 
 export interface CardRef {
   controller: number;
@@ -119,7 +119,7 @@ export interface DuelView {
 export interface TestRecord {
   options: StartOptions;
   picks: (number[] | null)[];
-  steps: { text: string; idle: boolean }[];
+  steps: { text: string; idle: boolean; code?: number }[];
   startHand: number[];
 }
 
@@ -178,7 +178,9 @@ export type ToWorker =
   | { type: "search"; id: number; search: CardSearch }
   | { type: "info"; codes: number[] }
   // the engine probe: what every Main Deck card starts, alone and in pairs (see probe.ts)
-  | { type: "probe"; id: number; main: number[]; extra: number[] };
+  | { type: "probe"; id: number; main: number[]; extra: number[] }
+  // route search from `hand` (the rest of `main` is the Deck) toward `targets`, your full boards
+  | { type: "route"; id: number; main: number[]; extra: number[]; hand: number[]; targets: number[][]; prior: string[] };
 
 export type FromWorker =
   | { type: "progress"; text: string }
@@ -190,6 +192,8 @@ export type FromWorker =
   // asked: the passcode as requested (Omega numbers alternate artworks itself), code: the card it is
   | { type: "info"; cards: (CardInfo & { asked: number })[] }
   | { type: "probe"; id: number; done: number; total: number; evidence?: CardEvidence[] }
+  // progress, then the line found, as a test the duel screen replays
+  | { type: "route"; id: number; tried: number; done?: { route: Route; record: TestRecord } }
   | { type: "error"; text: string };
 
 export const LOCATION = { DECK: 1, HAND: 2, MZONE: 4, SZONE: 8, GRAVE: 16, REMOVED: 32, EXTRA: 64 } as const;

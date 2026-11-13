@@ -52,6 +52,8 @@ function App() {
   const [status, setStatus] = useState("Starting");
   const [ready, setReady] = useState(false);
   const [decks, setDecks] = useState<SavedDeck[]>(() => startingDecks(saved));
+  const decksRef = useRef(decks);
+  decksRef.current = decks;
   const [deckId, setDeckId] = useState(saved.deckId ?? decks[0]?.id ?? "");
   const [editing, setEditing] = useState(false);
   const [pasting, setPasting] = useState(false);
@@ -73,6 +75,7 @@ function App() {
   // `from`: choices replayed from a saved test, not saved again until you make one of your own
   const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; from: number } | null>(null);
   const [record, setRecord] = useState<TestRecord | null>(null);
+  const lastRecord = useRef<TestRecord | null>(null);
   const [worked, setWorked] = useState(false);
   // watching a saved test: its choices are made one by one; any tap of yours takes over from there
   const [replay, setReplay] = useState<{ picks: (number[] | null)[]; at: number } | null>(null);
@@ -147,6 +150,7 @@ function App() {
         setStatus(`${message.cards.toLocaleString()} cards loaded`);
       } else if (message.type === "view") receive(message.view);
       else if (message.type === "record") {
+        lastRecord.current = message.record;
         if (!replayRef.current) setRecord(message.record);
       }
       else if (message.type === "text") setTexts((known) => new Map(known).set(message.card.code, message.card));
@@ -167,6 +171,26 @@ function App() {
           return next;
         });
         infoWaiting.current.shift()?.(message.cards);
+      } else if (message.type === "route") {
+        const job = routingRef.current;
+        if (!job || job.id !== message.id) return;
+        if (!message.done) return setRouting({ ...job, tried: message.tried });
+        const { route, record: line } = message.done;
+        setDecks((all) =>
+          all.map((one) => {
+            if (one.id !== job.deckId) return one;
+            const aimed = (one.tests ?? []).some((test) => test.worked && test.board?.length);
+            const saved = { board: route.board, coverage: route.coverage, full: route.full, aimed, tried: route.tried, date: Date.now(), signature: deckSignature(one), record: line };
+            return { ...one, routes: { ...one.routes, [job.code]: saved } };
+          }),
+        );
+        // on to the next start waiting, if any
+        const [next, ...rest] = job.queue;
+        if (next) {
+          const target = decksRef.current.find((one) => one.id === job.deckId);
+          if (target) return searchRoute(target, next.code, next.hand, rest);
+        }
+        setRouting(null);
       } else if (message.type === "probe") {
         const job = probeRef.current;
         if (!job || job.id !== message.id) return;
@@ -239,6 +263,25 @@ function App() {
   };
 
   // a test from the optimiser deals exactly the cards it names (5 cards, hand traps held back) and stays set for New hand
+  // route searches, one start at a time: the queue holds the starts still to search and the hand each starts from
+  const [routing, setRouting] = useState<{ id: number; deckId: string; code: number; tried: number; queue: { code: number; hand: number[] }[] } | null>(null);
+  const routingRef = useRef(routing);
+  routingRef.current = routing;
+  const searchRoute = (target: SavedDeck, code: number, hand: number[], queue: { code: number; hand: number[] }[] = []) => {
+    const id = (routingRef.current?.id ?? 0) + 1;
+    const next = { id, deckId: target.id, code, tried: 0, queue };
+    routingRef.current = next;
+    setRouting(next);
+    const worked = (target.tests ?? []).filter((one) => one.worked);
+    const targets = worked.flatMap((one) => (one.board?.length ? [one.board] : []));
+    const prior = [...new Set(worked.flatMap((one) => one.steps.filter((step) => step.idle && step.code).map((step) => `${step.text.split(/[ :]/)[0]}:${step.code}`)))];
+    post({ type: "route", id, main: target.main, extra: target.extra, hand, targets, prior });
+  };
+  const findLines = (target: SavedDeck, starts: { code: number; hand: number[] }[]) => {
+    if (!starts.length) return;
+    searchRoute(target, starts[0].code, starts[0].hand, starts.slice(1));
+  };
+
   const checkDeck = useCallback((target: SavedDeck) => {
     const signature = deckSignature(target);
     const running = probeRef.current;
@@ -287,7 +330,8 @@ function App() {
   // the next recorded choice, once the prompt it answers is on screen and the animations before it have played
   useEffect(() => {
     if (!replay || !view?.prompt || queue.current.length || timer.current) return;
-    if (replay.at >= replay.picks.length) return setReplay(null);
+    // played to the end: the test on screen is that line, so "This worked" can keep it
+    if (replay.at >= replay.picks.length) return setReplay(null), setRecord(lastRecord.current);
     const wait = window.setTimeout(() => {
       post({ type: "answer", picks: replay.picks[replay.at] });
       setReplay({ ...replay, at: replay.at + 1 });
@@ -306,7 +350,7 @@ function App() {
       setIgnoreHandTraps(true);
     }
     setError("");
-    setEditing(false);
+    // a test started from the editor returns to it when you leave the duel
     // whatever was still being shown from the last hand is dropped
     window.clearTimeout(timer.current);
     timer.current = 0;
@@ -366,6 +410,9 @@ function App() {
         onClose={() => setEditing(false)}
         onTest={(chosen) => start(chosen ? { chosen } : undefined)}
         engineProgress={probe && probe.deckId === deck.id ? probe : null}
+        routing={routing && routing.deckId === deck.id ? { code: routing.code, tried: routing.tried, waiting: routing.queue.map((one) => one.code) } : null}
+        onFindLines={(starts) => findLines(deck, starts)}
+        onWatchLine={(line, code) => watch({ ...line, id: newId(), date: Date.now(), testOf: code })}
         onCheck={() => checkDeck(deck)}
       />
     );
