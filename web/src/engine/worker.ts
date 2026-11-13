@@ -23,7 +23,7 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import { autoAnswer, probeDeck, routeSearch } from "./probe";
+import { CHOKE_TRAPS, autoAnswer, chokePoints, probeDeck, routeSearch } from "./probe";
 import { isHandTrap } from "./handtraps";
 import { readEffects, readSetConstants, type QuickEffect } from "./interruptions";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
@@ -1243,6 +1243,7 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
     const next = steps.next();
     if (next.done) {
       const route = next.value;
+
       const options: StartOptions = { main: [...handCodes, ...[...deck].reverse()], extra: extraCodes, hand: handCodes.length, chosen: [], ignoreHandTraps: true, seed: 1 };
       const record: TestRecord = { options, picks: route.ui, steps: route.steps.map((text) => ({ text, idle: !text.startsWith("pick ") && !text.startsWith("finish") })), startHand: handCodes };
       return send({ type: "route", id, tried: route.tried, done: { route, record } });
@@ -1251,6 +1252,30 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
       send({ type: "route", id, tried: next.value.tried });
       last = performance.now();
     }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+// Choke points for one line, between other requests like the probe and the route search
+let chokeJob = 0;
+async function runChoke(id: number, main: number[], extra: number[], hand: number[], keys: string[], goal: number) {
+  chokeJob = id;
+  const canonical = (code: number) => {
+    const known = knownCode(code);
+    const card = cards.get(known);
+    return card?.alias && Math.abs(card.alias - known) < 20 && cards.has(card.alias) ? card.alias : known;
+  };
+  const handCodes = hand.map(canonical);
+  const deck = main.map(canonical).filter((code) => cards.has(code));
+  for (const code of handCodes) deck.splice(deck.indexOf(code), 1);
+  const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
+  await prefetchScripts([...handCodes, ...deck, ...extraCodes, ...CHOKE_TRAPS]);
+  const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
+  const steps = chokePoints(env, handCodes, deck, extraCodes, keys, CHOKE_TRAPS, { goal, budget: 250, replans: 2 });
+  for (;;) {
+    if (chokeJob !== id) return;
+    const next = steps.next();
+    if (next.done) return send({ type: "choke", id, done: next.value });
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
@@ -1304,6 +1329,10 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
     } else if (message.type === "route") {
       void runRoute(message.id, message.main, message.extra, message.hand, message.targets, message.prior, message.goal).catch((error) =>
         send({ type: "error", text: `Route search stopped: ${error instanceof Error ? error.message : error}` }),
+      );
+    } else if (message.type === "choke") {
+      void runChoke(message.id, message.main, message.extra, message.hand, message.keys, message.goal).catch((error) =>
+        send({ type: "error", text: `Hand trap check stopped: ${error instanceof Error ? error.message : error}` }),
       );
     } else if (message.type === "text") {
       // YGO Omega's own artwork numbers read as the card they are

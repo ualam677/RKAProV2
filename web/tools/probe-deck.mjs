@@ -130,3 +130,19 @@ if (process.env.PLAN) {
     console.log(`after ${n}: failed=${!!s.failed} board=[${s.board.map((c) => names.get(c))}] options=${JSON.stringify(s.options)}`);
   }
 }
+
+if (process.env.CHOKE) {
+  const { routeSearch, chokePoints } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const hand = process.env.CHOKE.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const g = routeSearch(env, hand, rest(hand), extra, { targets: [], budget: 2500 });
+  let n; while (!(n = g.next()).done);
+  console.log(`LINE ${n.value.interruptions.length} interruptions: ${n.value.steps.filter((s) => !s.startsWith("pick")).join(" > ")}`);
+  const t = performance.now();
+  const c = chokePoints(env, hand, rest(hand), extra, n.value.keys);
+  let m; while (!(m = c.next()).done);
+  console.log(`choke points in ${((performance.now() - t) / 1000).toFixed(1)} s`);
+  for (const one of m.value) {
+    const worst = one.windows.reduce((a, w) => (a && a.interruptions <= w.interruptions ? a : w), null);
+    console.log(`  ${names.get(one.trap)}: clean ${one.clean}; ${one.windows.length} moments; ` + one.windows.map((w) => `${w.at} -> ${w.interruptions}`).join("; "));
+  }
+}

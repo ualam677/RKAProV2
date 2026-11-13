@@ -475,3 +475,11 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .state-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; text-align: left; }
 .state-row small { color: var(--muted); }
 .saved-note { margin: 0; color: #7fd18b; }
+.opt-through { display: grid; gap: 4px; padding: 6px 10px; border: 1px dashed var(--line); border-radius: var(--radius); font-size: 12px; }
+.opt-through .muted { margin: 0; font-size: 12px; }
+.opt-through > div { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.opt-through-row b { color: var(--text); font-variant-numeric: tabular-nums; }
+.opt-chokes { margin-top: 3px; color: #ffcf9a; }
+.opt-chokes summary { cursor: pointer; }
+.opt-chokes ul { margin: 4px 0; padding-left: 16px; display: grid; gap: 3px; color: var(--muted); }
+.opt-chokes b { color: var(--text); }

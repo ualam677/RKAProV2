@@ -20,6 +20,7 @@ interface Props {
   engineProgress: { done: number; total: number } | null;
   onCheck: () => void;
   routing: { code: number; tried: number; waiting: number[] } | null;
+  choking: { code: number; waiting: number[] } | null;
   onFindLines: (starts: { code: number; hand: number[] }[]) => void;
   onWatchLine: (line: TestRecord, code: number) => void;
 }
@@ -78,7 +79,7 @@ function Thumb({ code, card, limit, onTap, onHold }: { code: number; card?: Card
   );
 }
 
-export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestText, search, onChange, onClose, onTest, engineProgress, onCheck, routing, onFindLines, onWatchLine }: Props) {
+export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestText, search, onChange, onClose, onTest, engineProgress, onCheck, routing, choking, onFindLines, onWatchLine }: Props) {
   const [query, setQuery] = useState<CardSearch>({});
   const [results, setResults] = useState<{ results: CardInfo[]; more: boolean }>({ results: [], more: false });
   const [filters, setFilters] = useState(false);
@@ -298,7 +299,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
         <div className="deck-area">{(["main", "extra", "side"] as Section[]).map(section)}</div>
 
         {optimising ? (
-          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} routing={routing} onFindLines={onFindLines} onWatchLine={onWatchLine} />
+          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} routing={routing} choking={choking} onFindLines={onFindLines} onWatchLine={onWatchLine} />
         ) : (
         <div className="search-area">
           <div className="search-bar">

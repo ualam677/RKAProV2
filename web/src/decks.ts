@@ -5,6 +5,7 @@ import type { Tag } from "./optimiser";
 import type { CardEvidence } from "./engine/probe";
 import type { TestRecord } from "./engine/protocol";
 import type { Interruption } from "./engine/interruptions";
+import type { Choke } from "./engine/probe";
 
 // A hand test kept with its deck: enough to replay it exactly, and what it ended on if you said it worked
 export interface SavedTest extends TestRecord {
@@ -53,6 +54,8 @@ export interface SavedRoute {
   interruptions?: Interruption[];
   // the line as steps another search can follow ("Activate:<code>", "pick:<hint>:<code>")
   keys?: string[];
+  // each hand trap used at each moment it can be against this line, and what the line ends on then
+  chokes?: Choke[];
   coverage: number;
   full: boolean;
   // whether you had marked any full boards when it searched (without them it aims for the most resources)

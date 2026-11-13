@@ -205,6 +205,17 @@ function App() {
           return searchRoute(target, next.code, next.hand, rest);
         }
         setRouting(null);
+        // every line found: now where hand traps hurt each of them
+        const done = decksRef.current.find((one) => one.id === job.deckId);
+        if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "choke") {
+        const job = chokingRef.current;
+        if (!job || job.id !== message.id || !message.done) return;
+        const chokes = message.done;
+        setDecks((all) => all.map((one) => (one.id === job.deckId && one.routes?.[job.code] ? { ...one, routes: { ...one.routes, [job.code]: { ...one.routes[job.code], chokes } } } : one)));
+        const target = decksRef.current.find((one) => one.id === job.deckId);
+        if (target) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? target, job.queue), 50);
+        else setChoking(null);
       } else if (message.type === "probe") {
         const job = probeRef.current;
         if (!job || job.id !== message.id) return;
@@ -307,7 +318,24 @@ function App() {
     ];
     post({ type: "route", id, main: target.main, extra: target.extra, hand, targets, prior, goal: target.fullAt ?? 3 });
   };
+  // choke points, one start at a time, once its line is found (the hand trap check runs after all lines are in)
+  const [choking, setChoking] = useState<{ id: number; deckId: string; code: number; queue: { code: number; hand: number[] }[] } | null>(null);
+  const chokingRef = useRef(choking);
+  chokingRef.current = choking;
+  const checkChokes = (target: SavedDeck, queue: { code: number; hand: number[] }[]) => {
+    const [first, ...rest] = queue;
+    const route = first && target.routes?.[first.code];
+    if (!first) return setChoking(null);
+    if (!route?.keys) return checkChokes(target, rest);
+    const id = (chokingRef.current?.id ?? 0) + 1;
+    const next = { id, deckId: target.id, code: first.code, queue: rest };
+    chokingRef.current = next;
+    setChoking(next);
+    post({ type: "choke", id, main: target.main, extra: target.extra, hand: first.hand, keys: route.keys, goal: target.fullAt ?? 3 });
+  };
+  const allStarts = useRef<{ code: number; hand: number[] }[]>([]);
   const findLines = (target: SavedDeck, starts: { code: number; hand: number[] }[]) => {
+    allStarts.current = starts;
     if (!starts.length) return;
     // every start once, then a second round for the ones that fell short, now guided by the others' lines
     const queue: Queued[] = [...starts.slice(1), ...(starts.length > 1 ? starts.map((one) => ({ ...one, retry: true })) : [])];
@@ -464,6 +492,7 @@ function App() {
         onTest={(chosen) => start(chosen ? { chosen } : undefined)}
         engineProgress={probe && probe.deckId === deck.id ? probe : null}
         routing={routing && routing.deckId === deck.id ? { code: routing.code, tried: routing.tried, waiting: routing.queue.map((one) => one.code) } : null}
+        choking={choking && choking.deckId === deck.id ? { code: choking.code, waiting: choking.queue.map((one) => one.code) } : null}
         onFindLines={(starts) => findLines(deck, starts)}
         onWatchLine={(line, code) => watch({ ...line, id: newId(), date: Date.now(), testOf: code })}
         onCheck={() => checkDeck(deck)}

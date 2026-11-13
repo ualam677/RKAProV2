@@ -1,6 +1,6 @@
 // Messages between the page and the duel worker. The worker turns everything
 // the duel core says into these plain shapes, so the page knows nothing about the core.
-import type { CardEvidence, Route } from "./probe";
+import type { CardEvidence, Choke, Route } from "./probe";
 
 export interface CardRef {
   controller: number;
@@ -187,7 +187,9 @@ export type ToWorker =
   // the engine probe: what every Main Deck card starts, alone and in pairs (see probe.ts)
   | { type: "probe"; id: number; main: number[]; extra: number[] }
   // route search from `hand` (the rest of `main` is the Deck) toward `targets`, your full boards
-  | { type: "route"; id: number; main: number[]; extra: number[]; hand: number[]; targets: number[][]; prior: string[]; goal: number };
+  | { type: "route"; id: number; main: number[]; extra: number[]; hand: number[]; targets: number[][]; prior: string[]; goal: number }
+  // choke points for a line found: each hand trap at each moment, the worst ones searched again
+  | { type: "choke"; id: number; main: number[]; extra: number[]; hand: number[]; keys: string[]; goal: number };
 
 export type FromWorker =
   | { type: "progress"; text: string }
@@ -201,6 +203,7 @@ export type FromWorker =
   | { type: "probe"; id: number; done: number; total: number; evidence?: CardEvidence[] }
   // progress, then the line found, as a test the duel screen replays
   | { type: "route"; id: number; tried: number; done?: { route: Route; record: TestRecord } }
+  | { type: "choke"; id: number; done?: Choke[] }
   | { type: "error"; text: string };
 
 export const LOCATION = { DECK: 1, HAND: 2, MZONE: 4, SZONE: 8, GRAVE: 16, REMOVED: 32, EXTRA: 64 } as const;

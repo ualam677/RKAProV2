@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CardArt } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
-import type { CardEvidence } from "./engine/probe";
+import type { CardEvidence, Choke } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
 import {
   GOALS, ROLES, allProven, normalLimit, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
@@ -22,6 +22,7 @@ interface Props {
   engineProgress: { done: number; total: number } | null;
   onCheck: () => void;
   routing: { code: number; tried: number; waiting: number[] } | null;
+  choking: { code: number; waiting: number[] } | null;
   onFindLines: (starts: { code: number; hand: number[] }[]) => void;
   onWatchLine: (line: TestRecord, code: number) => void;
 }
@@ -31,7 +32,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, onFindLines, onWatchLine }: Props) {
+export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onWatchLine }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -131,6 +132,27 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
     return computeOdds(checked, second ? 6 : 5);
   }, [main, second, deck.routes, fullAt]);
   const startCards = main.filter((card) => card.tag.role === "starter" || card.tag.role === "pair");
+  // through one hand trap, used at its best moment: a start still counts if its line keeps a full board
+  const trapCodes = useMemo(() => [...new Set(Object.values(routes).flatMap((route) => (route.chokes ?? []).map((choke) => choke.trap)))], [deck.routes]);
+  useEffect(() => {
+    const missing = trapCodes.filter((code) => !infoOf(code));
+    if (missing.length) requestInfo(missing);
+  }, [trapCodes]);
+  const through = useMemo(
+    () =>
+      trapCodes.map((trap) => {
+        const checked = main.map((card) => {
+          if (card.tag.role !== "starter" && card.tag.role !== "pair") return card;
+          const route = routeOf(card.code);
+          const choke = route?.chokes?.find((one) => one.trap === trap);
+          // never usable against this line: the line as it is; otherwise its worst moment
+          const worst = !choke ? -1 : choke.windows.length ? Math.min(...choke.windows.map((window) => window.interruptions)) : (route?.interruptions?.length ?? 0);
+          return isFull(route) && worst >= fullAt ? card : { ...card, tag: { role: "other" as Role } };
+        });
+        return { trap, odds: computeOdds(checked, second ? 6 : 5).combo };
+      }),
+    [trapCodes, main, second, deck.routes, fullAt],
+  );
   const handFor = (card: DeckCard) => testHand(card, main)?.map((code) => held.get(code) ?? code) ?? null;
   const findAll = () => onFindLines(startCards.flatMap((card) => { const hand = handFor(card); return hand ? [{ code: card.code, hand }] : []; }));
 
@@ -294,6 +316,18 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               <b className={everyStartProven ? "" : "warn"}>{pct(everyStartProven ? odds.combo : proven.combo)}</b>
             </li>
           </ul>
+          {through.length > 0 && reached && (
+            <div className="opt-through">
+              <span className="muted">Full board through one hand trap, used at its worst moment for you:</span>
+              <div>
+                {through.map(({ trap, odds: value }) => (
+                  <span key={trap} className="opt-through-row">
+                    {nameOf(trap)} <b>{pct(value)}</b>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {startCards.length > 0 && (
             <div className="opt-find">
               <button className="button small" onClick={findAll} disabled={!!routing}>
@@ -490,7 +524,9 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                   {(card.tag.role === "starter" || card.tag.role === "pair") && (
                     <RouteLine
                       route={routes[card.code]}
+                      fullAt={fullAt}
                       full={isFull(routes[card.code])}
+                      checking={choking?.code === card.code ? "now" : choking?.waiting.includes(card.code) ? "waiting" : null}
                       fresh={!!routeOf(card.code)}
                       searching={routing?.code === card.code ? routing.tried : null}
                       waiting={!!routing?.waiting.includes(card.code)}
@@ -549,7 +585,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
 }
 
 // What the route search found from this start's test hand
-function RouteLine({ route, full, fresh, searching, waiting, nameOf, onWatch }: { route?: SavedRoute; full: boolean; fresh: boolean; searching: number | null; waiting: boolean; nameOf: (code: number) => string; onWatch: () => void }) {
+function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, nameOf, onWatch }: { route?: SavedRoute; full: boolean; fullAt: number; checking: "now" | "waiting" | null; fresh: boolean; searching: number | null; waiting: boolean; nameOf: (code: number) => string; onWatch: () => void }) {
   if (searching !== null) return <span className="opt-engine">Searching for a line… {searching} tried</span>;
   if (waiting) return <span className="opt-engine">Waiting to search</span>;
   if (!route) return null;
@@ -567,7 +603,47 @@ function RouteLine({ route, full, fresh, searching, waiting, nameOf, onWatch }: 
       <button className="opt-link" onClick={onWatch}>
         Watch
       </button>
+      {checking === "now" && <span className="opt-chokes"> · Checking hand traps against this line…</span>}
+      {checking === "waiting" && <span className="opt-chokes"> · Hand traps next</span>}
+      {!checking && route.chokes && route.chokes.length > 0 && <Chokes chokes={route.chokes} fullAt={fullAt} nameOf={nameOf} />}
     </span>
+  );
+}
+
+// Each hand trap at its worst moment for this line, worst first; every moment one tap away
+function Chokes({ chokes, fullAt, nameOf }: { chokes: Choke[]; fullAt: number; nameOf: (code: number) => string }) {
+  const rows = chokes
+    .map((choke) => {
+      const worst = choke.windows.reduce<Choke["windows"][number] | null>((low, window) => (!low || window.interruptions < low.interruptions ? window : low), null);
+      return { choke, worst };
+    })
+    .sort((a, b) => (a.worst?.interruptions ?? 99) - (b.worst?.interruptions ?? 99));
+  const verdict = (count: number, clean: number) => (count >= fullAt ? `still ${count}` : count === 0 ? "0: stops the line" : count < clean ? `${count} of ${clean}` : `${count}`);
+  return (
+    <details className="opt-chokes">
+      <summary>
+        Choke points:{" "}
+        {rows
+          .filter(({ worst, choke }) => worst && worst.interruptions < choke.clean)
+          .slice(0, 3)
+          .map(({ choke, worst }) => `${nameOf(choke.trap)} on ${worst!.at} → ${verdict(worst!.interruptions, choke.clean)}`)
+          .join(" · ") || "no hand trap costs this line anything"}
+      </summary>
+      <ul>
+        {rows.map(({ choke, worst }) => (
+          <li key={choke.trap}>
+            <b>{nameOf(choke.trap)}</b>:{" "}
+            {!worst
+              ? "never usable against this line"
+              : choke.windows
+                  .slice()
+                  .sort((a, b) => a.interruptions - b.interruptions)
+                  .map((window) => `on ${window.at} → ${verdict(window.interruptions, choke.clean)}${window.replanned ? " (best way through)" : ""}`)
+                  .join("; ")}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
