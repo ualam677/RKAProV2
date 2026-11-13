@@ -6,6 +6,7 @@ import createCore, {
   OcgDuelMode,
   OcgLocation,
   OcgMessageType,
+  OcgOpCode,
   OcgPosition,
   OcgProcessResult,
   OcgQueryFlags,
@@ -21,7 +22,7 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import type { CardRef, CardView, Choice, DuelView, FromWorker, PlayerView, Prompt, StartOptions, ToWorker } from "./protocol";
+import type { CardRef, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, ToWorker } from "./protocol";
 
 // Folder holding cards.cdb and the release / pre-release databases, and a listing of that folder.
 const CDB_URL = import.meta.env.VITE_CDB_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/BabelCDB/master";
@@ -125,33 +126,90 @@ function knownCode(code: number): number {
 }
 
 // The core asks for scripts synchronously, which a worker can do with a blocking request.
-function fetchText(url: string): string | null {
-  const request = new XMLHttpRequest();
-  request.open("GET", url, false);
-  try {
-    request.send();
-  } catch {
-    return null;
+// null: the file does not exist (404). undefined: the download failed, so it is tried again next time.
+function fetchText(url: string): string | null | undefined {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const request = new XMLHttpRequest();
+    request.open("GET", url, false);
+    try {
+      request.send();
+    } catch {
+      continue;
+    }
+    if (request.status === 200) return request.responseText;
+    if (request.status === 404) return null;
   }
-  return request.status === 200 ? request.responseText : null;
+  return undefined;
 }
+
+async function fetchTextAsync(url: string): Promise<string | null | undefined> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return await response.text();
+      if (response.status === 404) return null;
+    } catch {
+      // network hiccup: try again
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+  }
+  return undefined;
+}
+
+const scriptFolders = (name: string) => (/^c\d+\.lua$/.test(name) ? ["official", "pre-release", "unofficial"] : [""]);
+const scriptUrl = (folder: string, name: string) => `${SCRIPTS_URL}/${folder ? folder + "/" : ""}${name}`;
 
 function readScript(path: string): string | null {
   const name = path.split("/").pop()!;
   if (scripts.has(name)) return scripts.get(name)!;
-  const folders = /^c\d+\.lua$/.test(name) ? ["official", "pre-release", "unofficial"] : [""];
   let source: string | null = null;
-  for (const folder of folders) {
-    source = fetchText(`${SCRIPTS_URL}/${folder ? folder + "/" : ""}${name}`);
-    if (source !== null) break;
+  let failed = false;
+  for (const folder of scriptFolders(name)) {
+    const text = fetchText(scriptUrl(folder, name));
+    if (text === undefined) failed = true;
+    else if (text !== null) {
+      source = text;
+      break;
+    }
   }
   // alternate artworks share the script of the card they are an artwork of
-  if (source === null && folders.length > 1) {
+  if (source === null && name.startsWith("c")) {
     const alias = cards.get(Number(name.slice(1, -4)))?.alias;
     if (alias) source = readScript(`c${alias}.lua`);
   }
-  scripts.set(name, source);
+  if (source !== null || !failed) scripts.set(name, source);
   return source;
+}
+
+// Downloads every script a deck needs at once, before the duel, instead of one by one as the core asks.
+// Returns the cards whose script could not be downloaded.
+async function prefetchScripts(codes: number[]): Promise<number[]> {
+  const missing: number[] = [];
+  const one = async (code: number): Promise<boolean> => {
+    const name = `c${code}.lua`;
+    if (scripts.has(name)) return true;
+    for (const folder of scriptFolders(name)) {
+      const text = await fetchTextAsync(scriptUrl(folder, name));
+      if (text === undefined) return false;
+      if (text !== null) {
+        scripts.set(name, text);
+        return true;
+      }
+    }
+    const alias = cards.get(code)?.alias;
+    if (alias) return one(alias);
+    // a card without a script (a Normal Monster) is fine
+    scripts.set(name, null);
+    return true;
+  };
+  const unique = [...new Set(codes)];
+  // a few at a time, so a phone on mobile data is not flooded
+  for (let i = 0; i < unique.length; i += 12) {
+    const batch = unique.slice(i, i + 12);
+    const results = await Promise.all(batch.map(one));
+    results.forEach((ok, index) => ok || missing.push(batch[index]));
+  }
+  return missing;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +227,9 @@ let turnPlayer = 0;
 let phase = "";
 let ended = false;
 let prompt: Prompt | null = null;
+let events: DuelEvent[] = [];
+// cards in the current chain, link 1 first
+let chain: (CardRef & { code: number })[] = [];
 // turns the player's picks into the core's response for the prompt on screen
 let respond: ((picks: number[] | null) => OcgResponse | null) | null = null;
 
@@ -210,6 +271,61 @@ function freeZones(player: number, mask: number): Choice[] {
   }
   for (const zone of zones) zone.label = `${zone.zone!.controller === player ? "" : "Opponent's "}${zoneName(zone.zone!)}`;
   return zones;
+}
+
+const TYPE_TOKEN = 0x4000;
+// Which card names may be declared: the core sends a small stack program, evaluated per card
+// the way EDOPro's client does it (types, races and attributes match on any shared bit).
+function declarable(card: OcgCardData, opcodes: bigint[]): boolean {
+  const stack: bigint[] = [];
+  let aliases = false;
+  let tokens = false;
+  const pop = () => stack.pop() ?? 0n;
+  const two = (op: (a: bigint, b: bigint) => bigint) => {
+    const b = pop();
+    const a = pop();
+    stack.push(op(a, b));
+  };
+  const flag = (value: boolean) => (value ? 1n : 0n);
+  for (const opcode of opcodes) {
+    switch (opcode) {
+      case OcgOpCode.ADD: two((a, b) => a + b); break;
+      case OcgOpCode.SUB: two((a, b) => a - b); break;
+      case OcgOpCode.MUL: two((a, b) => a * b); break;
+      case OcgOpCode.DIV: two((a, b) => (b === 0n ? 0n : a / b)); break;
+      case OcgOpCode.AND: two((a, b) => flag(a !== 0n && b !== 0n)); break;
+      case OcgOpCode.OR: two((a, b) => flag(a !== 0n || b !== 0n)); break;
+      case OcgOpCode.NEG: stack.push(-pop()); break;
+      case OcgOpCode.NOT: stack.push(flag(pop() === 0n)); break;
+      case OcgOpCode.BAND: two((a, b) => a & b); break;
+      case OcgOpCode.BOR: two((a, b) => a | b); break;
+      case OcgOpCode.BNOT: stack.push(~pop()); break;
+      case OcgOpCode.BXOR: two((a, b) => a ^ b); break;
+      case OcgOpCode.LSHIFT: two((a, b) => a << b); break;
+      case OcgOpCode.RSHIFT: two((a, b) => a >> b); break;
+      case OcgOpCode.ALLOW_ALIASES: aliases = true; break;
+      case OcgOpCode.ALLOW_TOKENS: tokens = true; break;
+      case OcgOpCode.ISCODE: stack.push(flag(BigInt(card.code) === pop())); break;
+      case OcgOpCode.ISSETCARD: {
+        const set = Number(pop());
+        stack.push(flag(card.setcodes.some((code) => (code & 0xfff) === (set & 0xfff) && (code & set) === set)));
+        break;
+      }
+      case OcgOpCode.ISTYPE: stack.push(flag((BigInt(card.type) & pop()) !== 0n)); break;
+      case OcgOpCode.ISRACE: stack.push(flag((BigInt(card.race) & pop()) !== 0n)); break;
+      case OcgOpCode.ISATTRIBUTE: stack.push(flag((BigInt(card.attribute) & pop()) !== 0n)); break;
+      case OcgOpCode.GETCODE: stack.push(BigInt(card.code)); break;
+      case OcgOpCode.GETTYPE: stack.push(BigInt(card.type)); break;
+      case OcgOpCode.GETRACE: stack.push(BigInt(card.race)); break;
+      case OcgOpCode.GETATTRIBUTE: stack.push(BigInt(card.attribute)); break;
+      default: stack.push(opcode);
+    }
+  }
+  if (stack.length !== 1 || stack[0] === 0n) return false;
+  // alternate artworks are the same name; tokens are not cards
+  if (!aliases && card.alias && Math.abs(card.alias - card.code) < 20) return false;
+  if (!tokens && card.type & TYPE_TOKEN) return false;
+  return true;
 }
 
 // Builds what the player sees for a core prompt. Returns false when the prompt needs no player (answered here).
@@ -366,6 +482,16 @@ function buildPrompt(message: OcgMessage): boolean {
         null,
         (index) => ({ type: OcgResponseType.ANNOUNCE_NUMBER, value: index! }) as OcgResponse,
       );
+    case OcgMessageType.ANNOUNCE_CARD: {
+      const opcodes = message.opcodes.map((opcode) => BigInt(opcode));
+      const options = [...cards.values()]
+        .filter((card) => declarable(card, opcodes))
+        .map((card) => ({ code: card.code, name: nameOf(card.code) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      prompt = { kind: "announce", title: "Declare a card name", choices: [], options };
+      respond = (picks) => (picks && options[picks[0]] ? { type: OcgResponseType.ANNOUNCE_CARD, card: options[picks[0]].code } : null);
+      return true;
+    }
     case OcgMessageType.SORT_CARD:
     case OcgMessageType.SORT_CHAIN:
       return answer({ type: OcgResponseType.SORT_CARD, order: null });
@@ -422,13 +548,15 @@ function sendView() {
       if (card && zone) card.materials = zone.materials;
     });
   }
-  const view: DuelView = { turn, turnPlayer, phase, players, prompt, ended };
+  const view: DuelView = { events, turn, turnPlayer, phase, players, prompt, ended };
+  events = [];
   send({ type: "view", view });
 }
 
 const isPrompt = (type: number) => (type >= 10 && type <= 26 && type !== 17) || type === 132 || (type >= 140 && type <= 143);
 
-// Runs the core until it needs the player, then shows the result.
+// Runs the core until it needs the player, then shows the result. Summons, activations and resolutions
+// are sent as they happen, so the page can show each one before the duel moves on.
 function advance() {
   prompt = null;
   respond = null;
@@ -453,6 +581,31 @@ function advance() {
         case OcgMessageType.LPUPDATE:
           lp[message.player] = message.lp;
           break;
+        case OcgMessageType.SUMMONING:
+        case OcgMessageType.SPSUMMONING:
+        case OcgMessageType.FLIPSUMMONING:
+          events.push({ kind: "summon", code: message.code, name: nameOf(message.code), controller: message.controller, location: message.location, sequence: message.sequence });
+          break;
+        case OcgMessageType.CHAINING: {
+          const ref = { controller: message.controller, location: message.location, sequence: message.sequence };
+          chain[message.chain_size - 1] = { ...ref, code: message.code };
+          events.push({ kind: "activate", code: message.code, name: nameOf(message.code), ...ref, chain: message.chain_size, text: describe(message.description) });
+          break;
+        }
+        case OcgMessageType.CHAIN_SOLVING: {
+          // a hand trap has already gone to the GY as its cost; the card is still named from its activation
+          const link = chain[message.chain_size - 1];
+          if (link) events.push({ kind: "resolve", ...link, name: nameOf(link.code), chain: message.chain_size });
+          break;
+        }
+        case OcgMessageType.CHAIN_END:
+          chain = [];
+          break;
+        case OcgMessageType.MOVE:
+          // a card found in the deck and added to the player's hand (searches)
+          if (message.from.location === OcgLocation.DECK && message.to.location === OcgLocation.HAND && message.to.controller === 0 && message.card)
+            events.push({ kind: "added", code: message.card, name: nameOf(message.card), controller: 0, location: OcgLocation.HAND, sequence: message.to.sequence });
+          break;
         case OcgMessageType.RETRY:
           send({ type: "error", text: "The duel core did not accept that choice." });
           break;
@@ -461,17 +614,24 @@ function advance() {
       }
     }
     if (status === OcgProcessResult.END) ended = true;
+    // show this moment before anything else happens
+    if (events.length && !prompt) sendView();
   }
   sendView();
 }
 
-function start(options: StartOptions) {
+async function start(options: StartOptions) {
+  const missing = await prefetchScripts([...options.main, ...options.extra].map(knownCode));
+  if (missing.length)
+    send({ type: "error", text: `Could not download the card scripts for ${missing.map(nameOf).join(", ")}. Check the connection and tap New hand.` });
   if (duel) core.destroyDuel(duel);
   lp = [8000, 8000];
   turn = 0;
   turnPlayer = 0;
   phase = "";
   ended = false;
+  events = [];
+  chain = [];
   duel = core.createDuel({
     // the page shuffles the deck itself, so the cards asked for can be put on top
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
@@ -481,7 +641,7 @@ function start(options: StartOptions) {
     cardReader: (code) => cards.get(code) ?? null,
     scriptReader: (name) => readScript(name) ?? "",
     errorHandler: (_type, text) => {
-      if (!/not found/.test(text)) send({ type: "error", text });
+      if (!/not found/.test(text)) send({ type: "error", text: `Card script error: ${text}` });
     },
   });
   if (!duel) throw new Error("The duel could not be created");
@@ -524,7 +684,7 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       core = await createCore({ sync: true, wasmBinary });
       send({ type: "ready", cards: cards.size });
     } else if (message.type === "start") {
-      start(message);
+      await start(message);
     } else if (message.type === "answer") {
       const response = duel && respond ? respond(message.picks) : null;
       if (response) {

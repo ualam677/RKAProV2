@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CardArt } from "./CardArt";
-import { LOCATION, POSITION, TYPE, type CardRef, type CardText, type CardView, type Choice, type DuelView, type PlayerView } from "./engine/protocol";
+import { LOCATION, POSITION, TYPE, type CardRef, type CardText, type CardView, type Choice, type DuelEvent, type DuelView, type PlayerView } from "./engine/protocol";
 
 interface Props {
   view: DuelView;
@@ -9,7 +9,13 @@ interface Props {
   answer: (picks: number[] | null) => void;
   restart: () => void;
   leave: () => void;
+  // jump past the animations still waiting to play
+  skip: () => void;
 }
+
+// How long each moment stays on screen, close to EDOPro's own pacing.
+const CUE_MS: Record<DuelEvent["kind"], number> = { activate: 650, resolve: 420, summon: 320, added: 520 };
+export const cueTime = (events: DuelEvent[]) => events.reduce((longest, event) => Math.max(longest, CUE_MS[event.kind]), 0);
 
 type Pile = "grave" | "banished" | "extra";
 type Sheet = { kind: "card"; card: CardView } | { kind: "pile"; controller: number; pile: Pile } | null;
@@ -38,6 +44,14 @@ function frame(card: { code: number; type: number }): string {
   if (card.type & TYPE.SYNCHRO) return "synchro";
   if (card.type & TYPE.FUSION) return "fusion";
   return "monster";
+}
+
+// ★8 for a Level, ☆4 for a Rank, L3 for a Link Rating, as on the card itself
+function levelLabel(card: { type: number; level: number }): string {
+  const value = card.level & 0xff;
+  if (card.type & TYPE.LINK) return `L${value}`;
+  if (card.type & TYPE.XYZ) return `☆${value}`;
+  return `★${value}`;
 }
 
 function useMedia(query: string) {
@@ -126,6 +140,7 @@ function CardTile({ card, glow, picked, focused, className, style, onTap, onHold
           {(card.type & TYPE.LINK) === 0 && `/${card.defense}`}
         </span>
       )}
+      {!hidden && (card.type & TYPE.MONSTER) !== 0 && card.location === LOCATION.MZONE && <span className="tile-level">{levelLabel(card)}</span>}
       {card.materials > 0 && <span className="tile-badge">{card.materials}</span>}
       {caption && <span className="tile-caption">{caption}</span>}
     </button>
@@ -181,7 +196,59 @@ function CardInfo({ card, text, children }: { card: CardView | null; text?: Card
 
 const PHASE_SHORT: Record<string, string> = { Draw: "DP", Standby: "SP", "Main 1": "M1", Battle: "BP", Damage: "BP", "Main 2": "M2", End: "EP" };
 
-export function Duel({ view, texts, requestText, answer, restart, leave }: Props) {
+// What happened just now, drawn over the board: the activated card in the middle, a resolving chain link,
+// a burst on a summoned monster's zone, a card added to the hand.
+function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
+  const activate = events.filter((event) => event.kind === "activate").pop();
+  const resolve = events.filter((event) => event.kind === "resolve").pop();
+  const added = events.filter((event) => event.kind === "added");
+  // the last view of a play keeps its events, so the cue hides itself once it has been seen
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    const hide = window.setTimeout(() => setShown(false), cueTime(events));
+    return () => window.clearTimeout(hide);
+  }, [events]);
+  if (!shown || (!activate && !resolve && !added.length)) return null;
+  return (
+    <div className="cues" onClick={(event) => (event.stopPropagation(), onSkip())}>
+      {activate && (
+        <div className="cue-activate" key={`a${activate.chain}-${activate.code}`}>
+          <span className="cue-chain">Chain {activate.chain}</span>
+          <div className="cue-card">
+            <CardArt code={activate.code} />
+            <span className="cue-card-name">{activate.name}</span>
+          </div>
+          <span className="cue-label">{activate.text || "Activate"}</span>
+        </div>
+      )}
+      {!activate && resolve && (
+        <div className="cue-resolve" key={`r${resolve.chain}-${resolve.code}`}>
+          <div className="cue-thumb">
+            <CardArt code={resolve.code} />
+          </div>
+          <span>
+            <b>Chain {resolve.chain}</b> resolving
+            <br />
+            {resolve.name}
+          </span>
+        </div>
+      )}
+      {added.length > 0 && (
+        <div className="cue-added">
+          {added.map((card, index) => (
+            <div className="cue-thumb" key={index}>
+              <CardArt code={card.code} />
+              <span className="cue-card-name">{card.name}</span>
+            </div>
+          ))}
+          <span className="cue-label">Added to hand</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Duel({ view, texts, requestText, answer, restart, leave, skip }: Props) {
   const wide = useMedia(WIDE_QUERY);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [info, setInfo] = useState<CardView | null>(null);
@@ -206,7 +273,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
   const zonePrompt = prompt?.kind === "multi" && choices.length > 0 && choices.every((choice) => choice.zone);
   const cardPrompt = !!prompt && !idle && choices.length > 0 && choices.every((choice) => choice.card);
   // how a prompt is shown: on the board itself, as a grid of cards, or as a small dialog of buttons
-  const promptMode: "none" | "board" | "grid" | "dialog" = !prompt || idle ? "none" : zonePrompt || (cardPrompt && choices.every((choice) => onBoard(choice.card!))) ? "board" : cardPrompt ? "grid" : "dialog";
+  const promptMode: "none" | "board" | "grid" | "dialog" | "announce" = !prompt || idle ? "none" : prompt.kind === "announce" ? "announce" : zonePrompt || (cardPrompt && choices.every((choice) => onBoard(choice.card!))) ? "board" : cardPrompt ? "grid" : "dialog";
 
   const actionsFor = (card: CardRef) => choices.map((choice, index) => ({ choice, index })).filter(({ choice }) => choice.card && same(choice.card, card));
   const hasAction = (card: CardRef) => !!prompt && !zonePrompt && choices.some((choice) => choice.card && same(choice.card, card));
@@ -269,9 +336,10 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
     const card = (location === LOCATION.MZONE ? player.monsters : player.spells)[sequence] ?? null;
     const ref = { controller, location, sequence };
     const index = zoneIndex(ref);
+    const cue = view.events.find((event) => same(event, ref) && event.kind !== "added");
     return (
       <div
-        className={`zone ${extraClass} ${index >= 0 ? "open" : ""} ${picks.includes(index) ? "picked" : ""}`}
+        className={`zone ${extraClass} ${index >= 0 ? "open" : ""} ${picks.includes(index) ? "picked" : ""} ${cue ? `cue-${cue.kind}` : ""}`}
         key={`${controller}-${location}-${sequence}`}
         onClick={index >= 0 && !card ? (event) => (event.stopPropagation(), togglePick(index)) : undefined}
       >
@@ -373,7 +441,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
         </span>
         {promptButtons}
       </div>
-    ) : (promptMode === "grid" || promptMode === "dialog") && promptHidden ? (
+    ) : (promptMode === "grid" || promptMode === "dialog" || promptMode === "announce") && promptHidden ? (
       <div className="prompt-bar" onClick={(event) => event.stopPropagation()}>
         <span className="prompt-title">{prompt!.title}</span>
         <button className="button primary" onClick={() => setPromptHidden(false)}>
@@ -418,6 +486,39 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
         })}
       </div>
       <div className="prompt-actions">{promptButtons}</div>
+    </div>
+  );
+
+  // declaring a card name: type to narrow the list, tap a name
+  const [query, setQuery] = useState("");
+  useEffect(() => setQuery(""), [prompt]);
+  const announceList = useMemo(() => {
+    if (prompt?.kind !== "announce") return [];
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return prompt.options
+      .map((option, index) => ({ ...option, index }))
+      .filter((option) => words.every((word) => option.name.toLowerCase().includes(word)))
+      .slice(0, 80);
+  }, [prompt, query]);
+  const promptAnnounce = promptMode === "announce" && !promptHidden && prompt?.kind === "announce" && (
+    <div className="sheet prompt-sheet" onClick={(event) => event.stopPropagation()}>
+      <div className="sheet-title">
+        <h2>{prompt.title}</h2>
+        <button className="button ghost small" onClick={() => setPromptHidden(true)}>
+          View field
+        </button>
+      </div>
+      {prompt.options.length > 12 && (
+        <input className="search" type="search" placeholder={`Search ${prompt.options.length.toLocaleString()} cards`} value={query} onChange={(event) => setQuery(event.target.value)} />
+      )}
+      <div className="list">
+        {announceList.map((option) => (
+          <button className="list-row" key={option.code} onClick={() => answer([option.index])}>
+            {option.name}
+          </button>
+        ))}
+        {announceList.length === 0 && <p className="muted">No card matches.</p>}
+      </div>
     </div>
   );
 
@@ -651,7 +752,10 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
         </>
       )}
 
+      {view.events.length > 0 && <Cues key={view.events.map((event) => event.kind + event.code).join()} events={view.events} onSkip={skip} />}
+
       {promptGrid}
+      {promptAnnounce}
 
       {sheetBody && (
         <>

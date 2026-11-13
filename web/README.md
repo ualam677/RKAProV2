@@ -18,6 +18,14 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 - Prompts: when every card in a prompt is on the field or in the hand (chain with a hand trap, tribute, targets) the cards
   glow where they are and a slim bar above the hand asks the question; other card prompts (searches, GY picks) open a
   grid of cards; yes/no, options and positions are a small dialog. Grids and dialogs have "View field" to peek.
+- Moments shown like EDOPro, before play goes on: an activated card pops up in the middle with its chain link,
+  "Chain N resolving" before an effect happens, a burst on a summoned monster's zone, searched cards flash up as
+  "Added to hand". The worker sends a view at each of these; the page holds each for 320-650 ms (tap to skip).
+- Field monsters show Level (★), Rank (☆) or Link rating (L); defense position is the whole card turned sideways.
+- Declaring a card name (Crossout Designator, Prohibition...): the core's opcode filter is evaluated per card like
+  EDOPro's client, then a searchable list.
+- A deck's scripts are downloaded together before the duel, with retries; a failed download is retried later instead
+  of being remembered as "no script" (that was the "attempt to call an error function" error on the phone).
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
   hand size and chosen cards are remembered on the device.
 
@@ -27,7 +35,7 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 2. Deck Optimiser: card roles, exact odds, routes learned from saved replays, then end-board suggestion from a random
    hand (beam search over the core, scored against learned end boards).
 3. Save states (seed + response log), replays, takeover.
-4. Missing prompts: SELECT_SUM, SELECT_COUNTER, ANNOUNCE_RACE / ATTRIB / CARD.
+4. Missing prompts: SELECT_SUM, SELECT_COUNTER, ANNOUNCE_RACE / ATTRIB.
 5. Omega deck folder link with write-back, Google Drive sync.
 6. Replay to mp4 / GIF.
 

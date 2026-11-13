@@ -1,7 +1,7 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { parseYdk, shuffled, type Deck } from "./deck";
-import { Duel } from "./Duel";
+import { Duel, cueTime } from "./Duel";
 import { CardArt } from "./CardArt";
 import type { CardText, DuelView, FromWorker, ToWorker } from "./engine/protocol";
 import "./style.css";
@@ -45,6 +45,38 @@ function App() {
 
   const post = (message: ToWorker) => worker.current?.postMessage(message);
 
+  // Views sent mid-play are shown one after another, each held only as long as its animation;
+  // a tap skips straight to the newest one.
+  const queue = useRef<DuelView[]>([]);
+  const timer = useRef(0);
+  const playNext = useCallback(() => {
+    timer.current = 0;
+    const next = queue.current.shift();
+    if (!next) return;
+    setView(next);
+    // a view with an animation stays up for it, even if the next view has not arrived yet
+    const hold = cueTime(next.events);
+    if (hold) timer.current = window.setTimeout(playNext, hold);
+    else if (queue.current.length) playNext();
+  }, []);
+  const receive = useCallback(
+    (next: DuelView) => {
+      queue.current.push(next);
+      if (!timer.current) playNext();
+    },
+    [playNext],
+  );
+  const skip = useCallback(() => {
+    window.clearTimeout(timer.current);
+    timer.current = 0;
+    const last = queue.current.pop();
+    queue.current = [];
+    setView((shown) => {
+      const latest = last ?? shown;
+      return latest && { ...latest, events: [] };
+    });
+  }, []);
+
   useEffect(() => {
     const instance = new Worker(new URL("./engine/worker.ts", import.meta.url), { type: "module" });
     worker.current = instance;
@@ -54,7 +86,7 @@ function App() {
       else if (message.type === "ready") {
         setReady(true);
         setStatus(`${message.cards.toLocaleString()} cards loaded`);
-      } else if (message.type === "view") setView(message.view);
+      } else if (message.type === "view") receive(message.view);
       else if (message.type === "text") setTexts((known) => new Map(known).set(message.card.code, message.card));
       else if (message.type === "error") setError(message.text);
     };
@@ -63,6 +95,13 @@ function App() {
   }, []);
 
   useEffect(() => save({ deckText, deckName, hand, chosen }), [deckText, deckName, hand, chosen]);
+
+  // errors clear themselves so they never sit over the field for long
+  useEffect(() => {
+    if (!error || !view) return;
+    const clear = window.setTimeout(() => setError(""), 6000);
+    return () => window.clearTimeout(clear);
+  }, [error, view]);
 
   // card names for the opening hand picker come from the worker once the cards are loaded
   const unique = useMemo(() => [...new Set(deck?.main ?? [])], [deck]);
@@ -91,6 +130,10 @@ function App() {
   const start = useCallback(() => {
     if (!deck) return;
     setError("");
+    // whatever was still being shown from the last hand is dropped
+    window.clearTimeout(timer.current);
+    timer.current = 0;
+    queue.current = [];
     post({ type: "start", main: shuffled(deck.main), extra: deck.extra, hand, chosen, seed: Math.floor(Math.random() * 2 ** 31) });
   }, [deck, hand, chosen]);
 
@@ -109,7 +152,7 @@ function App() {
             {error}
           </p>
         )}
-        <Duel view={view} texts={texts} requestText={requestText} answer={(picks) => post({ type: "answer", picks })} restart={start} leave={() => setView(null)} />
+        <Duel view={view} texts={texts} requestText={requestText} answer={(picks) => post({ type: "answer", picks })} restart={start} leave={() => (skip(), setView(null))} skip={skip} />
       </>
     );
   }

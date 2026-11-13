@@ -41,9 +41,22 @@ export type Prompt =
   // pick exactly one (index into choices), or null when cancel is allowed
   | { kind: "choice"; idle: boolean; title: string; choices: Choice[]; cancel: string | null }
   // pick between min and max
-  | { kind: "multi"; title: string; choices: Choice[]; min: number; max: number; cancel: boolean };
+  | { kind: "multi"; title: string; choices: Choice[]; min: number; max: number; cancel: boolean }
+  // declare a card name (Crossout Designator, Prohibition); picks[0] is an index into options
+  | { kind: "announce"; title: string; choices: Choice[]; options: { code: number; name: string }[] };
+
+// Moments shown on screen before play goes on, like EDOPro's animations.
+export interface DuelEvent extends CardRef {
+  kind: "summon" | "activate" | "resolve" | "added";
+  code: number;
+  name: string;
+  chain?: number; // chain link number, for activate and resolve
+  text?: string; // the effect being activated
+}
 
 export interface DuelView {
+  // what just happened; views sent mid-play carry events and no prompt
+  events: DuelEvent[];
   turn: number;
   turnPlayer: number;
   phase: string;
