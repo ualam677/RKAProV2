@@ -85,6 +85,13 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   Your own hand traps are only held back on your own turn.
 - The route search learns your picks too, by what they were for (the core's "add to your hand" vs "send to the GY"
   hint), so a working Orbital 7 line that adds Galaxy Summoner and sends Photon Emperor is followed.
+- Phases as EDOPro shows them: a DP SP M1 BP M2 EP bar lit in your colour or the opponent's, and a banner at every
+  phase change on both turns. Chances to respond say what to ("Respond to Seventh Tachyon?", "Respond to the summon
+  of Galaxy Wizard?", "Opponent's End Phase: activate an effect?").
+- Save / load states (duel menu): the duel's start plus every choice so far, kept per deck (20); loading replays it
+  choice by choice, opponent included, and you play on from there.
+- Summon buttons say how (Xyz / Synchro / Link / Fusion Summon) and which card when several share a spot; the same card
+  offered twice is "(another way)".
 - "Ignore hand traps" now holds back only known hand traps (src/engine/handtraps.ts); other effects from the hand,
   like Galaxy War Drake summoning itself, stay available in tests and in the search.
   Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it

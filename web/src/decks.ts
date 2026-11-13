@@ -37,6 +37,15 @@ export interface SavedDeck extends Deck {
   routes?: Record<string, SavedRoute>;
   // a full board: at least this many interruptions (default 3)
   fullAt?: number;
+  // save states from the duel menu: the duel's start and every choice up to that moment
+  saves?: SavedState[];
+}
+
+export interface SavedState {
+  id: string;
+  name: string;
+  date: number;
+  record: TestRecord;
 }
 
 export interface SavedRoute {

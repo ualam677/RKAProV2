@@ -325,6 +325,19 @@ function App() {
     setWorked(current.worked);
     keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board });
   };
+  // save states: where the duel on screen is now, kept with the deck; loading one rebuilds it choice by choice
+  const saveState = () => {
+    const current = lastRecord.current;
+    const target = test.current && decks.find((one) => one.id === test.current!.deckId);
+    if (!current || !target || !view) return;
+    const state = { id: newId(), date: Date.now(), name: `Turn ${view.turn} · ${view.phase} · ${current.picks.length} choice${current.picks.length === 1 ? "" : "s"}`, record: current };
+    changeDeck({ ...target, saves: [state, ...(target.saves ?? [])].slice(0, 20) });
+    return state.name;
+  };
+  const loadState = (id: string) => {
+    const state = (test.current ? decks.find((one) => one.id === test.current!.deckId) : deck)?.saves?.find((one) => one.id === id);
+    if (state) watch({ ...state.record, id: newId(), date: Date.now() }, state.record.picks.length);
+  };
   const watch = (saved: SavedTest, from = 0) => {
     setError("");
     newTest(saved.testOf, from > 0 ? from : saved.picks.length);
@@ -335,6 +348,7 @@ function App() {
     // on your turn, so your recorded choices still play the same and you can go on into their turn
     const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false };
     // "from": jump straight to that choice and carry on from there yourself; otherwise watch it play
+    lastRecord.current = null;
     if (from > 0) post({ type: "jump", ...options, picks: saved.picks.slice(0, from) });
     else {
       setReplay({ picks: saved.picks, at: 0 });
@@ -369,6 +383,7 @@ function App() {
     window.clearTimeout(timer.current);
     timer.current = 0;
     queue.current = [];
+    lastRecord.current = null;
     post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...opponentDeck(), seed: Math.floor(Math.random() * 2 ** 31) });
   }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, decks]);
 
@@ -405,6 +420,9 @@ function App() {
           worked={worked}
           onWorked={record && !replay ? markWorked : undefined}
           replaying={replay ? { at: replay.at, of: replay.picks.length, stop: () => (setReplay(null), newTest(test.current?.testOf, replay.at)) } : null}
+          states={(decks.find((one) => one.id === test.current?.deckId) ?? deck)?.saves ?? []}
+          onSaveState={saveState}
+          onLoadState={loadState}
         />
       </>
     );

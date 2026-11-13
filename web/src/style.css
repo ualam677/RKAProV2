@@ -462,3 +462,16 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-fullat { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .opt-fullat .button { min-height: 30px; width: 30px; padding: 0; }
 .select { width: 100%; min-height: 44px; padding: 0 10px; border: 1px solid var(--line-bright); border-radius: var(--radius); background: #050c1a; color: var(--text); font: inherit; font-size: 15px; }
+
+/* ---- phases, as EDOPro shows them: the bar, and a banner when one begins ---- */
+.phase-track { display: flex; gap: 2px; }
+.phase-track span { min-width: 24px; padding: 2px 3px; border: 1px solid var(--line); border-radius: 4px; background: rgba(5, 12, 26, 0.85); color: var(--muted); font-size: 10px; font-weight: 700; text-align: center; }
+.phase-track.mine span.on { border-color: #7ab4ff; background: linear-gradient(180deg, #3b8bff, #1a56c0); color: #fff; }
+.phase-track.theirs span.on { border-color: #ff9a8a; background: linear-gradient(180deg, #e25a4a, #9c2a20); color: #fff; }
+.phase-dock { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.cue-phase { padding: 8px 18px; border-radius: var(--radius); font-size: 16px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; animation: cue-in 120ms ease-out; box-shadow: 0 0 18px rgba(0, 0, 0, 0.6); }
+.cue-phase.mine { background: linear-gradient(180deg, #3b8bff, #1a56c0); border: 1px solid #7ab4ff; }
+.cue-phase.theirs { background: linear-gradient(180deg, #e25a4a, #9c2a20); border: 1px solid #ff9a8a; }
+.state-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; text-align: left; }
+.state-row small { color: var(--muted); }
+.saved-note { margin: 0; color: #7fd18b; }

@@ -477,6 +477,7 @@ function buildPrompt(message: OcgMessage): boolean {
   aiActed = false;
   switch (message.type) {
     case OcgMessageType.SELECT_IDLECMD: {
+      lastSummon = 0;
       // nobody is sitting on the other side yet: its turn ends at once
       if (message.player !== 0) return answer({ type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null });
       const choices: Choice[] = [];
@@ -487,7 +488,21 @@ function buildPrompt(message: OcgMessage): boolean {
           actions.push([action, index]);
         });
       add(system(1151, "Normal Summon"), SelectIdleCMDAction.SELECT_SUMMON, message.summons);
-      add(system(1152, "Special Summon"), SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, message.special_summons);
+      // say how: an Extra Deck monster is Xyz / Synchro / Link / Fusion Summoned; the same card offered twice is a
+      // second way to summon it (another procedure), so the buttons are never two identical "Special Summon"s
+      const seenSummons = new Map<string, number>();
+      message.special_summons.forEach((card, index) => {
+        const type = cards.get(card.code)?.type ?? 0;
+        const how =
+          card.location === OcgLocation.EXTRA
+            ? type & 0x800000 ? "Xyz Summon" : type & 0x2000 ? "Synchro Summon" : type & 0x4000000 ? "Link Summon" : type & 0x40 ? "Fusion Summon" : system(1152, "Special Summon")
+            : system(1152, "Special Summon");
+        const key = `${card.location}:${card.sequence}:${card.code}`;
+        const count = (seenSummons.get(key) ?? 0) + 1;
+        seenSummons.set(key, count);
+        choices.push(cardChoice(count > 1 ? `${how} (another way${count > 2 ? ` ${count - 1}` : ""})` : how, card));
+        actions.push([SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, index]);
+      });
       add(system(1155, "Change position"), SelectIdleCMDAction.SELECT_POS_CHANGE, message.pos_changes);
       add(system(1153, "Set"), SelectIdleCMDAction.SELECT_MONSTER_SET, message.monster_sets);
       add(system(1153, "Set"), SelectIdleCMDAction.SELECT_SPELL_SET, message.spell_sets);
@@ -569,7 +584,12 @@ function buildPrompt(message: OcgMessage): boolean {
       if (message.player !== 0) return answer({ type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null });
       const list = offered.length ? offered : message.selects.map((card, index) => ({ card, index }));
       return one(
-        "Chain an effect?",
+        // what you would be responding to, and when
+        chain.length
+          ? `Respond to ${nameOf(chain[chain.length - 1].code)}?`
+          : lastSummon
+            ? `Respond to the summon of ${nameOf(lastSummon)}?`
+            : `${turnPlayer === 0 ? "Your" : "Opponent's"} ${phaseTitle(phase)}: activate an effect?`,
         list.map(({ card }) => {
           const text = describe(card.description);
           return cardChoice(text ? `${nameOf(card.code)}: ${text}` : nameOf(card.code), card);
@@ -819,6 +839,10 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
 
 // the test being played, as it will be saved; `quiet` holds the views back while a recorded test is fast-forwarded
 let record: TestRecord | null = null;
+// "Main 1" -> "Main Phase 1", "Battle" -> "Battle Phase"
+const phaseTitle = (name: string) => (name.startsWith("Main") ? `Main Phase ${name.slice(5)}` : name ? `${name} Phase` : "turn");
+// the monster summoned last, until the next action: a chance to respond right after it is about that summon
+let lastSummon = 0;
 // the card whose effect is resolving, and the cards last picked (an option is often about them)
 let solvingCode = 0;
 let lastPicked: number[] = [];
@@ -873,6 +897,10 @@ function advance() {
           break;
         case OcgMessageType.NEW_PHASE:
           phase = PHASES[message.phase] ?? "";
+          lastSummon = 0;
+          // every phase is shown, yours and the opponent's, so you know when you are being asked to respond
+          if (opponentOn || turnPlayer === 0)
+            events.push({ kind: "phase", code: 0, name: "", controller: turnPlayer, location: 0, sequence: 0, text: `${turnPlayer === 0 ? "Your" : "Opponent's"} ${phaseTitle(phase)}` });
           break;
         case OcgMessageType.DAMAGE:
         case OcgMessageType.PAY_LPCOST:
@@ -887,6 +915,7 @@ function advance() {
         case OcgMessageType.SUMMONING:
         case OcgMessageType.SPSUMMONING:
         case OcgMessageType.FLIPSUMMONING:
+          lastSummon = message.code;
           events.push({ kind: "summon", code: message.code, name: nameOf(message.code), controller: message.controller, location: message.location, sequence: message.sequence });
           break;
         case OcgMessageType.CHAINING: {
@@ -960,6 +989,7 @@ function advance() {
           chain = [];
           solvingCode = 0;
           lastPicked = [];
+          lastSummon = 0;
           break;
         case OcgMessageType.MOVE:
           // a card found in the deck and added to the player's hand (searches)
@@ -1051,6 +1081,8 @@ async function start(options: StartOptions) {
   record = { options: { ...options }, picks: [], steps: [], startHand: [] };
   advance();
   record.startHand = cardsIn(0, OcgLocation.HAND).flatMap((card) => (card ? [card.code] : []));
+  // the page keeps the duel's start straight away, so a state can be saved before the first choice
+  if (!quiet) send({ type: "record", record });
 }
 
 // Makes a choice on the prompt on screen, records it, and plays on. False if the core's prompt doesn't take it.

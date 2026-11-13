@@ -93,7 +93,7 @@ export function sumSoFar(rule: SumRule, picks: number[]): number {
 
 // Moments shown on screen before play goes on, like EDOPro's animations.
 export interface DuelEvent extends CardRef {
-  kind: "summon" | "activate" | "resolve" | "added" | "draw" | "negated" | "reveal" | "coin" | "dice" | "attack" | "message";
+  kind: "summon" | "activate" | "resolve" | "added" | "draw" | "negated" | "reveal" | "coin" | "dice" | "attack" | "message" | "phase";
   code: number;
   name: string;
   chain?: number; // chain link number, for activate and resolve

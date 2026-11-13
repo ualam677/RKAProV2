@@ -16,6 +16,10 @@ interface Props {
   onWorked?: () => void;
   // a saved test playing back: where it is, and stopping it to play on yourself
   replaying: { at: number; of: number; stop: () => void } | null;
+  // save states: keep this moment, or go back to one kept earlier
+  states: { id: string; name: string; date: number }[];
+  onSaveState: () => string | undefined;
+  onLoadState: (id: string) => void;
 }
 
 // How long each moment stays on screen, close to EDOPro's own pacing.
@@ -31,6 +35,7 @@ const CUE_MS: Record<DuelEvent["kind"], number> = {
   dice: 900,
   attack: 380,
   message: 1400,
+  phase: 550,
 };
 export const cueTime = (events: DuelEvent[]) => events.reduce((longest, event) => Math.max(longest, CUE_MS[event.kind]), 0);
 
@@ -221,6 +226,21 @@ function CardInfo({ card, text, materials, children }: { card: CardView | null; 
 
 const PHASE_SHORT: Record<string, string> = { Draw: "DP", Standby: "SP", "Main 1": "M1", Battle: "BP", Damage: "BP", "Main 2": "M2", End: "EP" };
 
+// DP SP M1 BP M2 EP, the current one lit, in your colour or the opponent's (EDOPro's phase bar)
+const TRACK = ["Draw", "Standby", "Main 1", "Battle", "Main 2", "End"];
+function PhaseTrack({ phase, mine }: { phase: string; mine: boolean }) {
+  const now = phase === "Damage" ? "Battle" : phase;
+  return (
+    <div className={`phase-track ${mine ? "mine" : "theirs"}`} aria-label={`${mine ? "Your" : "Opponent's"} ${phase} Phase`}>
+      {TRACK.map((name) => (
+        <span key={name} className={name === now ? "on" : ""}>
+          {PHASE_SHORT[name]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // What happened just now, drawn over the board: the activated card in the middle, a resolving chain link,
 // a burst on a summoned monster's zone, a card added to the hand.
 function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
@@ -231,15 +251,22 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   const revealed = events.filter((event) => event.kind === "reveal");
   // coins, dice and the core's messages are a line of text
   const notes = events.filter((event) => event.kind === "coin" || event.kind === "dice" || event.kind === "message");
+  // a new phase, yours or the opponent's, as EDOPro shows it
+  const phaseCue = events.filter((event) => event.kind === "phase").pop();
   // the last view of a play keeps its events, so the cue hides itself once it has been seen
   const [shown, setShown] = useState(true);
   useEffect(() => {
     const hide = window.setTimeout(() => setShown(false), cueTime(events));
     return () => window.clearTimeout(hide);
   }, [events]);
-  if (!shown || (!activate && !resolve && !negated && !added.length && !revealed.length && !notes.length)) return null;
+  if (!shown || (!activate && !resolve && !negated && !added.length && !revealed.length && !notes.length && !phaseCue)) return null;
   return (
     <div className="cues" onClick={(event) => (event.stopPropagation(), onSkip())}>
+      {phaseCue && !activate && (
+        <div className={`cue-phase ${phaseCue.controller === 0 ? "mine" : "theirs"}`} key={`p${phaseCue.text}`}>
+          {phaseCue.text}
+        </div>
+      )}
       {activate && (
         <div className="cue-activate" key={`a${activate.chain}-${activate.code}`}>
           <span className="cue-chain">Chain {activate.chain}</span>
@@ -302,7 +329,9 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   );
 }
 
-export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying }: Props) {
+export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying, states, onSaveState, onLoadState }: Props) {
+  const [stateList, setStateList] = useState(false);
+  const [savedNote, setSavedNote] = useState("");
   const wide = useMedia(WIDE_QUERY);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [info, setInfo] = useState<CardView | null>(null);
@@ -749,6 +778,30 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
 
   const menu = (
     <>
+      <button
+        className="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          const name = onSaveState();
+          if (name) setSavedNote(`Saved: ${name}`);
+          window.setTimeout(() => setSavedNote(""), 1800);
+        }}
+      >
+        Save state
+      </button>
+      {states.length > 0 && (
+        <button className={`button ${stateList ? "on" : ""}`} onClick={(event) => (event.stopPropagation(), setStateList(!stateList))}>
+          Load state ({states.length})
+        </button>
+      )}
+      {stateList &&
+        states.map((state) => (
+          <button key={state.id} className="button small ghost state-row" onClick={() => (setStateList(false), onLoadState(state.id))}>
+            {state.name}
+            <small>{new Date(state.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
+          </button>
+        ))}
+      {savedNote && <p className="muted saved-note">{savedNote}</p>}
       {onWorked && (
         <button className={`button ${worked ? "on" : ""}`} onClick={onWorked}>
           {worked ? "✓ Worked (tap to undo)" : "✓ This worked"}
@@ -765,13 +818,13 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
 
   const phaseControl = wide ? (
     <div className="phase-strip" onClick={(event) => event.stopPropagation()}>
-      <span className="phase-now">
-        Turn {view.turn} · {view.phase}
-      </span>
+      <span className="phase-now">Turn {view.turn}</span>
+      <PhaseTrack phase={view.phase} mine={view.turnPlayer === 0} />
       {phaseChoices.map(({ choice, index }) => pickButton(choice, index, "button primary"))}
     </div>
   ) : (
     <div className="phase-dock">
+      <PhaseTrack phase={view.phase} mine={view.turnPlayer === 0} />
       <button
         className={`phase-button ${phaseChoices.length ? "ready" : ""}`}
         onClick={(event) => {
@@ -895,7 +948,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
         <>
           <div className="scrim" onClick={(event) => (event.stopPropagation(), setFocus(null))} />
           <div className="float-actions" ref={floatRef} style={floatPos ? { left: floatPos.left, top: floatPos.top } : { visibility: "hidden" }}>
-            {focusActions.map(({ choice, index }) => pickButton(choice, index, "float-action"))}
+            {focusActions.map(({ choice, index }) => {
+              // two actions with the same words (a pile of cards): say which card each is for
+              const twin = focusActions.some((other) => other.index !== index && other.choice.label === choice.label);
+              return pickButton(twin && choice.card ? { ...choice, label: `${choice.label}: ${choice.card.name}` } : choice, index, "float-action");
+            })}
             {!wide && (
               <button className="float-action info" onClick={(event) => (event.stopPropagation(), showDetail(focus.card))}>
                 Card text
