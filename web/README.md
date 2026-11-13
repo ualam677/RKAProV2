@@ -9,11 +9,14 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 ## Done
 - Engine in a worker, .ydk loading (Omega alternate-art ids accepted), release and pre-release card sets.
 - Playable duel screen: field, hand, piles, prompts as bottom sheets, card text, card pictures.
+- Phone layout like Duel Links with the TCG field: hand fanned along the bottom edge, tap a card for actions floating
+  over it, tap and hold any card (hand, field, pile list) for its text, phase button on the right edge under the field,
+  LP bars for the opponent at the top and you at the bottom, piles and field zones in side columns
+  (yours: Field + Extra on the left, GY + Deck on the right; the opponent's mirrored), New hand / Exit in the ☰ menu.
 
 ## Next, in order
-1. Duel Links layout for phones: 3 monster + 3 spell columns are NOT wanted (TCG rules, 5 columns stay); copy the feel:
-   large hand fan at the bottom, tap-and-hold card detail, phase button on the right edge, LP bars top and bottom,
-   action buttons floating over the tapped card instead of a sheet. Desktop layout = EDOPro's.
+1. Desktop layout = EDOPro's (the phone layout is used everywhere for now). Effect prompts that name cards
+   ("Chain an effect?") still open a bottom sheet over the hand.
 2. Hand test options: hand size 1-6, chosen opening hand.
 3. Opponent: hand traps (easy / smart), then plays its own turn with board breakers
    (Veiler / Imperm on the player's turn, Imperm at the start of its turn, Lightning Storm, Cosmic Cyclone-style cards).
@@ -58,3 +61,4 @@ Things that cost time
 
 Not yet confirmed by the owner
 - The cropping fix for field cards (cards keep card proportions; defense position is the card turned sideways).
+- The Duel Links-style phone layout (checked here on Pixel 7 and iPhone SE sizes, without card pictures).
