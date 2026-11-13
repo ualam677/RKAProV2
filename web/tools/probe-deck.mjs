@@ -101,7 +101,16 @@ if (process.env.ROUTE) {
   const hand = process.env.ROUTE.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
   const targets = process.env.TARGET ? [process.env.TARGET.split(",").map((n) => [...names].find(([, name]) => name === n)[0])] : [];
   const t = performance.now();
-  const steps = routeSearch(env, hand, rest(hand), extra, { targets, budget: Number(process.env.BUDGET ?? 600) });
+  // PRIOR_FROM: search that hand first and use its line as guidance (as the app does with other starts' lines)
+  let prior = new Set();
+  if (process.env.PRIOR_FROM) {
+    const other = process.env.PRIOR_FROM.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+    const g = routeSearch(env, other, rest(other), extra, { targets, budget: 2500 });
+    let n; while (!(n = g.next()).done);
+    prior = new Set(n.value.keys);
+    console.log("PRIOR", n.value.interruptions.length, "interruptions from", process.env.PRIOR_FROM.split(",")[0], n.value.keys.join(" "));
+  }
+  const steps = routeSearch(env, hand, rest(hand), extra, { targets, prior, budget: Number(process.env.BUDGET ?? 2500) });
   let next;
   while (!(next = steps.next()).done);
   const r = next.value;

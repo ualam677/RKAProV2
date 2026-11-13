@@ -144,6 +144,8 @@ export interface StartOptions {
   opponent?: { main: number[]; extra: number[] };
   // it chains its hand traps against you on your turn
   opponentHandTraps?: boolean;
+  // the opponent takes the first turn: yours passes at once, it opens with 4 and draws to 5
+  goSecond?: boolean;
 }
 
 // A card as the deck editor needs it.

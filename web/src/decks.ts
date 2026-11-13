@@ -51,6 +51,8 @@ export interface SavedState {
 export interface SavedRoute {
   board: number[];
   interruptions?: Interruption[];
+  // the line as steps another search can follow ("Activate:<code>", "pick:<hint>:<code>")
+  keys?: string[];
   coverage: number;
   full: boolean;
   // whether you had marked any full boards when it searched (without them it aims for the most resources)

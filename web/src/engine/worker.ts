@@ -305,6 +305,7 @@ let ignoreHandTraps = false;
 // the computer opponent: whether there is one, whether it fights your turn, and what it has done this turn
 let opponentOn = false;
 let opponentHandTraps = false;
+let goSecond = false;
 const aiUsed = new Set<string>();
 let aiBattled = false;
 let aiActed = false;
@@ -481,6 +482,8 @@ function buildPrompt(message: OcgMessage): boolean {
   switch (message.type) {
     case OcgMessageType.SELECT_IDLECMD: {
       lastSummon = 0;
+      // going second: your turn 1 is the opponent's to open, so it passes at once
+      if (goSecond && turn === 1 && message.player === 0) return answer({ type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null });
       // nobody is sitting on the other side yet: its turn ends at once
       if (message.player !== 0) return answer({ type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null });
       const choices: Choice[] = [];
@@ -852,7 +855,8 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
             aiUsed.add(key);
             return { type: OcgResponseType.SELECT_IDLECMD, action, index };
           }
-      if (message.to_bp && !aiBattled && turn > 1) {
+      // no attacking on the duel's first real turn (its turn 2 when you go second)
+      if (message.to_bp && !aiBattled && turn > (goSecond ? 2 : 1)) {
         aiBattled = true;
         return { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_BP, index: null };
       }
@@ -965,7 +969,7 @@ function advance() {
           phase = PHASES[message.phase] ?? "";
           lastSummon = 0;
           // every phase is shown, yours and the opponent's, so you know when you are being asked to respond
-          if (opponentOn || turnPlayer === 0)
+          if ((opponentOn || turnPlayer === 0) && !(goSecond && turn === 1))
             events.push({ kind: "phase", code: 0, name: "", controller: turnPlayer, location: 0, sequence: 0, text: `${turnPlayer === 0 ? "Your" : "Opponent's"} ${phaseTitle(phase)}` });
           break;
         case OcgMessageType.DAMAGE:
@@ -1105,6 +1109,7 @@ async function start(options: StartOptions) {
   solvingCode = 0;
   opponentOn = !!options.opponent?.main.length;
   opponentHandTraps = !!options.opponentHandTraps;
+  goSecond = opponentOn && !!options.goSecond;
   aiUsed.clear();
   aiBattled = false;
   aiRetries = 0;
@@ -1114,7 +1119,8 @@ async function start(options: StartOptions) {
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
     seed: [BigInt(options.seed), 2n, 3n, 4n],
     team1: { drawCountPerTurn: 1, startingDrawCount: options.hand, startingLP: 8000 },
-    team2: { drawCountPerTurn: 1, startingDrawCount: opponentOn ? 5 : 0, startingLP: 8000 },
+    // going second: it opens with 4 and draws its 5th on what is its first turn
+    team2: { drawCountPerTurn: 1, startingDrawCount: opponentOn ? (options.goSecond ? 4 : 5) : 0, startingLP: 8000 },
     cardReader: (code) => cards.get(code) ?? null,
     scriptReader: (name) => readScript(name) ?? "",
     errorHandler: (_type, text) => {

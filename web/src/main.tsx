@@ -23,6 +23,7 @@ interface Saved {
   // the computer opponent: "none", "copy" (of the deck being tested) or a saved deck's id
   opponent?: string;
   opponentHandTraps?: boolean;
+  goSecond?: boolean;
   // before decks were saved in a list, the last opened .ydk was kept here
   deckText?: string;
   deckName?: string;
@@ -66,6 +67,7 @@ function App() {
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
   const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
   const [opponentHandTraps, setOpponentHandTraps] = useState(saved.opponentHandTraps ?? false);
+  const [goSecond, setGoSecond] = useState(saved.goSecond ?? false);
   const [view, setView] = useState<DuelView | null>(null);
   const [texts, setTexts] = useState(new Map<number, CardText>());
   const [cards, setCards] = useState(new Map<number, CardInfo>());
@@ -185,15 +187,22 @@ function App() {
           all.map((one) => {
             if (one.id !== job.deckId) return one;
             const aimed = (one.tests ?? []).some((test) => test.worked && test.board?.length);
-            const saved = { board: route.board, interruptions: route.interruptions, coverage: route.coverage, full: route.full, aimed, tried: route.tried, date: Date.now(), signature: deckSignature(one), record: line };
+            // a second round keeps the earlier line if it was better
+            const before = one.routes?.[job.code];
+            if (before && before.signature === deckSignature(one) && (before.interruptions?.length ?? 0) >= route.interruptions.length && before.date > job.started) return one;
+            const saved = { keys: route.keys, board: route.board, interruptions: route.interruptions, coverage: route.coverage, full: route.full, aimed, tried: route.tried, date: Date.now(), signature: deckSignature(one), record: line };
             return { ...one, routes: { ...one.routes, [job.code]: saved } };
           }),
         );
-        // on to the next start waiting, if any
-        const [next, ...rest] = job.queue;
-        if (next) {
-          const target = decksRef.current.find((one) => one.id === job.deckId);
-          if (target) return searchRoute(target, next.code, next.hand, rest);
+        // on to the next start waiting, if any (a second-round start that already reached a full board is skipped)
+        let rest = job.queue;
+        const target = decksRef.current.find((one) => one.id === job.deckId);
+        while (rest.length && target) {
+          const [next, ...after] = rest;
+          rest = after;
+          const found = next.code === job.code ? message.done.route : target.routes?.[next.code];
+          if (next.retry && found && (found.interruptions?.length ?? 0) >= (target.fullAt ?? 3)) continue;
+          return searchRoute(target, next.code, next.hand, rest);
         }
         setRouting(null);
       } else if (message.type === "probe") {
@@ -211,11 +220,11 @@ function App() {
   }, []);
 
   useEffect(() => storeDecks(decks), [decks]);
-  useEffect(() => save({ deckId: deck?.id ?? "", hand, chosen, ignoreHandTraps, opponent, opponentHandTraps }), [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps]);
+  useEffect(() => save({ deckId: deck?.id ?? "", hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, goSecond }), [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, goSecond]);
   // the opponent's deck for a new duel, shuffled
   const opponentDeck = () => {
     const source = opponent === "none" ? null : opponent === "copy" ? deck : decks.find((one) => one.id === opponent) ?? deck;
-    return source && source.main.length ? { opponent: { main: shuffled(source.main), extra: source.extra }, opponentHandTraps } : {};
+    return source && source.main.length ? { opponent: { main: shuffled(source.main), extra: source.extra }, opponentHandTraps, goSecond } : {};
   };
 
   // errors clear themselves so they never sit over the field for long
@@ -274,23 +283,35 @@ function App() {
 
   // a test from the optimiser deals exactly the cards it names (5 cards, hand traps held back) and stays set for New hand
   // route searches, one start at a time: the queue holds the starts still to search and the hand each starts from
-  const [routing, setRouting] = useState<{ id: number; deckId: string; code: number; tried: number; queue: { code: number; hand: number[] }[] } | null>(null);
+  // a queued start with `retry` is a second round: searched again, guided by every line found, if it fell short
+  type Queued = { code: number; hand: number[]; retry?: boolean };
+  const [routing, setRouting] = useState<{ id: number; deckId: string; code: number; tried: number; queue: Queued[]; started: number } | null>(null);
   const routingRef = useRef(routing);
   routingRef.current = routing;
-  const searchRoute = (target: SavedDeck, code: number, hand: number[], queue: { code: number; hand: number[] }[] = []) => {
+  const searchRoute = (target: SavedDeck, code: number, hand: number[], queue: Queued[] = []) => {
     const id = (routingRef.current?.id ?? 0) + 1;
-    const next = { id, deckId: target.id, code, tried: 0, queue };
+    const next = { id, deckId: target.id, code, tried: 0, queue, started: Date.now() };
     routingRef.current = next;
     setRouting(next);
     const worked = (target.tests ?? []).filter((one) => one.worked);
     const targets = worked.flatMap((one) => (one.board?.length ? [one.board] : []));
     // your actions ("Activate:<card>") and your picks ("pick:<card>": what you added, what you sent) in working lines
-    const prior = [...new Set(worked.flatMap((one) => one.steps.filter((step) => step.code).map((step) => (step.idle ? `${step.text.split(/[ :]/)[0]}:${step.code}` : `pick:${step.hint ?? 0}:${step.code}`))))];
+    const signature = deckSignature(target);
+    const prior = [
+      ...new Set([
+        ...worked.flatMap((one) => one.steps.filter((step) => step.code).map((step) => (step.idle ? `${step.text.split(/[ :]/)[0]}:${step.code}` : `pick:${step.hint ?? 0}:${step.code}`))),
+        // the lines found for the other starts: a start that searches into one of them (Galaxy Wizard into Orbital 7)
+        // follows it from there
+        ...Object.entries(target.routes ?? {}).flatMap(([start, route]) => (Number(start) !== code && route.signature === signature ? route.keys ?? [] : [])),
+      ]),
+    ];
     post({ type: "route", id, main: target.main, extra: target.extra, hand, targets, prior, goal: target.fullAt ?? 3 });
   };
   const findLines = (target: SavedDeck, starts: { code: number; hand: number[] }[]) => {
     if (!starts.length) return;
-    searchRoute(target, starts[0].code, starts[0].hand, starts.slice(1));
+    // every start once, then a second round for the ones that fell short, now guided by the others' lines
+    const queue: Queued[] = [...starts.slice(1), ...(starts.length > 1 ? starts.map((one) => ({ ...one, retry: true })) : [])];
+    searchRoute(target, starts[0].code, starts[0].hand, queue);
   };
 
   const checkDeck = useCallback((target: SavedDeck) => {
@@ -346,7 +367,7 @@ function App() {
     queue.current = [];
     // a test saved without an opponent (or a line the route search found) gets today's opponent, without hand traps
     // on your turn, so your recorded choices still play the same and you can go on into their turn
-    const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false };
+    const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false };
     // "from": jump straight to that choice and carry on from there yourself; otherwise watch it play
     lastRecord.current = null;
     if (from > 0) post({ type: "jump", ...options, picks: saved.picks.slice(0, from) });
@@ -385,7 +406,7 @@ function App() {
     queue.current = [];
     lastRecord.current = null;
     post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...opponentDeck(), seed: Math.floor(Math.random() * 2 ** 31) });
-  }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, decks]);
+  }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, goSecond, decks]);
 
   const requestText = useCallback(
     (code: number) => {
@@ -553,6 +574,16 @@ function App() {
                 ))}
               <option value="none">None: my turn only</option>
             </select>
+            {opponent !== "none" && (
+              <div className="segmented two">
+                <button className={`button ${!goSecond ? "on" : ""}`} onClick={() => setGoSecond(false)}>
+                  I go first
+                </button>
+                <button className={`button ${goSecond ? "on" : ""}`} onClick={() => setGoSecond(true)}>
+                  I go second
+                </button>
+              </div>
+            )}
             {opponent !== "none" && (
               <div className="segmented two">
                 <button className={`button ${!opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(false)}>
