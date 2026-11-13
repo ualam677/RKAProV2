@@ -325,10 +325,24 @@ let respond: ((picks: number[] | null) => OcgResponse | null) | null = null;
 const nameOf = (code: number) => names.get(code) ?? (code ? `#${code}` : "");
 
 // An effect description is either "card code * 16 + string number" or a system string.
+// EDOPro's scripts number a card's own wording as passcode << 20 | string number (utility.lua aux.Stringid);
+// older ones as passcode * 16 + string number. An alternate artwork reads the original's strings.
+function cardString(code: number, index: number): string {
+  const strings = cardStrings.get(code) ?? cardStrings.get(cards.get(code)?.alias ?? 0);
+  return strings?.[index] ?? "";
+}
 function describe(description: bigint): string {
   const value = Number(description);
   if (value < 10000) return systemStrings.get(value) ?? "";
-  return cardStrings.get(Math.floor(value / 16))?.[value % 16] ?? "";
+  const wide = cardString(Number(description >> 20n), Number(description & 0xfffffn));
+  return wide || cardString(Math.floor(value / 16), value % 16);
+}
+// the card a description belongs to (0 for system wording)
+function describedCard(description: bigint): number {
+  const value = Number(description);
+  if (value < 10000) return 0;
+  const code = Number(description >> 20n);
+  return cards.has(code) ? code : Math.floor(value / 16);
 }
 
 // system strings leave the card name and its place as %ls, filled in order
@@ -522,13 +536,28 @@ function buildPrompt(message: OcgMessage): boolean {
     }
     case OcgMessageType.SELECT_YESNO:
       return one(describe(message.description) || "Confirm?", [{ label: "Yes" }, { label: "No" }], null, (index) => ({ type: OcgResponseType.SELECT_YESNO, yes: index === 0 }));
-    case OcgMessageType.SELECT_OPTION:
+    case OcgMessageType.SELECT_OPTION: {
+      // say whose effect it is and which card it is about: "Add Galaxy Summoner to your hand", not "Option 1"
+      const source = solvingCode ? nameOf(solvingCode) : "";
+      const about = lastPicked.length ? lastPicked.map(nameOf).join(", ") : "";
+      const label = (option: bigint, index: number) => {
+        const value = Number(option);
+        if (about && value === 573) return `Add ${about} to your hand`;
+        if (about && value === 574) return `Send ${about} to the GY`;
+        const text = describe(option);
+        // "Special Summon it in Defense Position (Photon Emperor)": which card "it" is
+        if (text) return text.includes("%ls") ? fill(text, about || source) : about && /\b(it|them)\b/.test(text) ? `${text} (${about})` : text;
+        // no wording anywhere: the card and which of its effects
+        const owner = describedCard(option) ? nameOf(describedCard(option)) : source;
+        return owner ? `${owner}: effect ${index + 1}` : `Choice ${index + 1}`;
+      };
       return one(
-        "Select an option",
-        message.options.map((option, index) => ({ label: describe(option) || `Option ${index + 1}` })),
+        source ? `${source}: choose one` : "Choose one",
+        message.options.map((option, index) => ({ label: label(option, index) })),
         null,
         (index) => ({ type: OcgResponseType.SELECT_OPTION, index: index! }),
       );
+    }
     case OcgMessageType.SELECT_CHAIN: {
       // with hand traps switched off, known hand traps in the hand are never offered (other hand effects are)
       const offered = message.selects
@@ -790,6 +819,9 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
 
 // the test being played, as it will be saved; `quiet` holds the views back while a recorded test is fast-forwarded
 let record: TestRecord | null = null;
+// the card whose effect is resolving, and the cards last picked (an option is often about them)
+let solvingCode = 0;
+let lastPicked: number[] = [];
 // the core's last "Select a card to ..." hint, and the one for the prompt on screen
 let lastHint = 0;
 let promptHint = 0;
@@ -866,6 +898,7 @@ function advance() {
         case OcgMessageType.CHAIN_SOLVING: {
           // a hand trap has already gone to the GY as its cost; the card is still named from its activation
           const link = chain[message.chain_size - 1];
+          solvingCode = link?.code ?? 0;
           if (link) events.push({ kind: "resolve", ...link, name: nameOf(link.code), chain: message.chain_size });
           break;
         }
@@ -925,6 +958,8 @@ function advance() {
           break;
         case OcgMessageType.CHAIN_END:
           chain = [];
+          solvingCode = 0;
+          lastPicked = [];
           break;
         case OcgMessageType.MOVE:
           // a card found in the deck and added to the player's hand (searches)
@@ -970,6 +1005,8 @@ async function start(options: StartOptions) {
   selectHint = "";
   events = [];
   ignoreHandTraps = options.ignoreHandTraps;
+  lastPicked = [];
+  solvingCode = 0;
   opponentOn = !!options.opponent?.main.length;
   opponentHandTraps = !!options.opponentHandTraps;
   aiUsed.clear();
@@ -1021,6 +1058,11 @@ function choose(picks: number[] | null): boolean {
   const shown = prompt;
   const response = duel && respond ? respond(picks) : null;
   if (!response || !shown) return false;
+  // remember which cards were picked, for a following "add it or send it?" choice
+  if (picks && (shown.kind === "multi" || shown.kind === "choice")) {
+    const codes = picks.flatMap((pick) => (shown.choices[pick]?.card?.code ? [shown.choices[pick].card!.code] : []));
+    if (codes.length) lastPicked = codes;
+  }
   record?.picks.push(picks);
   // the card acted on or picked: what the route search learns your lines from
   const acted = picks?.length === 1 && "choices" in shown ? shown.choices[picks[0]]?.card?.code : undefined;

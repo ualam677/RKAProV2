@@ -41,6 +41,7 @@ if (process.env.OVERLAY) {
   let shown = 0;
   core.duelGetMessage = (duel) => {
     const messages = get(duel);
+    for (const m of messages) if (m.type === 14 && shown < 6) { shown++; console.log("OPTION", m.player, JSON.stringify(m.options.map(String))); }
     for (const m of messages) if (m.type === 15 && shown < 3 && m.selects.some((c) => c.overlay_sequence !== undefined || c.location & 0x80)) {
       shown++;
       console.log("OVERLAY PICK", JSON.stringify(m.selects.map((c) => ({ code: c.code, location: c.location, sequence: c.sequence, overlay_sequence: c.overlay_sequence }))), "min", m.min, "max", m.max);
