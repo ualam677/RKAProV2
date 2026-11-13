@@ -45,6 +45,23 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 The C++ fork in `gframe/` already implements 1-3 for desktop (see `deck_optimizer.h`, `handtrap_ai.h`, `single_mode.cpp`);
 port the logic from there.
 
+## v1 vs v2 optimiser on the Galaxy-Eyes list (`node web/tools/compare-v1-v2.mjs <path to ualam677/rkapro>`)
+
+Current 43-card list (v1 `packs/galaxy-eyes/deck.json`), going first:
+- v1 (its own `odds.ts` on `lines.json`): "full board" 93.34%, brick 6.66%. v2 (`deck_optimizer.h` formula, v1's role tags,
+  no bricks tagged): playable 93.17%. 2,000,000 shuffled hands give 93.34% and 93.16%: both are exact, no arithmetic error.
+- v1's NOTES quote 93.5% / 5.9%; that row is the old list (Thrasher, Prosperity). Its current-list row is 93.3% / 6.7%.
+- They disagree on 0.61% of hands, and v1 is right both times:
+  - 0.39%: Photon Orbital + a Level 4 LIGHT body (War Drake, Summoner) with no tagged starter. v1 has this as an
+    engine-verified line (board 4); a starter tag cannot express a two-card start.
+  - 0.22%: Galaxy Soldier whose only other monsters are non-LIGHT (Ash FIRE, Fuwalos WIND, Droll WIND). Soldier's cost is
+    "another LIGHT monster", so this is a brick; v2 counts it as playable.
+- v1's real bias is in the label, not the maths: its "full board" threshold (3.25) equals its weakest line (Galaxy
+  Wizard alone), so "full board" = "has any verified line" (partial boards: 0.00%). And neither model plays against hand
+  traps: 93% is an uninterrupted ceiling, not a win rate.
+- For the web optimiser: keep v2's tags and exact maths, add v1's two-card "needs" (Soldier + LIGHT, Orbital + body) so
+  starters that need a partner are counted right, and report board strength and hand-trap interaction separately.
+
 ## Handoff notes
 
 Decisions made by the owner
