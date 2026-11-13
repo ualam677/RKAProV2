@@ -4,8 +4,9 @@ import { parseYdk, shuffled } from "./deck";
 import { Duel, cueTime } from "./Duel";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt } from "./CardArt";
-import { EXTRA_TYPES, deckSignature, importDeck, loadDecks, newId, storeDecks, type SavedDeck } from "./decks";
-import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, ToWorker } from "./engine/protocol";
+import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest } from "./decks";
+import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
+import { Tests } from "./Tests";
 import "./style.css";
 
 // EDOPro's card back, from Project Ignis like the scripts and card data; every face-down card uses it
@@ -68,6 +69,15 @@ function App() {
   const [probe, setProbe] = useState<{ id: number; deckId: string; signature: string; done: number; total: number } | null>(null);
   const probeRef = useRef(probe);
   probeRef.current = probe;
+  // the hand test on screen, saved with its deck as it is played (not while a saved one is being watched)
+  // `from`: choices replayed from a saved test, not saved again until you make one of your own
+  const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; from: number } | null>(null);
+  const [record, setRecord] = useState<TestRecord | null>(null);
+  const [worked, setWorked] = useState(false);
+  // watching a saved test: its choices are made one by one; any tap of yours takes over from there
+  const [replay, setReplay] = useState<{ picks: (number[] | null)[]; at: number } | null>(null);
+  const replayRef = useRef(replay);
+  replayRef.current = replay;
 
   const post = (message: ToWorker) => worker.current?.postMessage(message);
 
@@ -136,6 +146,9 @@ function App() {
         setBanlist(message.banlist);
         setStatus(`${message.cards.toLocaleString()} cards loaded`);
       } else if (message.type === "view") receive(message.view);
+      else if (message.type === "record") {
+        if (!replayRef.current) setRecord(message.record);
+      }
       else if (message.type === "text") setTexts((known) => new Map(known).set(message.card.code, message.card));
       else if (message.type === "search") {
         // results are remembered too, so adding one knows whether it belongs in the Extra Deck
@@ -181,8 +194,11 @@ function App() {
   // card names for the opening hand picker come from the worker once the cards are loaded
   const unique = useMemo(() => [...new Set(deck?.main ?? [])], [deck]);
   useEffect(() => {
-    if (ready) unique.forEach((code) => texts.has(code) || post({ type: "text", code }));
-  }, [ready, unique]);
+    if (!ready) return;
+    // and for saved tests: what they opened with and the boards they ended on (Extra Deck monsters too)
+    const named = new Set([...unique, ...(deck?.tests ?? []).flatMap((one) => [...one.startHand, ...(one.board ?? [])])]);
+    named.forEach((code) => texts.has(code) || post({ type: "text", code }));
+  }, [ready, unique, deck?.tests]);
 
   const pickDeck = (id: string) => {
     setDeckId(id);
@@ -233,8 +249,56 @@ function App() {
     post({ type: "probe", id, main: target.main, extra: target.extra });
   }, []);
 
+  const keep = (deckIdToSave: string, entry: SavedTest) =>
+    setDecks((all) => all.map((one) => (one.id === deckIdToSave ? { ...one, tests: keepTest(one.tests, entry) } : one)));
+  // every choice made is saved straight away, so leaving or closing the page loses nothing
+  useEffect(() => {
+    const current = test.current;
+    if (!record || !current || record.picks.length <= current.from) return;
+    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board });
+  }, [record]);
+  const newTest = (testOf?: number, from = 0) => {
+    test.current = deck ? { id: newId(), deckId: deck.id, date: Date.now(), testOf, from } : null;
+    setRecord(null);
+    setWorked(false);
+  };
+  const markWorked = () => {
+    const current = test.current;
+    if (!current || !record || !view) return;
+    current.worked = !current.worked;
+    const mine = view.players[0];
+    current.board = current.worked ? [...mine.monsters, ...mine.spells].flatMap((card) => (card?.code ? [card.code] : [])) : undefined;
+    setWorked(current.worked);
+    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board });
+  };
+  const watch = (saved: SavedTest, from = 0) => {
+    setError("");
+    newTest(saved.testOf, from > 0 ? from : saved.picks.length);
+    window.clearTimeout(timer.current);
+    timer.current = 0;
+    queue.current = [];
+    // "from": jump straight to that choice and carry on from there yourself; otherwise watch it play
+    if (from > 0) post({ type: "jump", ...saved.options, picks: saved.picks.slice(0, from) });
+    else {
+      setReplay({ picks: saved.picks, at: 0 });
+      post({ type: "start", ...saved.options });
+    }
+  };
+  // the next recorded choice, once the prompt it answers is on screen and the animations before it have played
+  useEffect(() => {
+    if (!replay || !view?.prompt || queue.current.length || timer.current) return;
+    if (replay.at >= replay.picks.length) return setReplay(null);
+    const wait = window.setTimeout(() => {
+      post({ type: "answer", picks: replay.picks[replay.at] });
+      setReplay({ ...replay, at: replay.at + 1 });
+    }, 450);
+    return () => window.clearTimeout(wait);
+  }, [view, replay]);
+
   const start = useCallback((test?: { chosen: number[] }) => {
     if (!deck) return;
+    setReplay(null);
+    newTest(test ? test.chosen[0] : undefined);
     const use = test ? { hand: 5, chosen: test.chosen, ignoreHandTraps: true } : { hand, chosen, ignoreHandTraps };
     if (test) {
       setHand(5);
@@ -265,7 +329,25 @@ function App() {
             {error}
           </p>
         )}
-        <Duel view={view} texts={texts} requestText={requestText} answer={(picks) => post({ type: "answer", picks })} restart={() => start()} leave={() => (skip(), setView(null))} skip={skip} />
+        <Duel
+          view={view}
+          texts={texts}
+          requestText={requestText}
+          answer={(picks) => {
+            // a choice of yours while a saved test plays: you take over from here, as a new test
+            if (replayRef.current) {
+              setReplay(null);
+              newTest(test.current?.testOf, replayRef.current.at);
+            }
+            post({ type: "answer", picks });
+          }}
+          restart={() => start()}
+          leave={() => (skip(), setReplay(null), setView(null))}
+          skip={skip}
+          worked={worked}
+          onWorked={record && !replay ? markWorked : undefined}
+          replaying={replay ? { at: replay.at, of: replay.picks.length, stop: () => (setReplay(null), newTest(test.current?.testOf, replay.at)) } : null}
+        />
       </>
     );
   }
@@ -416,6 +498,8 @@ function App() {
               })}
             </div>
           </section>
+
+          {deck.tests && deck.tests.length > 0 && <Tests tests={deck.tests} nameOf={nameOf} onWatch={watch} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />}
         </>
       )}
     </main>

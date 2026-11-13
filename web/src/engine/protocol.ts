@@ -114,6 +114,15 @@ export interface DuelView {
   winner: number | null;
 }
 
+// A hand test as it was played: the duel's start (deck order, seed, settings) and every choice made, which replays it
+// exactly, plus readable steps for the route list.
+export interface TestRecord {
+  options: StartOptions;
+  picks: (number[] | null)[];
+  steps: { text: string; idle: boolean }[];
+  startHand: number[];
+}
+
 export interface CardText {
   code: number;
   name: string;
@@ -163,6 +172,8 @@ export type ToWorker =
   | { type: "init" }
   | ({ type: "start" } & StartOptions)
   | { type: "answer"; picks: number[] | null }
+  // start a recorded test and make its first `picks` choices at once, showing only where that leaves the duel
+  | ({ type: "jump"; picks: (number[] | null)[] } & StartOptions)
   | { type: "text"; code: number }
   | { type: "search"; id: number; search: CardSearch }
   | { type: "info"; codes: number[] }
@@ -173,6 +184,7 @@ export type FromWorker =
   | { type: "progress"; text: string }
   | { type: "ready"; cards: number; banlist: { name: string; limits: Record<number, number> } }
   | { type: "view"; view: DuelView }
+  | { type: "record"; record: TestRecord }
   | { type: "text"; card: CardText }
   | { type: "search"; id: number; results: CardInfo[]; more: boolean }
   // asked: the passcode as requested (Omega numbers alternate artworks itself), code: the card it is

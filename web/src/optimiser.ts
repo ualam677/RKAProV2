@@ -36,6 +36,8 @@ export interface Tag {
   engine?: boolean;
   // the start was played from the hand to a full board, with nothing else helping
   proven?: boolean;
+  // ... shown by a saved test you marked as working, not ticked by hand
+  provenByTest?: boolean;
 }
 export interface CardFacts {
   type: number;

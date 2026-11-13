@@ -3,6 +3,25 @@
 import { parseYdk, type Deck } from "./deck";
 import type { Tag } from "./optimiser";
 import type { CardEvidence } from "./engine/probe";
+import type { TestRecord } from "./engine/protocol";
+
+// A hand test kept with its deck: enough to replay it exactly, and what it ended on if you said it worked
+export interface SavedTest extends TestRecord {
+  id: string;
+  date: number;
+  worked?: boolean;
+  // your monsters and Spells/Traps when you said it worked
+  board?: number[];
+  // the start the optimiser's Test button was testing
+  testOf?: number;
+}
+// working tests are kept; of the rest, the newest few
+const KEEP_OTHERS = 30;
+export function keepTest(tests: SavedTest[] = [], test: SavedTest): SavedTest[] {
+  const next = [test, ...tests.filter((one) => one.id !== test.id)].sort((a, b) => b.date - a.date);
+  let others = 0;
+  return next.filter((one) => one.worked || ++others <= KEEP_OTHERS);
+}
 
 export interface SavedDeck extends Deck {
   id: string;
@@ -12,6 +31,7 @@ export interface SavedDeck extends Deck {
   tags?: Record<string, Tag>;
   // what the engine found each card starts, for the deck as it was (`signature`)
   engine?: { signature: string; evidence: CardEvidence[] };
+  tests?: SavedTest[];
 }
 
 // Changes whenever the cards the engine checks change (Main and Extra, any order)

@@ -58,7 +58,21 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
     return null;
   };
   // yours in this deck, then the engine's starts, then yours from other decks, then known cards
-  const tagOf = (key: number): Tag => deck.tags?.[key] ?? engineTag(key) ?? defaults[key] ?? guessTag(key) ?? { role: "none" };
+  const baseTag = (key: number): Tag => deck.tags?.[key] ?? engineTag(key) ?? defaults[key] ?? guessTag(key) ?? { role: "none" };
+  // a working test that opened with exactly one start proves that start (the rest of the hand had none)
+  const provenByTest = useMemo(() => {
+    const proven = new Set<number>();
+    for (const one of deck.tests ?? []) {
+      if (!one.worked) continue;
+      const starts = [...new Set(one.startHand.map(nameKey))].filter((key) => ["starter", "pair"].includes(baseTag(key).role));
+      if (starts.length === 1) proven.add(starts[0]);
+    }
+    return proven;
+  }, [deck.tests, deck.tags, evidence, defaults, cards]);
+  const tagOf = (key: number): Tag => {
+    const tag = baseTag(key);
+    return !tag.proven && provenByTest.has(key) ? { ...tag, proven: true, provenByTest: true } : tag;
+  };
   // a card is known by its original code; its details may only be cached under the artwork the deck holds
   const held = useMemo(() => {
     const map = new Map<number, number>();
@@ -86,7 +100,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
     };
     const sideCards = collect(deck.side.filter((code) => !((cards.get(code)?.type ?? 0) & EXTRA_TYPES)));
     return { main: collect(deck.main), side: sideCards, sideKeys: new Set(sideCards.map((card) => card.code)), total: deck.main.length };
-  }, [deck, cards, defaults]);
+  }, [deck, cards, defaults, provenByTest]);
 
   useEffect(() => {
     const missing = main.flatMap((card) => card.tag.with?.codes ?? []).filter((code) => !infoOf(code));
@@ -411,8 +425,12 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                       >
                         Test
                       </button>
-                      <button className={`button small ${card.tag.proven ? "on" : "ghost"}`} onClick={() => setTag(card.code, { ...card.tag, proven: !card.tag.proven })}>
-                        {card.tag.proven ? "✓ Proven" : "Proven?"}
+                      <button
+                        className={`button small ${card.tag.proven ? "on" : "ghost"}`}
+                        disabled={card.tag.provenByTest}
+                        onClick={() => setTag(card.code, { ...card.tag, proven: !card.tag.proven })}
+                      >
+                        {card.tag.provenByTest ? "✓ Proven by your test" : card.tag.proven ? "✓ Proven" : "Proven?"}
                       </button>
                     </span>
                   )}
@@ -445,7 +463,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               back doesn't count. It finds partners by itself: what the engine lets a card do with each other card in the hand. It says whether a hand gets going,
               not whether it reaches your full board; that's what Proven is for. Every possible opening hand is counted with its exact chance, no sampling. A combo opens with a Starter, or a Starter with a partner plus one of its partners. A hand trap used as the
               partner doesn't count as a hand trap you still hold. A start is only as good as its tag: Test deals it with a partner (if it needs one) and
-              cards that can't help, hand traps held back; tick Proven once it reaches your full board. Until every start is proven, the headline also shows the
+              cards that can't help, hand traps held back; tick Proven once it reaches your full board (or mark the test "This worked" in the duel menu, and it ticks itself). Until every start is proven, the headline also shows the
               proven-only number. Going first, "Hand trap, going 2nd" cards count as dead. Swaps are judged on going first and going second equally, and use the
               tags of the card coming in.
             </p>

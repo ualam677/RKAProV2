@@ -56,13 +56,18 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 - Normal Summon rule: starts whose engine line opens with a Normal Summon are marked (toggle per card); a second one in
   the hand counts as dead, the odds show how often two meet, and swaps never go past one per 8 cards (5 in 40).
   "Combo piece in the Deck" role: dead if drawn, never cut; the engine points at cards its lines take from the Deck.
+- Recording: every hand test is saved with its deck as it is played (deck order, seed, settings and every choice, which
+  the worker replays exactly; readable steps for the list). Duel menu "This worked" keeps it and records the end
+  board. Start screen "Saved tests": Watch (choices made one by one at play speed; any choice of yours takes over as a
+  new test) and "Play from here" on any step (fast-forwards to just before it). A working test that opened with one
+  start ticks that start Proven in the optimiser. Working tests are kept; of the rest, the newest 30.
   Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it
   matches v1's own code (93.34% / 96.48%), a separate naive evaluator over every hand, and a 1M-hand simulation.
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order
-1. Opponent: hand traps (easy / smart), then plays its own turn with board breakers
+1. Route search to a full board (target: the boards of working tests), then the opponent: hand traps (easy / smart), then plays its own turn with board breakers
    (Veiler / Imperm on the player's turn, Imperm at the start of its turn, Lightning Storm, Cosmic Cyclone-style cards).
 2. Routes learned from saved replays, then end-board suggestion from a random hand (beam search over the core, scored
    against learned end boards).

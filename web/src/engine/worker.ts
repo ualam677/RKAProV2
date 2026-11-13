@@ -24,7 +24,7 @@ import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { probeDeck } from "./probe";
-import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, ToWorker } from "./protocol";
+import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
 
 // Folder holding cards.cdb and the release / pre-release databases, and a listing of that folder.
 const CDB_URL = import.meta.env.VITE_CDB_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/BabelCDB/master";
@@ -713,7 +713,24 @@ function playerView(controller: 0 | 1, deck: number): PlayerView {
   };
 }
 
+// the test being played, as it will be saved; `quiet` holds the views back while a recorded test is fast-forwarded
+let record: TestRecord | null = null;
+let quiet = false;
+
+// "Normal Summon Galaxy Wizard", "Select a card to add to your hand: Galaxy Defense Robot Orbital 7"
+function describePick(shown: Prompt, picks: number[] | null): string {
+  if (picks === null) return shown.kind === "choice" && shown.cancel ? shown.cancel : "Cancel";
+  if (shown.kind === "counter") return `${shown.title}: ${picks.map((count, index) => (count ? `${count} from ${shown.choices[index]?.card?.name}` : "")).filter(Boolean).join(", ")}`;
+  if (shown.kind === "announce") return `${shown.title}: ${shown.options[picks[0]]?.name ?? ""}`;
+  const chosen = picks.map((pick) => shown.choices[pick]).filter(Boolean).map((choice) => (choice.card ? (choice.label && choice.label !== choice.card.name ? `${choice.label} ${choice.card.name}` : choice.card.name) : choice.label));
+  return shown.kind === "choice" && shown.idle ? chosen.join(", ") : `${shown.title ? `${shown.title}: ` : ""}${chosen.join(", ")}`;
+}
+
 function sendView() {
+  if (quiet) {
+    events = [];
+    return;
+  }
   const field = core.duelQueryField(duel!);
   const players: [PlayerView, PlayerView] = [playerView(0, field.players[0].deck_size), playerView(1, field.players[1].deck_size)];
   for (const controller of [0, 1]) {
@@ -889,7 +906,22 @@ async function start(options: StartOptions) {
   for (const code of [...main].reverse()) add(knownCode(code), OcgLocation.DECK);
   for (const code of options.extra) add(knownCode(code), OcgLocation.EXTRA);
   core.startDuel(handle);
+  record = { options: { ...options }, picks: [], steps: [], startHand: [] };
   advance();
+  record.startHand = cardsIn(0, OcgLocation.HAND).flatMap((card) => (card ? [card.code] : []));
+}
+
+// Makes a choice on the prompt on screen, records it, and plays on. False if the core's prompt doesn't take it.
+function choose(picks: number[] | null): boolean {
+  const shown = prompt;
+  const response = duel && respond ? respond(picks) : null;
+  if (!response || !shown) return false;
+  record?.picks.push(picks);
+  record?.steps.push({ text: describePick(shown, picks), idle: shown.kind === "choice" && !!shown.idle });
+  core.duelSetResponse(duel!, response);
+  advance();
+  if (record && !quiet) send({ type: "record", record });
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -950,11 +982,19 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
     } else if (message.type === "start") {
       await start(message);
     } else if (message.type === "answer") {
-      const response = duel && respond ? respond(message.picks) : null;
-      if (response) {
-        core.duelSetResponse(duel!, response);
-        advance();
+      choose(message.picks);
+    } else if (message.type === "jump") {
+      const { picks, type: _type, ...options } = message;
+      quiet = true;
+      try {
+        await start(options);
+        for (const pick of picks) if (!choose(pick)) break;
+      } finally {
+        quiet = false;
       }
+      events = [];
+      sendView();
+      if (record) send({ type: "record", record });
     } else if (message.type === "search") {
       send({ type: "search", id: message.id, ...search(message.search) });
     } else if (message.type === "info") {

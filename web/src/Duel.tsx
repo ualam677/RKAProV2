@@ -11,6 +11,11 @@ interface Props {
   leave: () => void;
   // jump past the animations still waiting to play
   skip: () => void;
+  // "This worked": keeps the test and the board it ended on; undefined while nothing has been played yet
+  worked: boolean;
+  onWorked?: () => void;
+  // a saved test playing back: where it is, and stopping it to play on yourself
+  replaying: { at: number; of: number; stop: () => void } | null;
 }
 
 // How long each moment stays on screen, close to EDOPro's own pacing.
@@ -297,7 +302,7 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   );
 }
 
-export function Duel({ view, texts, requestText, answer, restart, leave, skip }: Props) {
+export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying }: Props) {
   const wide = useMedia(WIDE_QUERY);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [info, setInfo] = useState<CardView | null>(null);
@@ -744,6 +749,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
 
   const menu = (
     <>
+      {onWorked && (
+        <button className={`button ${worked ? "on" : ""}`} onClick={onWorked}>
+          {worked ? "✓ Worked (tap to undo)" : "✓ This worked"}
+        </button>
+      )}
       <button className="button" onClick={restart}>
         New hand
       </button>
@@ -804,6 +814,17 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
       )}
       {!wide && opponentBar}
       {!wide && menuOpen && <div className="menu">{menu}</div>}
+      {replaying && (
+        <div className="replay-bar" onClick={(event) => event.stopPropagation()}>
+          <span>
+            Replaying · choice {Math.min(replaying.at + 1, replaying.of)} of {replaying.of}
+            <small> · make any choice to take over</small>
+          </span>
+          <button className="button small" onClick={replaying.stop}>
+            Take over
+          </button>
+        </div>
+      )}
 
       <div className="board">
         <div className="field-area">
