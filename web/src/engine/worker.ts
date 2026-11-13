@@ -346,8 +346,11 @@ function system(id: number, fallback: string): string {
   return systemStrings.get(id) ?? fallback;
 }
 
-function cardChoice(label: string, card: { code: number; controller: number; location: number; sequence: number }): Choice {
-  return { label, card: { controller: card.controller, location: card.location, sequence: card.sequence, code: card.code, name: nameOf(card.code), type: cards.get(card.code)?.type ?? 0 } };
+function cardChoice(label: string, card: { code: number; controller: number; location: number; sequence: number; overlay_sequence?: number }): Choice {
+  // an Xyz Material comes as the Monster Zone of its Xyz Monster plus a material number: mark it as a material
+  // (LOCATION_OVERLAY, as EDOPro does) so the page lists it by name instead of lighting up the monster
+  const location = card.overlay_sequence !== undefined ? card.location | OcgLocation.OVERLAY : card.location;
+  return { label: location & OcgLocation.OVERLAY ? `${label} (material of ${zoneName({ controller: card.controller, location: OcgLocation.MZONE, sequence: card.sequence })})` : label, card: { controller: card.controller, location, sequence: card.sequence, code: card.code, name: nameOf(card.code), type: cards.get(card.code)?.type ?? 0 } };
 }
 
 function zoneName(zone: CardRef): string {

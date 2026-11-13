@@ -36,6 +36,18 @@ const script = (name) => {
 };
 const wasmBinary = fs.readFileSync(require.resolve("ocgcore-wasm/lib/ocgcore.sync.wasm"));
 const core = await createCore({ sync: true, wasmBinary: wasmBinary.buffer.slice(wasmBinary.byteOffset, wasmBinary.byteOffset + wasmBinary.byteLength) });
+if (process.env.OVERLAY) {
+  const get = core.duelGetMessage.bind(core);
+  let shown = 0;
+  core.duelGetMessage = (duel) => {
+    const messages = get(duel);
+    for (const m of messages) if (m.type === 15 && shown < 3 && m.selects.some((c) => c.overlay_sequence !== undefined || c.location & 0x80)) {
+      shown++;
+      console.log("OVERLAY PICK", JSON.stringify(m.selects.map((c) => ({ code: c.code, location: c.location, sequence: c.sequence, overlay_sequence: c.overlay_sequence }))), "min", m.min, "max", m.max);
+    }
+    return messages;
+  };
+}
 const env = { core, card: (code) => cards.get(code) ?? null, script, name: (code) => names.get(code) ?? `#${code}` };
 
 const raw = zlib.inflateRawSync(Buffer.from(fs.readFileSync(OMEGA, "utf8").trim().split(/\s+/).pop(), "base64"));
