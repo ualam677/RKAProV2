@@ -88,6 +88,14 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 - The opponent plans its turn: at its first Main Phase it runs the route search on its own hand and deck (as a fresh
   opening, your board not part of the plan, about 10 s), then follows that plan step by step, picks included. Once
   your interruptions throw it off, it plays whatever it can. Still deterministic: loading a state replays it the same.
+- Going second ("I go second"): the opponent opens with 4, draws to 5, plans and plays turn 1 without attacking; your
+  turn 1 passes, so your first real turn starts with 6 cards against its board.
+- Choke points: each engine line is replayed with the opponent holding one hand trap (Ash, Imperm, Veiler, Ghost Ogre,
+  Nibiru, Droll, Ghost Belle, D.D. Crow) used at every moment the engine allows; the worst moments are searched again
+  with the hand trap in the duel (the best way through). Listed per line, worst first; "Full board through" each hand
+  trap counts every hand exactly: a start that plays through it, or two different full-board starts. Galaxy list:
+  52.9% through Ash going first (each line alone is stopped by Ash on its starter), 65.4% going second.
+- Working tests count their own board's interruptions (field with Xyz Materials, hand, GY, read from the scripts).
 - Phases as EDOPro shows them: a DP SP M1 BP M2 EP bar lit in your colour or the opponent's, and a banner at every
   phase change on both turns. Chances to respond say what to ("Respond to Seventh Tachyon?", "Respond to the summon
   of Galaxy Wizard?", "Opponent's End Phase: activate an effect?").

@@ -25,7 +25,8 @@ import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { CHOKE_TRAPS, autoAnswer, chokePoints, probeDeck, routeSearch } from "./probe";
 import { isHandTrap } from "./handtraps";
-import { readEffects, readSetConstants, type QuickEffect } from "./interruptions";
+import { interruptionsOf, readEffects, readSetConstants, type QuickEffect } from "./interruptions";
+import { isFirstTurnHandTrap } from "./handtraps";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
 
 // Folder holding cards.cdb and the release / pre-release databases, and a listing of that folder.
@@ -1330,6 +1331,25 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       void runRoute(message.id, message.main, message.extra, message.hand, message.targets, message.prior, message.goal).catch((error) =>
         send({ type: "error", text: `Route search stopped: ${error instanceof Error ? error.message : error}` }),
       );
+    } else if (message.type === "interruptions") {
+      const canonical = (code: number) => {
+        const known = knownCode(code);
+        const card = cards.get(known);
+        return card?.alias && Math.abs(card.alias - known) < 20 && cards.has(card.alias) ? card.alias : known;
+      };
+      const pieces = message.pieces.map((piece) => ({ ...piece, code: canonical(piece.code) }));
+      await prefetchScripts(pieces.map((piece) => piece.code));
+      const left = message.startHand.map(canonical);
+      const built = pieces.filter((piece) => {
+        if (piece.location !== OcgLocation.HAND) return true;
+        const at = left.indexOf(piece.code);
+        if (at < 0) return true;
+        left.splice(at, 1);
+        return false;
+      });
+      const spells = pieces.filter((piece) => piece.location === OcgLocation.SZONE).length;
+      const list = interruptionsOf(built, effectsOf, (code) => cards.get(code)?.setcodes ?? [], isFirstTurnHandTrap, Math.max(0, 5 - spells));
+      send({ type: "interruptions", id: message.id, list });
     } else if (message.type === "choke") {
       void runChoke(message.id, message.main, message.extra, message.hand, message.keys, message.goal).catch((error) =>
         send({ type: "error", text: `Hand trap check stopped: ${error instanceof Error ? error.message : error}` }),

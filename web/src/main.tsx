@@ -6,6 +6,7 @@ import { DeckEditor } from "./DeckEditor";
 import { CardArt } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest } from "./decks";
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
+import type { Piece } from "./engine/interruptions";
 import { Tests } from "./Tests";
 import "./style.css";
 
@@ -80,7 +81,7 @@ function App() {
   probeRef.current = probe;
   // the hand test on screen, saved with its deck as it is played (not while a saved one is being watched)
   // `from`: choices replayed from a saved test, not saved again until you make one of your own
-  const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; from: number } | null>(null);
+  const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; pieces?: Piece[]; from: number } | null>(null);
   const [record, setRecord] = useState<TestRecord | null>(null);
   const lastRecord = useRef<TestRecord | null>(null);
   const [worked, setWorked] = useState(false);
@@ -208,6 +209,9 @@ function App() {
         // every line found: now where hand traps hurt each of them
         const done = decksRef.current.find((one) => one.id === job.deckId);
         if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "interruptions") {
+        // a working test's board, counted: kept with the test
+        setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list } : test)) } : one)));
       } else if (message.type === "choke") {
         const job = chokingRef.current;
         if (!job || job.id !== message.id || !message.done) return;
@@ -358,7 +362,7 @@ function App() {
   useEffect(() => {
     const current = test.current;
     if (!record || !current || record.picks.length <= current.from) return;
-    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board });
+    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
   }, [record]);
   const newTest = (testOf?: number, from = 0) => {
     test.current = deck ? { id: newId(), deckId: deck.id, date: Date.now(), testOf, from } : null;
@@ -371,8 +375,18 @@ function App() {
     current.worked = !current.worked;
     const mine = view.players[0];
     current.board = current.worked ? [...mine.monsters, ...mine.spells].flatMap((card) => (card?.code ? [card.code] : [])) : undefined;
+    // everything that can matter on the opponent's turn, to count the board's interruptions
+    current.pieces = current.worked
+      ? [
+          ...mine.monsters.flatMap((card) => (card?.code ? [{ code: card.code, location: 4, materials: card.overlay?.length ?? 0 }] : [])),
+          ...mine.spells.flatMap((card) => (card?.code ? [{ code: card.code, location: 8, materials: 0 }] : [])),
+          ...mine.hand.flatMap((card) => (card.code ? [{ code: card.code, location: 2, materials: 0 }] : [])),
+          ...mine.grave.flatMap((card) => (card.code ? [{ code: card.code, location: 16, materials: 0 }] : [])),
+        ]
+      : undefined;
     setWorked(current.worked);
-    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board });
+    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
+    if (current.pieces) post({ type: "interruptions", id: current.id, pieces: current.pieces, startHand: record.startHand });
   };
   // save states: where the duel on screen is now, kept with the deck; loading one rebuilds it choice by choice
   const saveState = () => {

@@ -57,6 +57,13 @@ export function Tests({ tests, nameOf, onWatch, onDelete }: Props) {
                 {test.worked && <b className="test-badge">✓ Worked</b>} {when(test.date)} · {actions} action{actions === 1 ? "" : "s"}
               </span>
               {test.worked && test.board && test.board.length > 0 && <span className="test-board">Ended on {grouped(test.board, nameOf)}</span>}
+              {test.worked && test.interruptions && (
+                <span className={`test-board ${test.interruptions.length ? "" : "warn"}`}>
+                  {test.interruptions.length
+                    ? `${test.interruptions.length} interruption${test.interruptions.length > 1 ? "s" : ""}: ${test.interruptions.map((one) => `${nameOf(one.code)} (${one.kind}${one.from === "set" ? ", Set" : one.from === "hand" ? ", from the hand" : one.from === "gy" ? ", in the GY" : ""})`).join(", ")}`
+                    : "No interruptions on this board"}
+                </span>
+              )}
             </button>
             {expanded && (
               <div className="test-body">

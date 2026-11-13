@@ -483,3 +483,4 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-chokes summary { cursor: pointer; }
 .opt-chokes ul { margin: 4px 0; padding-left: 16px; display: grid; gap: 3px; color: var(--muted); }
 .opt-chokes b { color: var(--text); }
+.test-board.warn { color: #ffb36b; }

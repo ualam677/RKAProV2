@@ -4,7 +4,7 @@ import { parseYdk, type Deck } from "./deck";
 import type { Tag } from "./optimiser";
 import type { CardEvidence } from "./engine/probe";
 import type { TestRecord } from "./engine/protocol";
-import type { Interruption } from "./engine/interruptions";
+import type { Interruption, Piece } from "./engine/interruptions";
 import type { Choke } from "./engine/probe";
 
 // A hand test kept with its deck: enough to replay it exactly, and what it ended on if you said it worked
@@ -16,6 +16,9 @@ export interface SavedTest extends TestRecord {
   board?: number[];
   // the start the optimiser's Test button was testing
   testOf?: number;
+  // what you had when you said it worked (field with Xyz Materials, hand, GY), and the interruptions it holds
+  pieces?: Piece[];
+  interruptions?: Interruption[];
 }
 // working tests are kept; of the rest, the newest few
 const KEEP_OTHERS = 30;
