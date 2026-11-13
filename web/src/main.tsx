@@ -4,7 +4,7 @@ import { parseYdk, shuffled } from "./deck";
 import { Duel, cueTime } from "./Duel";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt } from "./CardArt";
-import { EXTRA_TYPES, importDeck, loadDecks, newId, storeDecks, type SavedDeck } from "./decks";
+import { EXTRA_TYPES, deckSignature, importDeck, loadDecks, newId, storeDecks, type SavedDeck } from "./decks";
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, ToWorker } from "./engine/protocol";
 import "./style.css";
 
@@ -64,6 +64,10 @@ function App() {
   const [banlist, setBanlist] = useState<{ name: string; limits: Record<number, number> }>({ name: "", limits: {} });
   const [error, setError] = useState("");
   const deck = decks.find((one) => one.id === deckId) ?? decks[0] ?? null;
+  // the engine checking a deck's cards in the background (one deck at a time; a newer request replaces it)
+  const [probe, setProbe] = useState<{ id: number; deckId: string; signature: string; done: number; total: number } | null>(null);
+  const probeRef = useRef(probe);
+  probeRef.current = probe;
 
   const post = (message: ToWorker) => worker.current?.postMessage(message);
 
@@ -150,6 +154,14 @@ function App() {
           return next;
         });
         infoWaiting.current.shift()?.(message.cards);
+      } else if (message.type === "probe") {
+        const job = probeRef.current;
+        if (!job || job.id !== message.id) return;
+        if (message.evidence) {
+          const evidence = message.evidence;
+          setDecks((all) => all.map((one) => (one.id === job.deckId ? { ...one, engine: { signature: job.signature, evidence } } : one)));
+          setProbe(null);
+        } else setProbe({ ...job, done: message.done, total: message.total });
       } else if (message.type === "error") setError(message.text);
     };
     instance.postMessage({ type: "init" } satisfies ToWorker);
@@ -211,6 +223,16 @@ function App() {
   };
 
   // a test from the optimiser deals exactly the cards it names (5 cards, hand traps held back) and stays set for New hand
+  const checkDeck = useCallback((target: SavedDeck) => {
+    const signature = deckSignature(target);
+    const running = probeRef.current;
+    if (running && running.deckId === target.id && running.signature === signature) return;
+    const id = (running?.id ?? 0) + 1;
+    setProbe({ id, deckId: target.id, signature, done: 0, total: 0 });
+    probeRef.current = { id, deckId: target.id, signature, done: 0, total: 0 };
+    post({ type: "probe", id, main: target.main, extra: target.extra });
+  }, []);
+
   const start = useCallback((test?: { chosen: number[] }) => {
     if (!deck) return;
     const use = test ? { hand: 5, chosen: test.chosen, ignoreHandTraps: true } : { hand, chosen, ignoreHandTraps };
@@ -261,6 +283,8 @@ function App() {
         onChange={changeDeck}
         onClose={() => setEditing(false)}
         onTest={(chosen) => start(chosen ? { chosen } : undefined)}
+        engineProgress={probe && probe.deckId === deck.id ? probe : null}
+        onCheck={() => checkDeck(deck)}
       />
     );
   }

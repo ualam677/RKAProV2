@@ -1,5 +1,6 @@
 // Messages between the page and the duel worker. The worker turns everything
 // the duel core says into these plain shapes, so the page knows nothing about the core.
+import type { CardEvidence } from "./probe";
 
 export interface CardRef {
   controller: number;
@@ -164,7 +165,9 @@ export type ToWorker =
   | { type: "answer"; picks: number[] | null }
   | { type: "text"; code: number }
   | { type: "search"; id: number; search: CardSearch }
-  | { type: "info"; codes: number[] };
+  | { type: "info"; codes: number[] }
+  // the engine probe: what every Main Deck card starts, alone and in pairs (see probe.ts)
+  | { type: "probe"; id: number; main: number[]; extra: number[] };
 
 export type FromWorker =
   | { type: "progress"; text: string }
@@ -174,6 +177,7 @@ export type FromWorker =
   | { type: "search"; id: number; results: CardInfo[]; more: boolean }
   // asked: the passcode as requested (Omega numbers alternate artworks itself), code: the card it is
   | { type: "info"; cards: (CardInfo & { asked: number })[] }
+  | { type: "probe"; id: number; done: number; total: number; evidence?: CardEvidence[] }
   | { type: "error"; text: string };
 
 export const LOCATION = { DECK: 1, HAND: 2, MZONE: 4, SZONE: 8, GRAVE: 16, REMOVED: 32, EXTRA: 64 } as const;

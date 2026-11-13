@@ -23,6 +23,7 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
+import { probeDeck } from "./probe";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, ToWorker } from "./protocol";
 
 // Folder holding cards.cdb and the release / pre-release databases, and a listing of that folder.
@@ -888,6 +889,41 @@ async function start(options: StartOptions) {
   advance();
 }
 
+// ---------------------------------------------------------------------------
+// The engine probe runs between other requests: one small duel, then a pause so searches and the duel keep answering.
+let probeJob = 0;
+async function runProbe(id: number, main: number[], extra: number[]) {
+  probeJob = id;
+  // one code per card name: alternate artworks probe as the card they are
+  const canonical = (code: number) => {
+    const known = knownCode(code);
+    const card = cards.get(known);
+    return card?.alias && Math.abs(card.alias - known) < 20 && cards.has(card.alias) ? card.alias : known;
+  };
+  const mainCodes = main.map(canonical).filter((code) => cards.has(code));
+  const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
+  await prefetchScripts([...mainCodes, ...extraCodes]);
+  const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf };
+  const steps = probeDeck(env, mainCodes, extraCodes);
+  let last = 0;
+  for (;;) {
+    if (probeJob !== id) return;
+    const next = steps.next();
+    if (next.done) return;
+    if (!next.value) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      continue;
+    }
+    const { done, total, evidence } = next.value;
+    if (done >= total) return send({ type: "probe", id, done, total, evidence: [...evidence.values()] });
+    if (performance.now() - last > 200) {
+      send({ type: "probe", id, done, total });
+      last = performance.now();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 function cardLine(code: number): string {
   const card = cards.get(code);
   if (!card) return "";
@@ -924,6 +960,8 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
         return card ? [{ ...card, asked }] : [];
       });
       send({ type: "info", cards: found });
+    } else if (message.type === "probe") {
+      void runProbe(message.id, message.main, message.extra).catch((error) => send({ type: "error", text: `Engine check stopped: ${error instanceof Error ? error.message : error}` }));
     } else if (message.type === "text") {
       send({ type: "text", card: { code: message.code, name: nameOf(message.code), line: cardLine(message.code), text: texts.get(message.code) ?? "" } });
     }

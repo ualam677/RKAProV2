@@ -1,0 +1,77 @@
+// Runs the engine probe (src/engine/probe.ts) on a deck outside the browser.
+// Usage: node --experimental-sqlite tools/probe-deck.mjs <cards.cdb> <CardScripts folder> <YGO Omega code file> [card name ...]
+import fs from "node:fs";
+import path from "node:path";
+import zlib from "node:zlib";
+import { createRequire } from "node:module";
+import { DatabaseSync } from "node:sqlite";
+const [CDB, SCRIPTS, OMEGA, ...only] = process.argv.slice(2);
+const require = createRequire(import.meta.url);
+const { default: createCore } = await import("ocgcore-wasm");
+const { probe, probeDeck } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+
+const db = new DatabaseSync(CDB);
+const cards = new Map(), names = new Map();
+for (const r of db.prepare("select d.id, d.alias, cast(d.setcode as text) setcode, d.type, d.level, d.attribute, cast(d.race as text) race, d.atk, d.def, t.name from datas d join texts t on t.id = d.id").all()) {
+  const set = BigInt.asUintN(64, BigInt(r.setcode));
+  const setcodes = [0n, 1n, 2n, 3n].map((i) => Number((set >> (16n * i)) & 0xffffn)).filter(Boolean);
+  const link = (r.type & 0x4000000) !== 0;
+  cards.set(r.id, { code: r.id, alias: r.alias, setcodes, type: r.type, level: r.level & 0xff, attribute: r.attribute, race: BigInt.asUintN(64, BigInt(r.race)),
+    attack: r.atk, defense: link ? 0 : r.def, lscale: (r.level >> 24) & 0xff, rscale: (r.level >> 16) & 0xff, link_marker: link ? r.def : 0 });
+  names.set(r.id, r.name);
+}
+const known = (code) => { if (cards.has(code)) return code; for (let o = 1; o < 10; o++) { const c = cards.get(code - o); if (c) return c.alias && cards.has(c.alias) ? c.alias : code - o; } return code; };
+const scriptCache = new Map();
+const script = (name) => {
+  name = path.basename(name);
+  if (scriptCache.has(name)) return scriptCache.get(name);
+  let text = "";
+  for (const folder of ["", "official", "pre-release", "unofficial"]) {
+    const file = path.join(SCRIPTS, folder, name);
+    if (fs.existsSync(file)) { text = fs.readFileSync(file, "utf8"); break; }
+  }
+  if (!text && /^c\d+\.lua$/.test(name)) { const alias = cards.get(Number(name.slice(1, -4)))?.alias; if (alias) text = script(`c${alias}.lua`); }
+  scriptCache.set(name, text);
+  return text;
+};
+const wasmBinary = fs.readFileSync(require.resolve("ocgcore-wasm/lib/ocgcore.sync.wasm"));
+const core = await createCore({ sync: true, wasmBinary: wasmBinary.buffer.slice(wasmBinary.byteOffset, wasmBinary.byteOffset + wasmBinary.byteLength) });
+const env = { core, card: (code) => cards.get(code) ?? null, script, name: (code) => names.get(code) ?? `#${code}` };
+
+const raw = zlib.inflateRawSync(Buffer.from(fs.readFileSync(OMEGA, "utf8").trim().split(/\s+/).pop(), "base64"));
+const all = Array.from({ length: raw[0] }, (_, i) => known(raw.readUInt32LE(2 + 4 * i)));
+const unknown = all.filter((c) => !cards.has(c));
+if (unknown.length) console.log(`Not in this database, left out: ${unknown.join(", ")}`);
+const codes = all.filter((c) => cards.has(c));
+const EXTRA = 0x40 | 0x2000 | 0x800000 | 0x4000000;
+const main = codes.filter((c) => !(cards.get(c).type & EXTRA)), extra = codes.filter((c) => cards.get(c).type & EXTRA);
+const rest = (hand) => { const deck = [...main]; for (const c of hand) deck.splice(deck.indexOf(c), 1); return deck; };
+const distinct = [...new Set(main)].filter((c) => !only.length || only.some((n) => names.get(c).toLowerCase().includes(n.toLowerCase())));
+
+console.log(`${main.length} main, ${extra.length} extra\n`);
+const t0 = performance.now();
+const r0 = probe(env, [distinct[0]], rest([distinct[0]]), extra, { budget: 1 });
+console.log(`one branch: ${(performance.now() - t0).toFixed(0)} ms\n`);
+for (const code of distinct) {
+  const t = performance.now();
+  const r = probe(env, [code], rest([code]), extra, { budget: 150, depth: 6 });
+  console.log(`${names.get(code).padEnd(34)} deck ${r.deck} extra ${r.extra}  (${r.tried} tried${r.exhausted ? ", all" : ""}, ${(performance.now() - t).toFixed(0)} ms)  ${r.steps.join(" > ")}${r.taken.length ? `  | took ${r.taken.map((c) => names.get(c)).join(", ")}` : ""}`);
+}
+
+if (process.env.PAIRS) {
+  const t1 = performance.now();
+  let last;
+  for (const step of probeDeck(env, main, extra)) if (step) last = step;
+  console.log(`\nWhole deck, singles and pairs: ${last.done} duels tried in ${((performance.now() - t1) / 1000).toFixed(1)} s`);
+  for (const e of last.evidence.values()) {
+    if (e.alone.deck > 0) console.log(`  START   ${names.get(e.code)}: alone, ${e.alone.deck} new from the Deck, ${e.alone.extra} Extra Deck summons`);
+    else if (e.partners.length) console.log(`  PARTNER ${names.get(e.code)} with: ${e.partners.map((c) => names.get(c)).join(", ")}`);
+    else console.log(`  none    ${names.get(e.code)} (${e.checked} pairs)`);
+  }
+}
+
+if (process.env.HAND) {
+  const hand = process.env.HAND.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const r = probe(env, hand, rest(hand), extra, { budget: 60, depth: 6, untilDeck: true });
+  console.log("HAND", process.env.HAND, JSON.stringify({ ...r, taken: r.taken.map((c) => names.get(c)) }));
+}

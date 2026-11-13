@@ -2,7 +2,8 @@
 // turns, and apply the swaps it finds with one tap (and undo them just as fast).
 import { useEffect, useMemo, useState } from "react";
 import { CardArt } from "./CardArt";
-import { EXTRA_TYPES, loadTagDefaults, storeTagDefault, type SavedDeck } from "./decks";
+import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck } from "./decks";
+import type { CardEvidence } from "./engine/probe";
 import type { CardInfo } from "./engine/protocol";
 import {
   GOALS, ROLES, allProven, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
@@ -18,6 +19,8 @@ interface Props {
   onShow: (code: number) => void;
   requestInfo: (codes: number[]) => void;
   onTest: (chosen: number[]) => void;
+  engineProgress: { done: number; total: number } | null;
+  onCheck: () => void;
 }
 
 const ATTRIBUTE_NAMES = ["EARTH", "WATER", "FIRE", "WIND", "LIGHT", "DARK", "DIVINE"];
@@ -25,7 +28,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest }: Props) {
+export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -33,7 +36,28 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const [suggestions, setSuggestions] = useState<{ swaps: Swap[]; cut: { cuts: number[]; before: Score; after: Score } | null } | null>(null);
   const defaults = useMemo(loadTagDefaults, [deck.tags]);
 
-  const tagOf = (key: number): Tag => deck.tags?.[key] ?? defaults[key] ?? guessTag(key) ?? { role: "none" };
+  // what the engine found, for the deck as it is now or (while it checks again) as it was
+  const signature = deckSignature(deck);
+  const fresh = deck.engine?.signature === signature;
+  useEffect(() => {
+    if (fresh || deck.main.length === 0) return;
+    const wait = window.setTimeout(onCheck, 800);
+    return () => window.clearTimeout(wait);
+  }, [signature]);
+  const evidence = useMemo(() => new Map((deck.engine?.evidence ?? []).map((entry) => [entry.code, entry])), [deck.engine]);
+  // a card the engine pairs with every card that doesn't start alone works with any second card in a real hand
+  const lone = useMemo(() => [...evidence.values()].filter((entry) => entry.alone.deck === 0).length, [evidence]);
+  const withAny = (codes: number[]) => lone > 1 && codes.length >= lone;
+  const engineTag = (key: number): Tag | null => {
+    const found = evidence.get(key);
+    if (!found) return null;
+    if (found.alone.deck > 0) return { role: "starter", engine: true };
+    if (found.partners.length) return { role: "pair", with: { codes: found.partners, attributes: 0, levels: [] }, engine: true };
+    // "starts nothing" is not "does nothing": a combo piece or a trap is left for you to tag, so it is never cut
+    return null;
+  };
+  // yours in this deck, then the engine's starts, then yours from other decks, then known cards
+  const tagOf = (key: number): Tag => deck.tags?.[key] ?? engineTag(key) ?? defaults[key] ?? guessTag(key) ?? { role: "none" };
   // a card is known by its original code; its details may only be cached under the artwork the deck holds
   const held = useMemo(() => {
     const map = new Map<number, number>();
@@ -73,6 +97,16 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const odds = second ? secondOdds : first;
   const everyStartProven = useMemo(() => allProven(main), [main]);
   const proven = useMemo(() => computeOdds(provenOnly(main), second ? 6 : 5), [main, second]);
+  // only the starts the engine saw work, with the partners it found
+  const engineChecked = useMemo(() => {
+    if (!evidence.size) return null;
+    const checked = main.map((card) => {
+      const engine = engineTag(card.code);
+      if (engine) return { ...card, tag: engine };
+      return card.tag.role === "starter" || card.tag.role === "pair" ? { ...card, tag: { role: "other" as Role } } : card;
+    });
+    return computeOdds(checked, second ? 6 : 5);
+  }, [main, second, evidence]);
   const count = (...roles: Role[]) => main.filter((card) => roles.includes(card.tag.role)).reduce((sum, card) => sum + card.count, 0);
   const untagged = count("none");
   const hasStart = count("starter", "pair") > 0;
@@ -184,10 +218,33 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               <small className="muted">Bricks {oneIn(1 - odds.combo)}</small>
             </span>
           </div>
-          {hasStart && !everyStartProven && (
-            <p className="opt-proven">
-              <b>{pct(proven.combo)}</b> with proven starts only. The rest assumes every start below works: play each with <u>Test</u>, then tick <u>Proven</u>.
-            </p>
+          <ul className="opt-evidence">
+            <li>
+              <span>As tagged</span>
+              <b>{pct(odds.combo)}</b>
+            </li>
+            <li title="The engine played every card alone and with each other card, and counted the starts that kept a new card from the Deck">
+              <span>
+                Engine-checked starts
+                {engineProgress && engineProgress.total > 0 && (
+                  <small>
+                    {" "}
+                    · checking {engineProgress.done} of {engineProgress.total}
+                  </small>
+                )}
+                {engineProgress && !engineProgress.total && <small> · getting ready</small>}
+              </span>
+              <b>{engineChecked ? pct(engineChecked.combo) : "…"}</b>
+            </li>
+            <li title="Starts you played to your full board with Test, then ticked Proven">
+              <span>Proven to a full board</span>
+              <b className={everyStartProven ? "" : "warn"}>{pct(everyStartProven ? odds.combo : proven.combo)}</b>
+            </li>
+          </ul>
+          {engineProgress && engineProgress.total > 0 && (
+            <span className="opt-bar opt-progress">
+              <i style={{ width: `${(engineProgress.done / engineProgress.total) * 100}%` }} />
+            </span>
           )}
           <ul className="opt-odds">
             {rows.map(([label, value, note]) => (
@@ -301,10 +358,23 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                   <button className="opt-name" onClick={() => onShow(card.code)}>
                     {nameOf(card.code)} <span className="muted">×{card.count}</span>
                     {card.tag.guessed && <span className="opt-guess">guess</span>}
+                    {card.tag.engine && <span className="opt-guess engine">engine</span>}
                   </button>
+                  <EngineLine
+                    found={evidence.get(card.code)}
+                    tag={card.tag}
+                    own={!!deck.tags?.[card.code]}
+                    nameOf={nameOf}
+                    withAny={withAny}
+                    onUseEngine={() => {
+                      const tags = { ...deck.tags };
+                      delete tags[card.code];
+                      onChange({ ...deck, tags, updated: Date.now() });
+                    }}
+                  />
                   {card.tag.role === "pair" && (
                     <button className="opt-partners" onClick={() => setPartnerFor(card.code)}>
-                      with {describePartners(card.tag.with, nameOf)} <u>Edit</u>
+                      with {card.tag.with && withAny(card.tag.with.codes) && !card.tag.with.attributes && !card.tag.with.levels.length ? "any other card" : describePartners(card.tag.with, nameOf)} <u>Edit</u>
                     </button>
                   )}
                   {(card.tag.role === "starter" || card.tag.role === "pair") && (
@@ -346,7 +416,10 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               ))}
             </ul>
             <p>
-              Every possible opening hand is counted with its exact chance, no sampling. A combo opens with a Starter, or a Starter with a partner plus one of its partners. A hand trap used as the
+              Engine-checked: the duel engine (EDOPro's own card scripts) played every card in the Main Deck alone, then every pair of cards that start nothing alone,
+              trying the actions it allows a few steps deep. A start counts when the hand ends up keeping a new card from the Deck, so a search that has to put a card
+              back doesn't count. It finds partners by itself: what the engine lets a card do with each other card in the hand. It says whether a hand gets going,
+              not whether it reaches your full board; that's what Proven is for. Every possible opening hand is counted with its exact chance, no sampling. A combo opens with a Starter, or a Starter with a partner plus one of its partners. A hand trap used as the
               partner doesn't count as a hand trap you still hold. A start is only as good as its tag: Test deals it with a partner (if it needs one) and
               cards that can't help, hand traps held back; tick Proven once it reaches your full board. Until every start is proven, the headline also shows the
               proven-only number. Going first, "Hand trap, going 2nd" cards count as dead. Swaps are judged on going first and going second equally, and use the
@@ -366,6 +439,35 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
         />
       )}
     </div>
+  );
+}
+
+// How the engine knows, in one line, and where it disagrees with a tag you set
+function EngineLine({ found, tag, own, nameOf, withAny, onUseEngine }: { found?: CardEvidence; tag: Tag; own: boolean; nameOf: (code: number) => string; withAny: (codes: number[]) => boolean; onUseEngine: () => void }) {
+  if (!found) return null;
+  const alone = found.alone.deck > 0;
+  const partnered = found.partners.length > 0;
+  const steps = found.alone.steps.filter((step) => !step.startsWith("pick ")).slice(0, 4).join(" › ");
+  const picks = found.alone.taken.slice(0, 3).map(nameOf).join(", ");
+  let text: string;
+  if (alone) text = `Engine: alone it keeps ${found.alone.deck} new card${found.alone.deck > 1 ? "s" : ""} from the Deck (${steps}${picks ? `: ${picks}` : ""})`;
+  else if (partnered) text = `Engine: nothing alone; starts with ${withAny(found.partners) ? "any other card" : `${found.partners.length} card${found.partners.length > 1 ? "s" : ""} in this deck`}`;
+  else text = `Engine: nothing alone or with any one other card (${found.checked} tried)`;
+  const role = tag.role;
+  const disagrees = own && ((role === "starter" && !alone) || (role === "pair" && alone) || ((role === "pair" || role === "starter") && !alone && !partnered) || (role !== "starter" && role !== "pair" && (alone || partnered)));
+  return (
+    <span className={`opt-engine ${disagrees ? "warn" : ""}`}>
+      {disagrees && "⚠ "}
+      {text}
+      {disagrees && (
+        <>
+          {" "}
+          <button className="opt-link" onClick={onUseEngine}>
+            Use the engine's tag
+          </button>
+        </>
+      )}
+    </span>
   );
 }
 

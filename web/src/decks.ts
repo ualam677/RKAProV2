@@ -2,6 +2,7 @@
 // .ydk (EDOPro), ydke:// links (EDOPro's "copy deck", YGOPRODeck) and YGO Omega deck codes.
 import { parseYdk, type Deck } from "./deck";
 import type { Tag } from "./optimiser";
+import type { CardEvidence } from "./engine/probe";
 
 export interface SavedDeck extends Deck {
   id: string;
@@ -9,7 +10,12 @@ export interface SavedDeck extends Deck {
   updated: number;
   // Deck Optimiser roles, by card (alternate artworks share the original's)
   tags?: Record<string, Tag>;
+  // what the engine found each card starts, for the deck as it was (`signature`)
+  engine?: { signature: string; evidence: CardEvidence[] };
 }
+
+// Changes whenever the cards the engine checks change (Main and Extra, any order)
+export const deckSignature = (deck: Deck) => `${[...deck.main].sort((a, b) => a - b).join(",")}|${[...deck.extra].sort((a, b) => a - b).join(",")}`;
 
 const KEY = "rka.decks";
 

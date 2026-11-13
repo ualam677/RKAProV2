@@ -29,6 +29,8 @@ export interface Tag {
   role: Role;
   with?: Partners;
   guessed?: boolean;
+  // set by the engine probe (it played the card and saw it start), not by anyone
+  engine?: boolean;
   // the start was played from the hand to a full board, with nothing else helping
   proven?: boolean;
 }

@@ -17,6 +17,8 @@ interface Props {
   onChange: (deck: SavedDeck) => void;
   onClose: () => void;
   onTest: (chosen?: number[]) => void;
+  engineProgress: { done: number; total: number } | null;
+  onCheck: () => void;
 }
 
 type Section = "main" | "extra" | "side";
@@ -73,7 +75,7 @@ function Thumb({ code, card, limit, onTap, onHold }: { code: number; card?: Card
   );
 }
 
-export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestText, search, onChange, onClose, onTest }: Props) {
+export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestText, search, onChange, onClose, onTest, engineProgress, onCheck }: Props) {
   const [query, setQuery] = useState<CardSearch>({});
   const [results, setResults] = useState<{ results: CardInfo[]; more: boolean }>({ results: [], more: false });
   const [filters, setFilters] = useState(false);
@@ -278,7 +280,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
         <div className="deck-area">{(["main", "extra", "side"] as Section[]).map(section)}</div>
 
         {optimising ? (
-          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} onTest={onTest} />
+          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} />
         ) : (
         <div className="search-area">
           <div className="search-bar">

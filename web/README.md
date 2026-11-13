@@ -44,6 +44,15 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   Each start has Test (deals it with one partner if it needs one and cards that can't help, hand traps held back) and a
   Proven tick; until every start is proven the headline also shows the proven-only number. On the Galaxy list, only
   Delta Wing, Orbital 7 and Infinity Dragon were ever replayed alone under EDOPro rules in v1: 71.1% proven of 93.3%.
+- Engine probe (`src/engine/probe.ts`, run in the worker between other requests; `tools/probe-deck.mjs` runs it in Node):
+  the duel core plays every Main Deck card alone, then every pair of cards that start nothing alone, trying the Main
+  Phase actions it allows and every single pick from the Deck, Extra Deck or hand, up to 6 steps, each branch replayed
+  from the start. A start keeps a new card out of the Deck (by identity, so Seventh Tachyon putting its search back
+  gains nothing). Its starts and the partners it finds become the tags unless you set your own, with a line per card
+  saying how it knows and a warning where your tag disagrees. The optimiser shows three numbers: as tagged,
+  engine-checked starts, proven to a full board. Galaxy list: 4 starters alone (Orbital 7, Infinity Dragon, Delta
+  Wing, Wizard), Soldier with any LIGHT monster in the deck, Photon Orbital with Summoner or War Drake, Seventh
+  Tachyon with any second card; 93.3% engine-checked. About 20 s for a 43-card deck, kept with the deck.
   Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it
   matches v1's own code (93.34% / 96.48%), a separate naive evaluator over every hand, and a 1M-hand simulation.
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
