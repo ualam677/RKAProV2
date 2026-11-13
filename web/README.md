@@ -41,6 +41,9 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   (a hand trap used as a partner is not counted), combo + extender, hand traps held, breakers, bricks. Suggestions:
   cut to 40 and the best one-for-one swaps (Main or Side Deck cards), judged on both turns equally for the chosen goal,
   applied with one tap and undone with another. Untagged cards and Extenders are never suggested as cuts.
+  Each start has Test (deals it with one partner if it needs one and cards that can't help, hand traps held back) and a
+  Proven tick; until every start is proven the headline also shows the proven-only number. On the Galaxy list, only
+  Delta Wing, Orbital 7 and Infinity Dragon were ever replayed alone under EDOPro rules in v1: 71.1% proven of 93.3%.
   Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it
   matches v1's own code (93.34% / 96.48%), a separate naive evaluator over every hand, and a 1M-hand simulation.
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,

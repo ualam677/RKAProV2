@@ -210,15 +210,22 @@ function App() {
     setChosen(chosen.slice(0, size));
   };
 
-  const start = useCallback(() => {
+  // a test from the optimiser deals exactly the cards it names (5 cards, hand traps held back) and stays set for New hand
+  const start = useCallback((test?: { chosen: number[] }) => {
     if (!deck) return;
+    const use = test ? { hand: 5, chosen: test.chosen, ignoreHandTraps: true } : { hand, chosen, ignoreHandTraps };
+    if (test) {
+      setHand(5);
+      setChosen(test.chosen);
+      setIgnoreHandTraps(true);
+    }
     setError("");
     setEditing(false);
     // whatever was still being shown from the last hand is dropped
     window.clearTimeout(timer.current);
     timer.current = 0;
     queue.current = [];
-    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, hand, chosen, ignoreHandTraps, seed: Math.floor(Math.random() * 2 ** 31) });
+    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, seed: Math.floor(Math.random() * 2 ** 31) });
   }, [deck, hand, chosen, ignoreHandTraps]);
 
   const requestText = useCallback(
@@ -236,7 +243,7 @@ function App() {
             {error}
           </p>
         )}
-        <Duel view={view} texts={texts} requestText={requestText} answer={(picks) => post({ type: "answer", picks })} restart={start} leave={() => (skip(), setView(null))} skip={skip} />
+        <Duel view={view} texts={texts} requestText={requestText} answer={(picks) => post({ type: "answer", picks })} restart={() => start()} leave={() => (skip(), setView(null))} skip={skip} />
       </>
     );
   }
@@ -253,7 +260,7 @@ function App() {
         search={search}
         onChange={changeDeck}
         onClose={() => setEditing(false)}
-        onTest={start}
+        onTest={(chosen) => start(chosen ? { chosen } : undefined)}
       />
     );
   }
@@ -309,7 +316,7 @@ function App() {
         </div>
         {deck && (
           <div className="row">
-            <button className="button primary" disabled={!ready || deck.main.length === 0} onClick={start}>
+            <button className="button primary" disabled={!ready || deck.main.length === 0} onClick={() => start()}>
               Test hand
             </button>
             <button className="button" disabled={!ready} onClick={() => setEditing(true)}>

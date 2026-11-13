@@ -420,3 +420,8 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-goals .button { min-height: 40px; padding: 0 4px; font-size: 12px; line-height: 1.2; }
 .opt-section > .muted { margin: 0; }
 .opt-note .button { margin-top: 6px; }
+.opt-proven { margin: 0; padding: 8px 10px; border: 1px dashed var(--line-bright); border-radius: var(--radius); font-size: 13px; color: var(--muted); line-height: 1.4; }
+.opt-proven b { font-size: 16px; color: #ffd36b; }
+.opt-proven u { color: var(--accent-strong); text-decoration: none; font-weight: 600; }
+.opt-proof { display: flex; gap: 6px; margin-top: 3px; }
+.opt-proof .button { min-height: 30px; padding: 0 10px; font-size: 12px; }

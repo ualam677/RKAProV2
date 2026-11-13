@@ -16,7 +16,7 @@ interface Props {
   search: (query: CardSearch) => Promise<{ results: CardInfo[]; more: boolean }>;
   onChange: (deck: SavedDeck) => void;
   onClose: () => void;
-  onTest: () => void;
+  onTest: (chosen?: number[]) => void;
 }
 
 type Section = "main" | "extra" | "side";
@@ -231,7 +231,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
         </button>
         {menu && (
           <div className="menu editor-menu" onClick={() => setMenu(false)}>
-            <button className="button" onClick={onTest}>
+            <button className="button" onClick={() => onTest()}>
               Test hand
             </button>
             <button className="button" onClick={download}>
@@ -278,7 +278,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
         <div className="deck-area">{(["main", "extra", "side"] as Section[]).map(section)}</div>
 
         {optimising ? (
-          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} />
+          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} onTest={onTest} />
         ) : (
         <div className="search-area">
           <div className="search-bar">

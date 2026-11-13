@@ -29,6 +29,8 @@ export interface Tag {
   role: Role;
   with?: Partners;
   guessed?: boolean;
+  // the start was played from the hand to a full board, with nothing else helping
+  proven?: boolean;
 }
 export interface CardFacts {
   type: number;
@@ -161,6 +163,34 @@ function forEachHand(groups: Group[], size: number, visit: (counts: number[], p:
     counts[at] = 0;
   };
   walk(0, size, 1);
+}
+
+const isStart = (role: Role) => role === "starter" || role === "pair";
+
+/** The deck as if only the proven starts worked: what the numbers are worth before anything else has been played. */
+export const provenOnly = (cards: DeckCard[]): DeckCard[] =>
+  cards.map((card) => (isStart(card.tag.role) && !card.tag.proven ? { ...card, tag: { role: "other" } } : card));
+export const allProven = (cards: DeckCard[]) => cards.every((card) => !isStart(card.tag.role) || card.tag.proven);
+
+/**
+ * The hand that tests one start: the start, one partner if it needs one (a card that starts nothing itself, so the
+ * test is about this card), and the rest from cards that cannot help (hand traps first, then bricks).
+ */
+export function testHand(card: DeckCard, cards: DeckCard[], size = 5): number[] | null {
+  const hand = [card.code];
+  const left = new Map(cards.map((one) => [one.code, one.count - (one.code === card.code ? 1 : 0)]));
+  const take = (one: DeckCard) => (hand.push(one.code), left.set(one.code, left.get(one.code)! - 1));
+  if (card.tag.role === "pair") {
+    const rank = (role: Role) => ["other", "none", "brick", "extender", "handtrap2", "handtrap", "pair", "starter"].indexOf(role);
+    const partner = cards.filter((one) => matchesPartner(card.tag.with, one) && left.get(one.code)! > 0).sort((a, b) => rank(a.tag.role) - rank(b.tag.role))[0];
+    if (!partner) return null;
+    take(partner);
+  }
+  const partnersOfAny = (one: DeckCard) => cards.some((pair) => pair.tag.role === "pair" && pair.code !== one.code && matchesPartner(pair.tag.with, one));
+  for (const role of ["handtrap", "handtrap2", "brick"] as Role[])
+    for (const one of cards)
+      while (hand.length < size && one.tag.role === role && left.get(one.code)! > 0 && !partnersOfAny(one)) take(one);
+  return hand;
 }
 
 export function computeOdds(cards: DeckCard[], hand: number): Odds {

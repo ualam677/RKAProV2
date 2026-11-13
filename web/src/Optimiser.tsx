@@ -5,7 +5,7 @@ import { CardArt } from "./CardArt";
 import { EXTRA_TYPES, loadTagDefaults, storeTagDefault, type SavedDeck } from "./decks";
 import type { CardInfo } from "./engine/protocol";
 import {
-  GOALS, ROLES, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, roleName,
+  GOALS, ROLES, allProven, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
 
@@ -17,6 +17,7 @@ interface Props {
   onChange: (deck: SavedDeck) => void;
   onShow: (code: number) => void;
   requestInfo: (codes: number[]) => void;
+  onTest: (chosen: number[]) => void;
 }
 
 const ATTRIBUTE_NAMES = ["EARTH", "WATER", "FIRE", "WIND", "LIGHT", "DARK", "DIVINE"];
@@ -24,7 +25,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo }: Props) {
+export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -70,6 +71,8 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const first = useMemo(() => computeOdds(main, 5), [main]);
   const secondOdds = useMemo(() => computeOdds(main, 6), [main]);
   const odds = second ? secondOdds : first;
+  const everyStartProven = useMemo(() => allProven(main), [main]);
+  const proven = useMemo(() => computeOdds(provenOnly(main), second ? 6 : 5), [main, second]);
   const count = (...roles: Role[]) => main.filter((card) => roles.includes(card.tag.role)).reduce((sum, card) => sum + card.count, 0);
   const untagged = count("none");
   const hasStart = count("starter", "pair") > 0;
@@ -90,6 +93,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
 
   const setTag = (key: number, tag: Tag) => {
     const clean: Tag = tag.role === "pair" ? { role: "pair", with: tag.with ?? { codes: [], attributes: 0, levels: [] } } : { role: tag.role };
+    if (tag.proven && (tag.role === "starter" || tag.role === "pair")) clean.proven = true;
     storeTagDefault(key, clean);
     onChange({ ...deck, tags: { ...deck.tags, [key]: clean }, updated: Date.now() });
   };
@@ -100,7 +104,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   };
   const setRole = (key: number, role: Role) => {
     const old = tagOf(key);
-    setTag(key, { role, with: role === "pair" ? old.with : undefined });
+    setTag(key, { role, with: role === "pair" ? old.with : undefined }); // a new role has to be proven again
     if (role === "pair" && !old.with) setPartnerFor(key);
   };
 
@@ -180,6 +184,11 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               <small className="muted">Bricks {oneIn(1 - odds.combo)}</small>
             </span>
           </div>
+          {hasStart && !everyStartProven && (
+            <p className="opt-proven">
+              <b>{pct(proven.combo)}</b> with proven starts only. The rest assumes every start below works: play each with <u>Test</u>, then tick <u>Proven</u>.
+            </p>
+          )}
           <ul className="opt-odds">
             {rows.map(([label, value, note]) => (
               <li key={label}>
@@ -298,6 +307,23 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                       with {describePartners(card.tag.with, nameOf)} <u>Edit</u>
                     </button>
                   )}
+                  {(card.tag.role === "starter" || card.tag.role === "pair") && (
+                    <span className="opt-proof">
+                      <button
+                        className="button small"
+                        onClick={() => {
+                          const hand = testHand(card, main);
+                          if (hand) onTest(hand.map((code) => held.get(code) ?? code));
+                        }}
+                        disabled={!testHand(card, main)}
+                      >
+                        Test
+                      </button>
+                      <button className={`button small ${card.tag.proven ? "on" : "ghost"}`} onClick={() => setTag(card.code, { ...card.tag, proven: !card.tag.proven })}>
+                        {card.tag.proven ? "✓ Proven" : "Proven?"}
+                      </button>
+                    </span>
+                  )}
                 </div>
                 <select value={card.tag.role} onChange={(event) => setRole(card.code, event.target.value as Role)} aria-label={`Role of ${nameOf(card.code)}`}>
                   <option value="none">Not tagged</option>
@@ -321,7 +347,9 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
             </ul>
             <p>
               Every possible opening hand is counted with its exact chance, no sampling. A combo opens with a Starter, or a Starter with a partner plus one of its partners. A hand trap used as the
-              partner doesn't count as a hand trap you still hold. Going first, "Hand trap, going 2nd" cards count as dead. Swaps are judged on going first and going second equally, and use the
+              partner doesn't count as a hand trap you still hold. A start is only as good as its tag: Test deals it with a partner (if it needs one) and
+              cards that can't help, hand traps held back; tick Proven once it reaches your full board. Until every start is proven, the headline also shows the
+              proven-only number. Going first, "Hand trap, going 2nd" cards count as dead. Swaps are judged on going first and going second equally, and use the
               tags of the card coming in.
             </p>
           </details>
