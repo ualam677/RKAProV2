@@ -1,23 +1,27 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { parseYdk, shuffled, type Deck } from "./deck";
+import { parseYdk, shuffled } from "./deck";
 import { Duel, cueTime } from "./Duel";
+import { DeckEditor } from "./DeckEditor";
 import { CardArt } from "./CardArt";
-import type { CardText, DuelView, FromWorker, ToWorker } from "./engine/protocol";
+import { EXTRA_TYPES, importDeck, loadDecks, newId, storeDecks, type SavedDeck } from "./decks";
+import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, ToWorker } from "./engine/protocol";
 import "./style.css";
 
 // EDOPro's card back, from Project Ignis like the scripts and card data; every face-down card uses it
 const COVER_URL = import.meta.env.VITE_COVER_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/Distribution/master/textures/cover.png";
 document.documentElement.style.setProperty("--cover", `url("${COVER_URL}")`);
 
-// remembered on this device only, so the phone opens straight to the last deck
+// hand test settings, remembered on this device only
 const SAVED = "rka.handtest";
 interface Saved {
-  deckText: string;
-  deckName: string;
+  deckId: string;
   hand: number;
   chosen: number[];
   ignoreHandTraps: boolean;
+  // before decks were saved in a list, the last opened .ydk was kept here
+  deckText?: string;
+  deckName?: string;
 }
 function loadSaved(): Partial<Saved> {
   try {
@@ -34,22 +38,56 @@ function save(value: Saved) {
   }
 }
 
+function startingDecks(saved: Partial<Saved>): SavedDeck[] {
+  const decks = loadDecks();
+  if (decks.length || !saved.deckText) return decks;
+  // the deck opened before the deck list existed becomes the first saved deck
+  return [{ ...parseYdk(saved.deckText), id: newId(), name: saved.deckName || "My deck", updated: Date.now() }];
+}
+
 function App() {
   const worker = useRef<Worker | null>(null);
   const saved = useMemo(loadSaved, []);
   const [status, setStatus] = useState("Starting");
   const [ready, setReady] = useState(false);
-  const [deckText, setDeckText] = useState(saved.deckText ?? "");
-  const [deckName, setDeckName] = useState(saved.deckName ?? "");
+  const [decks, setDecks] = useState<SavedDeck[]>(() => startingDecks(saved));
+  const [deckId, setDeckId] = useState(saved.deckId ?? decks[0]?.id ?? "");
+  const [editing, setEditing] = useState(false);
+  const [pasting, setPasting] = useState(false);
+  const [paste, setPaste] = useState("");
   const [hand, setHand] = useState(saved.hand ?? 5);
   const [chosen, setChosen] = useState<number[]>(saved.chosen ?? []);
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
   const [view, setView] = useState<DuelView | null>(null);
   const [texts, setTexts] = useState(new Map<number, CardText>());
+  const [cards, setCards] = useState(new Map<number, CardInfo>());
+  const [banlist, setBanlist] = useState<{ name: string; limits: Record<number, number> }>({ name: "", limits: {} });
   const [error, setError] = useState("");
-  const deck: Deck | null = useMemo(() => (deckText ? parseYdk(deckText) : null), [deckText]);
+  const deck = decks.find((one) => one.id === deckId) ?? decks[0] ?? null;
 
   const post = (message: ToWorker) => worker.current?.postMessage(message);
+
+  // replies the worker sends back to a request: searches by id, card details in the order they were asked
+  const searches = useRef(new Map<number, (result: { results: CardInfo[]; more: boolean }) => void>());
+  const searchId = useRef(0);
+  const infoWaiting = useRef<((found: (CardInfo & { asked: number })[]) => void)[]>([]);
+  const search = useCallback(
+    (query: CardSearch) =>
+      new Promise<{ results: CardInfo[]; more: boolean }>((resolve) => {
+        const id = ++searchId.current;
+        searches.current.set(id, resolve);
+        post({ type: "search", id, search: query });
+      }),
+    [],
+  );
+  const info = useCallback(
+    (codes: number[]) =>
+      new Promise<(CardInfo & { asked: number })[]>((resolve) => {
+        infoWaiting.current.push(resolve);
+        post({ type: "info", codes });
+      }),
+    [],
+  );
 
   // Views sent mid-play are shown one after another, each held only as long as its animation;
   // a tap skips straight to the newest one.
@@ -91,16 +129,34 @@ function App() {
       if (message.type === "progress") setStatus(message.text);
       else if (message.type === "ready") {
         setReady(true);
+        setBanlist(message.banlist);
         setStatus(`${message.cards.toLocaleString()} cards loaded`);
       } else if (message.type === "view") receive(message.view);
       else if (message.type === "text") setTexts((known) => new Map(known).set(message.card.code, message.card));
-      else if (message.type === "error") setError(message.text);
+      else if (message.type === "search") {
+        // results are remembered too, so adding one knows whether it belongs in the Extra Deck
+        setCards((known) => {
+          const next = new Map(known);
+          for (const card of message.results) next.set(card.code, card);
+          return next;
+        });
+        searches.current.get(message.id)?.(message);
+        searches.current.delete(message.id);
+      } else if (message.type === "info") {
+        setCards((known) => {
+          const next = new Map(known);
+          for (const card of message.cards) next.set(card.asked, { ...card, code: card.asked });
+          return next;
+        });
+        infoWaiting.current.shift()?.(message.cards);
+      } else if (message.type === "error") setError(message.text);
     };
     instance.postMessage({ type: "init" } satisfies ToWorker);
     return () => instance.terminate();
   }, []);
 
-  useEffect(() => save({ deckText, deckName, hand, chosen, ignoreHandTraps }), [deckText, deckName, hand, chosen, ignoreHandTraps]);
+  useEffect(() => storeDecks(decks), [decks]);
+  useEffect(() => save({ deckId: deck?.id ?? "", hand, chosen, ignoreHandTraps }), [deck, hand, chosen, ignoreHandTraps]);
 
   // errors clear themselves so they never sit over the field for long
   useEffect(() => {
@@ -115,11 +171,31 @@ function App() {
     if (ready) unique.forEach((code) => texts.has(code) || post({ type: "text", code }));
   }, [ready, unique]);
 
-  const loadDeck = async (file: File | undefined) => {
-    if (!file) return;
-    setDeckText(await file.text());
-    setDeckName(file.name.replace(/\.ydk$/i, ""));
+  const pickDeck = (id: string) => {
+    setDeckId(id);
     setChosen([]);
+  };
+  const changeDeck = (next: SavedDeck) => setDecks((all) => all.map((one) => (one.id === next.id ? next : one)));
+  const addDeck = (next: Omit<SavedDeck, "id" | "updated">) => {
+    const made = { ...next, id: newId(), updated: Date.now() };
+    setDecks((all) => [made, ...all]);
+    pickDeck(made.id);
+    return made;
+  };
+
+  const importText = async (text: string, fileName = "") => {
+    try {
+      const imported = await importDeck(text, fileName);
+      const name = fileName.replace(/\.(ydk|txt)$/i, "") || "Imported deck";
+      if ("deck" in imported) return addDeck({ ...imported.deck, name });
+      // YGO Omega keeps Main and Extra together: split them by card type
+      const found = await info([...imported.unsplit.mainAndExtra, ...imported.unsplit.side]);
+      const known = new Map(found.map((card) => [card.asked, card]));
+      const isExtra = (code: number) => ((known.get(code)?.type ?? 0) & EXTRA_TYPES) !== 0;
+      addDeck({ name, main: imported.unsplit.mainAndExtra.filter((code) => !isExtra(code)), extra: imported.unsplit.mainAndExtra.filter(isExtra), side: imported.unsplit.side });
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    }
   };
 
   const copies = (code: number) => deck?.main.filter((card) => card === code).length ?? 0;
@@ -136,6 +212,7 @@ function App() {
   const start = useCallback(() => {
     if (!deck) return;
     setError("");
+    setEditing(false);
     // whatever was still being shown from the last hand is dropped
     window.clearTimeout(timer.current);
     timer.current = 0;
@@ -163,6 +240,23 @@ function App() {
     );
   }
 
+  if (editing && deck) {
+    return (
+      <DeckEditor
+        deck={deck}
+        cards={cards}
+        texts={texts}
+        banlist={banlist}
+        requestInfo={(codes) => void info(codes)}
+        requestText={requestText}
+        search={search}
+        onChange={changeDeck}
+        onClose={() => setEditing(false)}
+        onTest={start}
+      />
+    );
+  }
+
   const nameOf = (code: number) => texts.get(code)?.name ?? `#${code}`;
   return (
     <main className="start">
@@ -170,17 +264,62 @@ function App() {
         <h1>RKAPro</h1>
         <p className="status">{status}</p>
       </header>
+      {error && (
+        <p className="error" onClick={() => setError("")}>
+          {error}
+        </p>
+      )}
 
-      <section className="panel">
-        <label className="button">
-          {deck ? `${deckName} (${deck.main.length} + ${deck.extra.length})` : "Open a deck (.ydk)"}
-          <input type="file" accept=".ydk" hidden onChange={(event) => loadDeck(event.target.files?.[0])} />
-        </label>
-        <button className="button primary" disabled={!ready || !deck} onClick={start}>
-          Test hand
-        </button>
+      <section className="box">
+        <div className="box-head">
+          <h2>Decks</h2>
+          <div className="row">
+            <button className="button small" onClick={() => (addDeck({ name: "New deck", main: [], extra: [], side: [] }), setEditing(true))} disabled={!ready}>
+              New
+            </button>
+            <label className="button small">
+              Open file
+              <input type="file" accept=".ydk,.txt" hidden onChange={async (event) => { const file = event.target.files?.[0]; if (file) await importText(await file.text(), file.name); event.target.value = ""; }} />
+            </label>
+            <button className="button small" onClick={() => setPasting(!pasting)}>
+              Paste
+            </button>
+          </div>
+        </div>
+        {pasting && (
+          <div className="paste">
+            <textarea value={paste} onChange={(event) => setPaste(event.target.value)} placeholder="A ydke:// link, a YGO Omega deck code, or the text of a .ydk file" rows={3} />
+            <button className="button primary small" disabled={!paste.trim() || !ready} onClick={async () => { await importText(paste); setPaste(""); setPasting(false); }}>
+              Import
+            </button>
+          </div>
+        )}
+        <div className="deck-picker">
+          {decks.map((one) => (
+            <button key={one.id} className={`deck-row ${one.id === deck?.id ? "on" : ""}`} onClick={() => pickDeck(one.id)}>
+              <span>{one.name}</span>
+              <span className="muted">
+                {one.main.length} + {one.extra.length}
+                {one.side.length ? ` + ${one.side.length}` : ""}
+              </span>
+            </button>
+          ))}
+          {!decks.length && <p className="muted">No decks yet: make one, or open a .ydk file, or paste a ydke:// link or YGO Omega code.</p>}
+        </div>
+        {deck && (
+          <div className="row">
+            <button className="button primary" disabled={!ready || deck.main.length === 0} onClick={start}>
+              Test hand
+            </button>
+            <button className="button" disabled={!ready} onClick={() => setEditing(true)}>
+              Edit deck
+            </button>
+            <button className="button ghost" onClick={() => { if (confirm(`Delete "${deck.name}"?`)) setDecks((all) => all.filter((one) => one.id !== deck.id)); }}>
+              Delete
+            </button>
+          </div>
+        )}
       </section>
-      {error && <p className="error">{error}</p>}
 
       {deck && (
         <>

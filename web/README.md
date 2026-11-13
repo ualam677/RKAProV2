@@ -30,15 +30,20 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   to a total (Ritual/Synchro, sent as soon as the total is right), removing counters, declaring a Type or Attribute;
   negated chain links, revealed cards, coin and dice results, attacks, the core's messages and the winner are shown;
   counters and Xyz materials are on the field and in the card text.
+- Deck editor after EDOPro's: search by name or text with filters (card type and subtype, Attribute, Type, Level or
+  Rank, ATK/DEF, ban-list status), Main / Extra / Side with the size rules, 3 copies and the TCG ban list (Project Ignis
+  LFLists), EDOPro's sort. Several decks saved on the device; import a .ydk, a ydke:// link or a YGO Omega code (Main and
+  Extra split by card type); export the same three. Phone: deck on top, search below; wide: info | deck | search.
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order
-1. Opponent: hand traps (easy / smart), then plays its own turn with board breakers
+1. Deck Optimiser inside the editor: v2's tags and exact odds plus v1's two-card needs (see the comparison below).
+2. Opponent: hand traps (easy / smart), then plays its own turn with board breakers
    (Veiler / Imperm on the player's turn, Imperm at the start of its turn, Lightning Storm, Cosmic Cyclone-style cards).
-2. Deck Optimiser: card roles, exact odds, routes learned from saved replays, then end-board suggestion from a random
-   hand (beam search over the core, scored against learned end boards).
-3. Save states (seed + response log), replays, takeover.
+3. Routes learned from saved replays, then end-board suggestion from a random hand (beam search over the core, scored
+   against learned end boards).
+4. Save states (seed + response log), replays, takeover.
 5. Omega deck folder link with write-back, Google Drive sync.
 6. Replay to mp4 / GIF.
 

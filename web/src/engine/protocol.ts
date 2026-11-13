@@ -131,17 +131,49 @@ export interface StartOptions {
   seed: number;
 }
 
+// A card as the deck editor needs it.
+export interface CardInfo {
+  code: number;
+  name: string;
+  type: number;
+  level: number; // Level, Rank or Link rating
+  attribute: number;
+  race: number;
+  attack: number;
+  defense: number;
+  // passcode the card shares its name with (alternate artworks), for the 3-copy rule
+  alias: number;
+}
+
+// The deck editor's search, after EDOPro's filters. Every field is optional.
+export interface CardSearch {
+  text?: string; // name or card text
+  kind?: "monster" | "spell" | "trap";
+  subtype?: number; // a TYPE bit (Effect, Fusion, Quick-Play, Continuous ...)
+  attribute?: number;
+  race?: number;
+  level?: number;
+  atk?: [number | null, number | null];
+  def?: [number | null, number | null];
+  limit?: 0 | 1 | 2 | 3; // ban-list status; 3 = unlimited
+}
+
 export type ToWorker =
   | { type: "init" }
   | ({ type: "start" } & StartOptions)
   | { type: "answer"; picks: number[] | null }
-  | { type: "text"; code: number };
+  | { type: "text"; code: number }
+  | { type: "search"; id: number; search: CardSearch }
+  | { type: "info"; codes: number[] };
 
 export type FromWorker =
   | { type: "progress"; text: string }
-  | { type: "ready"; cards: number }
+  | { type: "ready"; cards: number; banlist: { name: string; limits: Record<number, number> } }
   | { type: "view"; view: DuelView }
   | { type: "text"; card: CardText }
+  | { type: "search"; id: number; results: CardInfo[]; more: boolean }
+  // asked: the passcode as requested (Omega numbers alternate artworks itself), code: the card it is
+  | { type: "info"; cards: (CardInfo & { asked: number })[] }
   | { type: "error"; text: string };
 
 export const LOCATION = { DECK: 1, HAND: 2, MZONE: 4, SZONE: 8, GRAVE: 16, REMOVED: 32, EXTRA: 64 } as const;

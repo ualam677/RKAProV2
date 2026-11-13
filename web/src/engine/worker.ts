@@ -23,12 +23,13 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import type { CardRef, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, ToWorker } from "./protocol";
+import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, ToWorker } from "./protocol";
 
 // Folder holding cards.cdb and the release / pre-release databases, and a listing of that folder.
 const CDB_URL = import.meta.env.VITE_CDB_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/BabelCDB/master";
 const CDB_LIST_URL = import.meta.env.VITE_CDB_LIST_URL ?? "https://api.github.com/repos/ProjectIgnis/BabelCDB/contents/";
 const SCRIPTS_URL = import.meta.env.VITE_SCRIPTS_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/CardScripts/master";
+const LFLIST_URL = import.meta.env.VITE_LFLIST_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/LFLists/master/0TCG.lflist.conf";
 const STRINGS_URL = import.meta.env.VITE_STRINGS_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/Distribution/master/config/strings.conf";
 
 const send = (message: FromWorker) => postMessage(message);
@@ -40,6 +41,71 @@ const texts = new Map<number, string>();
 const cardStrings = new Map<number, string[]>(); // effect descriptions, str1..str16
 const systemStrings = new Map<number, string>();
 const counterNames = new Map<number, string>();
+// the TCG ban list: passcode -> copies allowed (0, 1 or 2); cards not listed allow 3
+const banlist = { name: "", limits: {} as Record<number, number> };
+
+async function loadBanlist() {
+  try {
+    const text = await (await fetch(LFLIST_URL)).text();
+    for (const line of text.split(/\r?\n/)) {
+      if (line.startsWith("!")) banlist.name = line.slice(1).trim();
+      const match = /^(\d+) (\d)/.exec(line);
+      if (match) banlist.limits[Number(match[1])] = Number(match[2]);
+    }
+  } catch {
+    // no ban list: everything at 3
+  }
+}
+
+const TYPE_TOKEN_BIT = 0x4000;
+const TYPE_SKILL_BIT = 0x8000000;
+function infoOf(code: number): CardInfo | null {
+  const card = cards.get(code);
+  if (!card) return null;
+  return { code, name: nameOf(code), type: card.type, level: card.level, attribute: card.attribute, race: Number(card.race), attack: card.attack, defense: card.defense, alias: card.alias };
+}
+
+// EDOPro's deck editor order: monsters (by type, then Level high to low), Spells, Traps; then by name
+function sortKey(card: CardInfo): [number, number, string] {
+  const group = card.type & 1 ? 0 : card.type & 2 ? 1 : 2;
+  return [group, -card.level, card.name];
+}
+
+function search(query: CardSearch): { results: CardInfo[]; more: boolean } {
+  const words = (query.text ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  const out: CardInfo[] = [];
+  for (const card of cards.values()) {
+    // one row per card name: alternate artworks and tokens are left out, as in EDOPro's search
+    if (card.alias && Math.abs(card.alias - card.code) < 20) continue;
+    if (card.type & (TYPE_TOKEN_BIT | TYPE_SKILL_BIT)) continue;
+    if (query.kind === "monster" && !(card.type & 1)) continue;
+    if (query.kind === "spell" && !(card.type & 2)) continue;
+    if (query.kind === "trap" && !(card.type & 4)) continue;
+    if (query.subtype && !(card.type & query.subtype)) continue;
+    if (query.attribute && !(card.attribute & query.attribute)) continue;
+    if (query.race && !(Number(card.race) & query.race)) continue;
+    if (query.level !== undefined && card.level !== query.level) continue;
+    const between = (value: number, range?: [number | null, number | null]) => !range || ((range[0] === null || value >= range[0]) && (range[1] === null || value <= range[1]));
+    if (!between(card.attack, query.atk) || !between(card.defense, query.def)) continue;
+    if (query.limit !== undefined && (banlist.limits[card.code] ?? 3) !== query.limit) continue;
+    if (words.length) {
+      const name = nameOf(card.code).toLowerCase();
+      const text = (texts.get(card.code) ?? "").toLowerCase();
+      if (!words.every((word) => name.includes(word) || text.includes(word))) continue;
+    }
+    out.push(infoOf(card.code)!);
+  }
+  // cards whose name matches come before cards that only mention it in their text
+  const named = (card: CardInfo) => (words.length && words.every((word) => card.name.toLowerCase().includes(word)) ? 0 : 1);
+  out.sort((a, b) => named(a) - named(b) || compareCards(a, b));
+  return { results: out.slice(0, 300), more: out.length > 300 };
+}
+
+function compareCards(a: CardInfo, b: CardInfo) {
+  const [ga, la, na] = sortKey(a);
+  const [gb, lb, nb] = sortKey(b);
+  return ga - gb || la - lb || na.localeCompare(nb);
+}
 const scripts = new Map<string, string | null>();
 
 // cards.cdb first, then every newer set: release-*.cdb and prerelease-*.cdb (no Rush, Skill or unofficial cards).
@@ -840,7 +906,8 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       send({ type: "progress", text: "Starting duel engine" });
       const wasmBinary = await (await fetch(coreWasmUrl)).arrayBuffer();
       core = await createCore({ sync: true, wasmBinary });
-      send({ type: "ready", cards: cards.size });
+      await loadBanlist();
+      send({ type: "ready", cards: cards.size, banlist });
     } else if (message.type === "start") {
       await start(message);
     } else if (message.type === "answer") {
@@ -849,6 +916,14 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
         core.duelSetResponse(duel!, response);
         advance();
       }
+    } else if (message.type === "search") {
+      send({ type: "search", id: message.id, ...search(message.search) });
+    } else if (message.type === "info") {
+      const found = message.codes.flatMap((asked) => {
+        const card = infoOf(knownCode(asked));
+        return card ? [{ ...card, asked }] : [];
+      });
+      send({ type: "info", cards: found });
     } else if (message.type === "text") {
       send({ type: "text", card: { code: message.code, name: nameOf(message.code), line: cardLine(message.code), text: texts.get(message.code) ?? "" } });
     }
