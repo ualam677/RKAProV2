@@ -440,9 +440,15 @@ function buildPrompt(message: OcgMessage): boolean {
     }
     case OcgMessageType.SELECT_UNSELECT_CARD: {
       const finish = message.can_finish || message.can_cancel;
+      // the response index runs over the cards that can be picked, then the ones already picked
+      const choices = [
+        ...message.select_cards.map((card) => ({ ...cardChoice(nameOf(card.code), card), pick: true })),
+        ...message.unselect_cards.map((card) => ({ ...cardChoice(nameOf(card.code), card), pick: true, picked: true })),
+      ];
+      const count = message.min === message.max ? `${message.min}` : `${message.min}-${message.max}`;
       return one(
-        "Select",
-        message.select_cards.map((card) => cardChoice(nameOf(card.code), card)),
+        `Select ${count}`,
+        choices,
         finish ? (message.can_finish ? "Done" : "Cancel") : null,
         (index) => ({ type: OcgResponseType.SELECT_UNSELECT_CARD, index }),
       );

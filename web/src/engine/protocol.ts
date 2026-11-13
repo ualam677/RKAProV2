@@ -35,6 +35,10 @@ export interface Choice {
   zone?: CardRef;
   // idle and battle commands that belong to the phase bar, not to a card
   phase?: boolean;
+  // a plain pick (Xyz materials and the like): tapping the card answers at once
+  pick?: boolean;
+  // already picked; picking it again takes it back
+  picked?: boolean;
 }
 
 export type Prompt =

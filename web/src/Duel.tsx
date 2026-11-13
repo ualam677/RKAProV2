@@ -278,7 +278,9 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
   const actionsFor = (card: CardRef) => choices.map((choice, index) => ({ choice, index })).filter(({ choice }) => choice.card && same(choice.card, card));
   const hasAction = (card: CardRef) => !!prompt && !zonePrompt && choices.some((choice) => choice.card && same(choice.card, card));
   const zoneIndex = (zone: CardRef) => (zonePrompt ? choices.findIndex((choice) => choice.zone && same(choice.zone, zone)) : -1);
-  const isPicked = (card: CardRef) => prompt?.kind === "multi" && !zonePrompt && picks.some((pick) => choices[pick].card && same(choices[pick].card!, card));
+  const isPicked = (card: CardRef) =>
+    (prompt?.kind === "multi" && !zonePrompt && picks.some((pick) => choices[pick].card && same(choices[pick].card!, card))) ||
+    choices.some((choice) => choice.picked && choice.card && same(choice.card, card));
 
   const togglePick = (index: number) => {
     if (prompt?.kind !== "multi") return;
@@ -313,7 +315,13 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
       }
     }
     if (focus && same(focus.card, card)) return setFocus(null);
-    if (prompt?.kind === "choice" && actionsFor(card).length > 0) {
+    const actions = actionsFor(card);
+    // picking materials or targets: the tap is the answer
+    if (prompt?.kind === "choice" && !idle && actions.length === 1 && actions[0].choice.pick) {
+      inspect(card);
+      return answer([actions[0].index]);
+    }
+    if (prompt?.kind === "choice" && actions.length > 0) {
       inspect(card);
       return setFocus({ card, rect: el.getBoundingClientRect() });
     }
@@ -472,7 +480,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
               key={index}
               card={card}
               className="grid-card"
-              picked={picks.includes(index)}
+              picked={picks.includes(index) || !!choice.picked}
               caption={label}
               onTap={() => {
                 inspect(card);
