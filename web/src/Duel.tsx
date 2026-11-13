@@ -103,6 +103,8 @@ function useHold(onTap: (el: HTMLElement) => void, onHold?: () => void) {
 interface TileProps {
   card: CardView;
   glow?: boolean;
+  // waiting to be picked: the border pulses until it is
+  pulse?: boolean;
   picked?: boolean;
   focused?: boolean;
   className?: string;
@@ -113,7 +115,7 @@ interface TileProps {
   caption?: string;
 }
 
-function CardTile({ card, glow, picked, focused, className, style, onTap, onHold, onHover, caption }: TileProps) {
+function CardTile({ card, glow, pulse, picked, focused, className, style, onTap, onHold, onHover, caption }: TileProps) {
   const hidden = !card.code;
   // the name stays as the tile's content until its picture has arrived
   const [art, setArt] = useState(0);
@@ -125,6 +127,7 @@ function CardTile({ card, glow, picked, focused, className, style, onTap, onHold
     hidden ? "back" : frame(card),
     sideways(card) ? "sideways" : "",
     glow ? "glow" : "",
+    pulse && !picked ? "pulse" : "",
     picked ? "picked" : "",
     focused ? "focused" : "",
     faceDown(card) && !hidden ? "set" : "",
@@ -282,6 +285,9 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
     (prompt?.kind === "multi" && !zonePrompt && picks.some((pick) => choices[pick].card && same(choices[pick].card!, card))) ||
     choices.some((choice) => choice.picked && choice.card && same(choice.card, card));
 
+  // a prompt that is only about picking cards (materials, tributes, targets)
+  const pickPrompt = (prompt?.kind === "multi" && !zonePrompt) || (prompt?.kind === "choice" && !idle && choices.some((choice) => choice.pick));
+
   const togglePick = (index: number) => {
     if (prompt?.kind !== "multi") return;
     const next = picks.includes(index) ? picks.filter((pick) => pick !== index) : [...picks, index];
@@ -332,6 +338,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
     <CardTile
       card={card}
       glow={hasAction(card)}
+      pulse={pickPrompt && hasAction(card)}
       picked={isPicked(card)}
       focused={!!focus && same(focus.card, card)}
       onTap={(el) => (index >= 0 ? togglePick(index) : tapCard(card, el))}
@@ -480,6 +487,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
               key={index}
               card={card}
               className="grid-card"
+              pulse={pickPrompt}
               picked={picks.includes(index) || !!choice.picked}
               caption={label}
               onTap={() => {
@@ -736,6 +744,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
               className="hand-card"
               style={{ width: cardWidth, left: `calc(50% + ${offset * step - cardWidth / 2}px)`, transform, zIndex: lifted ? 50 : i + 1 }}
               glow={hasAction(card)}
+              pulse={pickPrompt && hasAction(card)}
               picked={isPicked(card)}
               focused={!!focus && same(focus.card, card)}
               onTap={(el) => tapCard(card, el)}

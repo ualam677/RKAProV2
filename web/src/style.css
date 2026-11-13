@@ -262,3 +262,11 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .search { width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--line-bright); border-radius: var(--radius); background: #050c1a; color: var(--text); font: inherit; font-size: 16px; }
 .search:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .list { display: grid; gap: 6px; }
+
+/* a card waiting to be picked (Xyz materials, tributes, targets): its border pulses until it is picked */
+.tile.pulse { animation: pick-pulse 0.8s ease-in-out infinite; }
+.hand-card.pulse { animation: pick-pulse 0.8s ease-in-out infinite; }
+@keyframes pick-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent-strong), 0 0 6px var(--accent); }
+  50% { box-shadow: 0 0 0 4px #9cc8ff, 0 0 20px 4px var(--accent-strong); }
+}
