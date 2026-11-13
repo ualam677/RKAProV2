@@ -85,6 +85,9 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   Your own hand traps are only held back on your own turn.
 - The route search learns your picks too, by what they were for (the core's "add to your hand" vs "send to the GY"
   hint), so a working Orbital 7 line that adds Galaxy Summoner and sends Photon Emperor is followed.
+- The opponent plans its turn: at its first Main Phase it runs the route search on its own hand and deck (as a fresh
+  opening, your board not part of the plan, about 10 s), then follows that plan step by step, picks included. Once
+  your interruptions throw it off, it plays whatever it can. Still deterministic: loading a state replays it the same.
 - Phases as EDOPro shows them: a DP SP M1 BP M2 EP bar lit in your colour or the opponent's, and a banner at every
   phase change on both turns. Chances to respond say what to ("Respond to Seventh Tachyon?", "Respond to the summon
   of Galaxy Wizard?", "Opponent's End Phase: activate an effect?").
@@ -100,7 +103,8 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order
-1. Choke points: replay lines with the opponent holding one hand trap, at every moment the engine allows it, then the
+1. Going second: the opponent goes first and builds a board to break. Then choke points: replay lines with the
+   opponent holding one hand trap, at every moment the engine allows it, then the
    opponent: hand traps (easy / smart), then plays its own turn with board breakers
    (Veiler / Imperm on the player's turn, Imperm at the start of its turn, Lightning Storm, Cosmic Cyclone-style cards).
 2. Routes learned from saved replays, then end-board suggestion from a random hand (beam search over the core, scored

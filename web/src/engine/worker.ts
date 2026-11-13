@@ -309,6 +309,9 @@ const aiUsed = new Set<string>();
 let aiBattled = false;
 let aiActed = false;
 let aiRetries = 0;
+// the combo the opponent planned for this turn ("Activate:<code>", "pick:<hint>:<code>", ...) and how far it got
+let aiPlan: string[] = [];
+let aiStep = 0;
 let winner: number | null = null;
 // what the next selection is for ("Select the card to add to your hand"), sent by the core just before it
 let selectHint = "";
@@ -784,9 +787,55 @@ function playerView(controller: 0 | 1, deck: number): PlayerView {
 
 // The computer opponent: plain and predictable, so a replay plays the same. On its turn it activates everything it
 // can, Special Summons, Normal Summons, then attacks with everything; on yours it only chains hand traps if told to.
+let aiPlanned = false;
+// At the start of its Main Phase the opponent works out a combo for its hand with the route search, as if its hand were
+// a fresh opening (your board is not part of the plan), then follows it. Once your interruptions throw it off the
+// plan, it goes back to using whatever it can.
+function aiMakePlan() {
+  aiPlanned = true;
+  const codesIn = (location: OcgLocation) =>
+    core.duelQueryLocation(duel!, { flags: OcgQueryFlags.CODE as OcgQueryFlags, controller: 1, location }).flatMap((card) => (card?.code ? [card.code] : []));
+  const hand = codesIn(OcgLocation.HAND);
+  if (!hand.length) return;
+  if (!quiet) {
+    events.push({ kind: "message", code: 0, name: "", controller: 1, location: 0, sequence: 0, text: "Opponent is planning its turn…" });
+    sendView();
+  }
+  const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
+  const steps = routeSearch(env, hand, codesIn(OcgLocation.DECK), codesIn(OcgLocation.EXTRA), { goal: 3, targets: [], budget: 350 });
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  aiPlan = next.value.keys;
+  aiStep = 0;
+}
+// the plan's next step, if it is on offer: the index of the matching option
+function aiFollow(kind: "idle" | "pick", options: { code: number; tag?: string }[]): number {
+  const step = aiPlan[aiStep];
+  if (!step) return -1;
+  const [verb, ...rest] = step.split(":");
+  const code = Number(rest[rest.length - 1]);
+  const wanted = verb === "pick" ? "pick" : verb === "Normal" ? "n" : verb === "Special" ? "s" : "a";
+  if ((kind === "pick") !== (wanted === "pick")) return -1;
+  const at = options.findIndex((option) => option.code === code && (kind === "pick" || option.tag === wanted));
+  if (at >= 0) aiStep++;
+  // off the plan (something was negated or banished): from here on it plays by what it can
+  else aiPlan = [];
+  return at;
+}
+
 function aiAnswer(message: OcgMessage): OcgResponse | null {
   switch (message.type) {
     case OcgMessageType.SELECT_IDLECMD: {
+      if (turnPlayer === 1 && !aiPlanned) aiMakePlan();
+      {
+        const offered = [
+          ...message.activates.map((card, index) => ({ code: card.code, tag: "a", action: SelectIdleCMDAction.SELECT_ACTIVATE, index })),
+          ...message.special_summons.map((card, index) => ({ code: card.code, tag: "s", action: SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, index })),
+          ...message.summons.map((card, index) => ({ code: card.code, tag: "n", action: SelectIdleCMDAction.SELECT_SUMMON, index })),
+        ];
+        const at = aiFollow("idle", offered);
+        if (at >= 0) return { type: OcgResponseType.SELECT_IDLECMD, action: offered[at].action, index: offered[at].index };
+      }
       const candidates: [SelectIdleCMDAction, { code: number; location: number; sequence: number }[], string][] = [
         [SelectIdleCMDAction.SELECT_ACTIVATE, message.activates, "a"],
         [SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, message.special_summons, "s"],
@@ -827,6 +876,20 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
       return { type: OcgResponseType.SELECT_EFFECTYN, yes: true };
     case OcgMessageType.SELECT_YESNO:
       return { type: OcgResponseType.SELECT_YESNO, yes: true };
+    case OcgMessageType.SELECT_CARD:
+    case OcgMessageType.SELECT_UNSELECT_CARD: {
+      // the plan's pick (what to search, what to send), if it is among the cards offered
+      const list = message.type === OcgMessageType.SELECT_CARD ? message.selects : message.select_cards;
+      const single = message.type === OcgMessageType.SELECT_UNSELECT_CARD || (message.min === 1 && message.max === 1);
+      if (single && aiPlan.length && aiPlan[aiStep]?.startsWith("pick:")) {
+        const at = aiFollow("pick", list.map((card) => ({ code: card.code })));
+        if (at >= 0)
+          return message.type === OcgMessageType.SELECT_CARD
+            ? { type: OcgResponseType.SELECT_CARD, indicies: [at] }
+            : ({ type: OcgResponseType.SELECT_UNSELECT_CARD, index: at } as OcgResponse);
+      }
+      return autoAnswer(message);
+    }
     case OcgMessageType.ANNOUNCE_CARD: {
       const opcodes = message.opcodes.map((opcode) => BigInt(opcode));
       const card = [...cards.values()].find((one) => declarable(one, opcodes));
@@ -894,6 +957,9 @@ function advance() {
           turnPlayer = message.player;
           aiUsed.clear();
           aiBattled = false;
+          aiPlan = [];
+          aiStep = 0;
+          aiPlanned = false;
           break;
         case OcgMessageType.NEW_PHASE:
           phase = PHASES[message.phase] ?? "";

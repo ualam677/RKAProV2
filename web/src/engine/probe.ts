@@ -547,6 +547,9 @@ export interface Route {
   steps: string[];
   // the line as the duel screen takes it: replays in the app as a saved test
   ui: (number[] | null)[];
+  // each step as "Activate:<code>", "Normal:<code>", "Special:<code>" or "pick:<hint>:<code>": a plan that can be
+  // followed in another duel (the computer opponent plays its turn this way)
+  keys: string[];
   deck: number;
   extra: number;
   tried: number;
@@ -602,8 +605,8 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
     const spells = stop.pieces.filter((piece) => piece.location === OcgLocation.SZONE).length;
     return interruptionsOf(built, env.effects, env.setcodes, isFirstTurnHandTrap, Math.max(0, 5 - spells));
   };
-  type Node = { plan: number[]; stop: Stop; steps: string[]; liked: number; value: number; route: Route };
-  const judge = (stop: Stop, steps: string[], liked: number, tried: number): { value: number; route: Route } => {
+  type Node = { plan: number[]; stop: Stop; steps: string[]; keys: string[]; liked: number; value: number; route: Route };
+  const judge = (stop: Stop, steps: string[], liked: number, tried: number, keys: string[] = []): { value: number; route: Route } => {
     let coverage = 0;
     let target: number[] | null = null;
     for (const one of options.targets) {
@@ -612,7 +615,7 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
     }
     const interruptions = count(stop);
     const negates = interruptions.filter((one) => one.kind === "negate").length;
-    const route: Route = { board: stop.board, interruptions, coverage, target, full: interruptions.length >= goal, steps, ui: stop.ui, deck: stop.measure.deck, extra: stop.measure.extra, tried };
+    const route: Route = { board: stop.board, interruptions, coverage, target, full: interruptions.length >= goal, steps, ui: stop.ui, keys, deck: stop.measure.deck, extra: stop.measure.extra, tried };
     // what the board can stop on their turn first (negates above removal); then closeness to your working boards;
     // then what the line has gathered to keep going; then how much it looks like your own lines
     const value = interruptions.length * 50 + negates * 10 + coverage * 20 + stop.measure.deck * 4 + stop.measure.extra * 3 + stop.board.length * 2 + liked * 1.5;
@@ -621,7 +624,7 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
   let tried = 0;
   const first = play(env, hand, deck, extra, []);
   tried++;
-  const root: Node = { plan: [], stop: first, steps: [], liked: 0, ...judge(first, [], 0, tried) };
+  const root: Node = { plan: [], stop: first, steps: [], keys: [], liked: 0, ...judge(first, [], 0, tried) };
   let best = root;
   const seen = new Set<string>([first.key]);
   let beam: Node[] = [root];
@@ -640,7 +643,8 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
         const key = verb === "pick" ? `pick:${node.stop.hint}:${node.stop.codes[index]}` : `${verb}:${node.stop.codes[index]}`;
         const liked = node.liked + (prior.has(key) ? 3 : 0);
         const steps = [...node.steps, label.replace(/#\d+/, "").replace(/@\d+$/, "")];
-        const next: Node = { plan: [...node.plan, index], stop: child, steps, liked, ...judge(child, steps, liked, tried) };
+        const keys = [...node.keys, key];
+        const next: Node = { plan: [...node.plan, index], stop: child, steps, keys, liked, ...judge(child, steps, liked, tried, keys) };
         children.push(next);
         if (next.value > best.value) best = next;
         if (next.route.full) return { ...next.route, tried };
