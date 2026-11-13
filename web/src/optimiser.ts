@@ -367,3 +367,47 @@ export function describePartners(partners: Partners | undefined, nameOf: (code: 
   parts.push(...partners.codes.map(nameOf));
   return parts.length ? parts.join(", ") : "no partner picked";
 }
+
+/**
+ * The chance a hand still makes a full board when the opponent has one hand trap and uses it at its worst moment for
+ * you: the hand holds a start whose line plays through that hand trap, or two different full-board starts (it can
+ * only stop one of them). `verdict(code)`: "through" for a start that plays through it, "full" for one that reaches a
+ * full board but is stopped by it, anything else for the rest. Every hand counted exactly.
+ */
+export function throughOdds(cards: DeckCard[], hand: number, verdict: (code: number) => "through" | "full" | "no"): number {
+  const list = cards.filter((card) => card.count > 0);
+  const total = list.reduce((sum, card) => sum + card.count, 0);
+  if (total < hand) return 0;
+  const all = choose(total, hand);
+  const held = new Array(list.length).fill(0);
+  let odds = 0;
+  const starts = (index: number): boolean => {
+    const card = list[index];
+    if (card.tag.role === "starter") return true;
+    if (card.tag.role !== "pair") return false;
+    // a partnered start needs its partner in the hand (a second copy of itself counts)
+    return list.some((other, at) => held[at] > (at === index ? 1 : 0) && matchesPartner(card.tag.with, other));
+  };
+  const visit = (ways: number) => {
+    let through = false;
+    let full = 0;
+    held.forEach((count, index) => {
+      if (!count || !starts(index)) return;
+      const result = verdict(list[index].code);
+      if (result === "through") through = true;
+      else if (result === "full") full++;
+    });
+    if (through || full >= 2) odds += ways / all;
+  };
+  const walk = (at: number, left: number, ways: number) => {
+    if (left === 0) return visit(ways);
+    if (at === list.length) return;
+    for (let take = Math.min(left, list[at].count); take >= 0; take--) {
+      held[at] = take;
+      walk(at + 1, left - take, ways * choose(list[at].count, take));
+    }
+    held[at] = 0;
+  };
+  walk(0, hand, 1);
+  return odds;
+}

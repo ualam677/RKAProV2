@@ -6,7 +6,7 @@ import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type Save
 import type { CardEvidence, Choke } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
 import {
-  GOALS, ROLES, allProven, normalLimit, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
+  GOALS, ROLES, allProven, normalLimit, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
 
@@ -141,18 +141,19 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const through = useMemo(
     () =>
       trapCodes.map((trap) => {
-        const checked = main.map((card) => {
-          if (card.tag.role !== "starter" && card.tag.role !== "pair") return card;
-          const route = routeOf(card.code);
+        const verdict = (code: number): "through" | "full" | "no" => {
+          const route = routeOf(code);
+          if (!isFull(route)) return "no";
           const choke = route?.chokes?.find((one) => one.trap === trap);
-          // never usable against this line: the line as it is; otherwise its worst moment
-          const worst = !choke ? -1 : choke.windows.length ? Math.min(...choke.windows.map((window) => window.interruptions)) : (route?.interruptions?.length ?? 0);
-          return isFull(route) && worst >= fullAt ? card : { ...card, tag: { role: "other" as Role } };
-        });
-        return { trap, odds: computeOdds(checked, second ? 6 : 5).combo };
+          // never usable against this line, or its worst moment still leaves a full board
+          const worst = !choke ? 0 : choke.windows.length ? Math.min(...choke.windows.map((window) => window.interruptions)) : (route?.interruptions?.length ?? 0);
+          return choke && worst >= fullAt ? "through" : "full";
+        };
+        return { trap, odds: throughOdds(main, second ? 6 : 5, verdict) };
       }),
     [trapCodes, main, second, deck.routes, fullAt],
   );
+
   const handFor = (card: DeckCard) => testHand(card, main)?.map((code) => held.get(code) ?? code) ?? null;
   const findAll = () => onFindLines(startCards.flatMap((card) => { const hand = handFor(card); return hand ? [{ code: card.code, hand }] : []; }));
 
@@ -318,7 +319,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
           </ul>
           {through.length > 0 && reached && (
             <div className="opt-through">
-              <span className="muted">Full board through one hand trap, used at its worst moment for you:</span>
+              <span className="muted">Full board through one hand trap, used at its worst moment for you (a start that plays through it, or a second start for after it):</span>
               <div>
                 {through.map(({ trap, odds: value }) => (
                   <span key={trap} className="opt-through-row">
