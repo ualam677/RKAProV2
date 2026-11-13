@@ -216,9 +216,9 @@ async function prefetchScripts(codes: number[]): Promise<number[]> {
 // The running duel
 
 const PHASES: Record<number, string> = { 1: "Draw", 2: "Standby", 4: "Main 1", 8: "Battle", 16: "Battle", 32: "Damage", 64: "Damage", 128: "Battle", 256: "Main 2", 512: "End" };
-// Only these four: asking a whole location for type, level or rank as well comes back misaligned.
-// Those are read from the card database instead.
-const QUERY = (OcgQueryFlags.CODE | OcgQueryFlags.POSITION | OcgQueryFlags.ATTACK | OcgQueryFlags.DEFENSE) as OcgQueryFlags;
+// What the core is asked about each card. Never TYPE: ocgcore-wasm's reader does not handle that field and does not
+// skip it, so everything after it comes back shifted. The card's type is read from the database instead.
+const QUERY = (OcgQueryFlags.CODE | OcgQueryFlags.POSITION | OcgQueryFlags.LEVEL | OcgQueryFlags.RANK | OcgQueryFlags.ATTACK | OcgQueryFlags.DEFENSE | OcgQueryFlags.LINK) as OcgQueryFlags;
 
 let duel: OcgDuelHandle | null = null;
 let lp = [8000, 8000];
@@ -240,6 +240,26 @@ function describe(description: bigint): string {
   const value = Number(description);
   if (value < 10000) return systemStrings.get(value) ?? "";
   return cardStrings.get(Math.floor(value / 16))?.[value % 16] ?? "";
+}
+
+// system strings leave the card name and its place as %ls, filled in order
+function fill(text: string, ...values: string[]): string {
+  let next = 0;
+  return text.replace(/%ls/g, () => values[next++] ?? "");
+}
+
+function placeName(location: number): string {
+  if (location & OcgLocation.OVERLAY) return "Xyz Material";
+  const names: Record<number, string> = {
+    [OcgLocation.DECK]: "Deck",
+    [OcgLocation.HAND]: "Hand",
+    [OcgLocation.MZONE]: "Monster Zone",
+    [OcgLocation.SZONE]: "Spell & Trap Zone",
+    [OcgLocation.GRAVE]: "GY",
+    [OcgLocation.REMOVED]: "Banished",
+    [OcgLocation.EXTRA]: "Extra Deck",
+  };
+  return names[location] ?? "Field";
 }
 
 function system(id: number, fallback: string): string {
@@ -394,8 +414,9 @@ function buildPrompt(message: OcgMessage): boolean {
       return one("", choices, null, (index) => ({ type: OcgResponseType.SELECT_BATTLECMD, action: actions[index!][0], index: actions[index!][1] }), true);
     }
     case OcgMessageType.SELECT_EFFECTYN: {
-      const text = describe(message.description);
-      return one(`Activate the effect of "${nameOf(message.code)}"?${text ? `\n${text}` : ""}`, [{ label: "Yes" }, { label: "No" }], null, (index) => ({ type: OcgResponseType.SELECT_EFFECTYN, yes: index === 0 }));
+      // EDOPro's own wording, e.g. 'Activate the Trigger Effect of "%ls" from [%ls]?', with the blanks filled in
+      const text = fill(describe(message.description), nameOf(message.code), placeName(message.location));
+      return one(text || `Activate the effect of "${nameOf(message.code)}"?`, [{ label: "Yes" }, { label: "No" }], null, (index) => ({ type: OcgResponseType.SELECT_EFFECTYN, yes: index === 0 }));
     }
     case OcgMessageType.SELECT_YESNO:
       return one(describe(message.description) || "Confirm?", [{ label: "Yes" }, { label: "No" }], null, (index) => ({ type: OcgResponseType.SELECT_YESNO, yes: index === 0 }));
@@ -515,16 +536,19 @@ function cardsIn(controller: 0 | 1, location: OcgLocation, hidden = false): (Car
     const position = info.position ?? OcgPosition.FACEDOWN_DEFENSE;
     const secret = hidden || (controller === 1 && (position & (OcgPosition.FACEDOWN_ATTACK | OcgPosition.FACEDOWN_DEFENSE)) !== 0 && location !== OcgLocation.GRAVE);
     const code = secret ? 0 : (info.code ?? 0);
+    const type = cards.get(code)?.type ?? 0;
+    // Level, Rank and Link rating as they are now, after effects that change them
+    const level = !code ? 0 : type & 0x4000000 ? (info.link?.rating ?? 0) : type & 0x800000 ? (info.rank ?? 0) : (info.level ?? cards.get(code)?.level ?? 0);
     return {
       controller,
       location,
       sequence,
       code,
       name: nameOf(code),
-      type: cards.get(code)?.type ?? 0,
+      type,
       attack: info.attack ?? 0,
       defense: info.defense ?? 0,
-      level: cards.get(code)?.level ?? 0,
+      level,
       position,
       materials: 0,
     };

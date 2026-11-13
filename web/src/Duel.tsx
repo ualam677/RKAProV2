@@ -137,25 +137,20 @@ function CardTile({ card, glow, pulse, picked, focused, className, style, onTap,
     <button className={classes.join(" ")} style={style} {...handlers} onPointerEnter={onHover} aria-label={hidden ? "Face-down card" : card.name}>
       {!hidden && <CardArt key={card.code} code={card.code} onLoad={() => setArt(card.code)} />}
       {!hidden && !pictured && <span className="tile-name">{card.name}</span>}
-      {!hidden && (card.type & TYPE.MONSTER) !== 0 && card.location === LOCATION.MZONE && (
-        <span className="tile-stats">
-          {card.attack}
-          {(card.type & TYPE.LINK) === 0 && `/${card.defense}`}
-        </span>
-      )}
-      {!hidden && (card.type & TYPE.MONSTER) !== 0 && card.location === LOCATION.MZONE && <span className="tile-level">{levelLabel(card)}</span>}
       {card.materials > 0 && <span className="tile-badge">{card.materials}</span>}
       {caption && <span className="tile-caption">{caption}</span>}
     </button>
   );
 }
 
-// the top card of a pile, drawn inside the pile's own button
-function PileFace({ card }: { card: CardView }) {
+// the top card of a pile, filling the pile's box; a card back for the Deck and Extra Deck
+function PileFace({ card }: { card?: CardView }) {
   const [art, setArt] = useState(0);
+  if (!card) return <span className="pile-face back" />;
   return (
-    <span className={`tile pile-top ${frame(card)} ${art === card.code ? "pictured" : ""}`}>
+    <span className={`pile-face ${frame(card)}`}>
       <CardArt key={card.code} code={card.code} onLoad={() => setArt(card.code)} />
+      {art !== card.code && <span className="pile-face-name">{card.name}</span>}
     </span>
   );
 }
@@ -359,6 +354,15 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
         onClick={index >= 0 && !card ? (event) => (event.stopPropagation(), togglePick(index)) : undefined}
       >
         {card && fieldCard(card, index)}
+        {card && card.code !== 0 && (card.type & TYPE.MONSTER) !== 0 && location === LOCATION.MZONE ? (
+          <>
+            <span className="zone-level">{levelLabel(card)}</span>
+            <span className="zone-stats">
+              {card.attack}
+              {(card.type & TYPE.LINK) === 0 && <span className="def">/{card.defense}</span>}
+            </span>
+          </>
+        ) : null}
       </div>
     );
   };
@@ -378,9 +382,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip }:
         disabled={!open}
         aria-label={`${label} ${count}`}
       >
-        {count > 0 && (top ? <PileFace card={top} /> : <span className="tile back pile-top" />)}
-        <span className="pile-label">{label}</span>
-        <span className="pile-count">{count}</span>
+        {count > 0 && <PileFace card={top} />}
+        <span className="pile-info">
+          <span className="pile-label">{label}</span>
+          <b className="pile-count">{count}</b>
+        </span>
       </button>
     );
   };

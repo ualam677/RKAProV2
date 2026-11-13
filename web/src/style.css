@@ -100,9 +100,6 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .pile { color: var(--muted); font: inherit; cursor: pointer; flex-direction: column; background: rgba(5, 12, 26, 0.85); }
 .pile:disabled { cursor: default; }
 .pile.glow { border-color: var(--accent-strong); box-shadow: 0 0 8px var(--accent); }
-.pile-top { position: absolute; inset: 2px; width: auto; height: auto; min-height: 0; opacity: 0.85; pointer-events: none; }
-.pile-label { position: relative; z-index: 1; font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; text-shadow: 0 0 3px #000, 0 0 3px #000; }
-.pile-count { position: relative; z-index: 1; font-size: 15px; font-weight: 800; color: var(--text); text-shadow: 0 0 3px #000, 0 0 3px #000; }
 
 /* cards */
 .tile { position: relative; width: 100%; height: 100%; padding: 3px; border: 1px solid #000; border-radius: 4px; color: #10141c; font: inherit; font-size: 9px; line-height: 1.1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; overflow: hidden; cursor: pointer; touch-action: manipulation; transition: box-shadow var(--fast); }
@@ -118,18 +115,14 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 /* on the field a card keeps a real card's shape, so its picture is never cropped */
 .zone .tile { width: 100%; height: 100%; }
 .zone .tile.sideways { width: calc(100% * 86 / 59); height: calc(100% * 59 / 86); transform: rotate(90deg); flex: none; }
-.zone .tile.sideways .tile-stats { transform: rotate(-90deg); }
 .tile.glow { box-shadow: 0 0 0 2px var(--accent-strong), 0 0 12px var(--accent); }
 .tile.picked { box-shadow: 0 0 0 3px var(--gold), 0 0 12px var(--gold); }
 .tile.focused { box-shadow: 0 0 0 3px #fff, 0 0 16px var(--accent-strong); }
 .tile-name { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; }
-.tile-stats { font-size: 9px; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .tile-badge { position: absolute; top: 2px; right: 3px; font-size: 10px; font-weight: 700; }
 .tile-caption { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; padding: 2px 3px; background: rgba(4, 10, 24, 0.88); color: var(--text); font-size: 10px; line-height: 1.15; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 3px; }
 .tile.pictured { padding: 0; background: #000; }
-.tile.pictured .tile-stats { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 1px 0; background: rgba(0, 0, 0, 0.75); color: #fff; font-weight: 600; }
-.zone .tile.sideways.pictured .tile-stats { left: auto; right: auto; bottom: auto; top: 50%; padding: 1px 4px; border-radius: 4px; transform: translateY(-50%) rotate(-90deg); white-space: nowrap; }
 .tile.pictured .tile-badge { z-index: 1; color: #fff; text-shadow: 0 0 3px #000; }
 
 /* phase button on the right edge, under the field */
@@ -226,11 +219,8 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .deck-row b { color: var(--accent-strong); }
 
 /* ---- level / rank / link on field monsters ---- */
-.tile-level { position: absolute; top: 1px; left: 1px; z-index: 1; padding: 0 3px; border-radius: 3px; background: rgba(0, 0, 0, 0.72); color: #ffd54a; font-size: 9px; font-weight: 700; line-height: 1.35; white-space: nowrap; }
-.duel.wide .tile-level { font-size: 11px; }
 /* a defense position card is the same card as in attack, turned sideways; it reaches past its zone like in EDOPro */
 .zone .tile.sideways { width: 100%; height: 100%; transform: rotate(90deg); flex: none; z-index: 2; }
-.zone .tile.sideways .tile-level { transform: none; }
 
 /* ---- moments: activation, resolution, summon, search (EDOPro-like, quick) ---- */
 .cues { position: fixed; inset: 0; z-index: 42; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; pointer-events: auto; }
@@ -270,3 +260,22 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
   0%, 100% { box-shadow: 0 0 0 2px var(--accent-strong), 0 0 6px var(--accent); }
   50% { box-shadow: 0 0 0 4px #9cc8ff, 0 0 20px 4px var(--accent-strong); }
 }
+
+/* ---- piles: the top card (or a card back) fills the box, the count sits in a bar along the bottom ---- */
+.pile { overflow: hidden; padding: 0; }
+.pile-face { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 3px; border-radius: 3px; color: #10141c; font-size: 9px; font-weight: 600; line-height: 1.1; text-align: center; pointer-events: none; }
+.pile-face.back { background: repeating-linear-gradient(45deg, #17325f, #17325f 5px, #0f2344 5px, #0f2344 10px); }
+.pile-face.monster { background: #d9a760; } .pile-face.spell { background: #3fb39a; } .pile-face.trap { background: #c9609b; }
+.pile-face.fusion { background: #a878d0; } .pile-face.synchro { background: #e8e8e8; } .pile-face.xyz { background: #3a3f4a; color: #f1f4fa; } .pile-face.link { background: #3d7fd6; color: #f1f4fa; }
+.pile-face-name { position: relative; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pile-info { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; display: flex; align-items: baseline; justify-content: center; gap: 4px; padding: 2px 0; background: rgba(3, 8, 18, 0.82); line-height: 1.1; }
+.pile:disabled .pile-info { inset: 0; flex-direction: column; align-items: center; justify-content: center; background: none; }
+.pile-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.pile-count { font-size: 14px; font-weight: 800; color: var(--text); }
+.duel.wide .pile-label { font-size: 11px; } .duel.wide .pile-count { font-size: 17px; }
+
+/* ---- a monster's Level and ATK/DEF belong to its zone, so they stay upright in defense position ---- */
+.zone-level { position: absolute; top: 1px; left: 1px; z-index: 3; padding: 0 3px; border-radius: 3px; background: rgba(0, 0, 0, 0.75); color: #ffd54a; font-size: 9px; font-weight: 700; line-height: 1.35; white-space: nowrap; pointer-events: none; }
+.zone-stats { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; padding: 1px 0; border-radius: 0 0 3px 3px; background: rgba(0, 0, 0, 0.78); color: #fff; font-size: 9px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; text-align: center; white-space: nowrap; pointer-events: none; }
+.zone-stats .def { color: #b9c9e4; }
+.duel.wide .zone-level, .duel.wide .zone-stats { font-size: 11px; }
