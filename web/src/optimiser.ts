@@ -5,7 +5,7 @@
 // Every possible hand is counted with its exact probability: no sampling, no rounding until the screen.
 // Erasable TypeScript only, so Node can run it directly for the checks in tools/.
 
-export type Role = "none" | "starter" | "pair" | "extender" | "handtrap" | "handtrap2" | "breaker" | "brick" | "other";
+export type Role = "none" | "starter" | "pair" | "extender" | "piece" | "handtrap" | "handtrap2" | "breaker" | "brick" | "other";
 
 export const ROLES: { role: Role; name: string; help: string }[] = [
   { role: "starter", name: "Starter", help: "Starts your combo by itself." },
@@ -14,7 +14,8 @@ export const ROLES: { role: Role; name: string; help: string }[] = [
   { role: "handtrap", name: "Hand trap", help: "Stops the opponent from your hand, going first or second." },
   { role: "handtrap2", name: "Hand trap, going 2nd", help: "Only works while you control no cards, like the Mulcharmy cards." },
   { role: "breaker", name: "Board breaker", help: "Clears the opponent's board when you go second." },
-  { role: "brick", name: "Brick", help: "Dead in the opening hand, including cards the combo needs to stay in the deck." },
+  { role: "piece", name: "Combo piece in the Deck", help: "The combo needs it in the Deck (searched or summoned from there). Dead if you draw it, but never suggested as a cut." },
+  { role: "brick", name: "Brick", help: "Dead in the opening hand." },
   { role: "other", name: "Other", help: "Anything else: combo pieces you search, staples, traps." },
 ];
 export const roleName = (role: Role) => ROLES.find((entry) => entry.role === role)?.name ?? "Not tagged";
@@ -29,6 +30,8 @@ export interface Tag {
   role: Role;
   with?: Partners;
   guessed?: boolean;
+  // the start needs the turn's Normal Summon: a second such card in the same hand is dead
+  normal?: boolean;
   // set by the engine probe (it played the card and saw it start), not by anyone
   engine?: boolean;
   // the start was played from the hand to a full board, with nothing else helping
@@ -61,9 +64,13 @@ export interface Odds {
   handtrap2: number; // at least two
   handtrapAvg: number;
   breaker: number;
-  dead: number; // at least one Brick
+  dead: number; // at least one dead card: a Brick, a Combo piece, or a second Normal Summon card
   dead2: number;
+  normal2: number; // two or more cards that need the Normal Summon
 }
+
+// At most 5 cards that need the Normal Summon in a 40-card deck (one per 8 cards)
+export const normalLimit = (total: number) => Math.max(1, Math.floor(total / 8));
 
 const choose = (() => {
   const table: number[][] = [];
@@ -82,6 +89,7 @@ const choose = (() => {
 interface Group {
   count: number;
   role: Role;
+  normal: boolean;
   partnerOf: number[]; // indexes of the partnered starters this group can be the partner for
 }
 function groupDeck(cards: DeckCard[]) {
@@ -94,10 +102,11 @@ function groupDeck(cards: DeckCard[]) {
     const partnerOf = pairs.flatMap((pair, index) => (matchesPartner(pair.tag.with, card) ? [index] : []));
     const pairIndex = pairs.indexOf(card);
     // a partnered starter keeps a group of its own, so the maths knows which card needs which partner
-    const signature = pairIndex >= 0 ? `pair:${pairIndex}` : `${card.tag.role}:${partnerOf.join(",")}`;
+    const normal = !!card.tag.normal;
+    const signature = pairIndex >= 0 ? `pair:${pairIndex}` : `${card.tag.role}:${normal}:${partnerOf.join(",")}`;
     let at = bySignature.get(signature);
     if (at === undefined) {
-      at = groups.push({ count: 0, role: card.tag.role, partnerOf }) - 1;
+      at = groups.push({ count: 0, role: card.tag.role, normal, partnerOf }) - 1;
       bySignature.set(signature, at);
     }
     groups[at].count += card.count;
@@ -114,11 +123,12 @@ interface HandFacts {
   extenders: number;
   breakers: number;
   bricks: number;
+  normals: number;
 }
 
 function evaluate(counts: number[], deck: ReturnType<typeof groupDeck>, goingSecond: boolean): HandFacts {
   const { groups, pairGroup, partnerGroups } = deck;
-  let starters = 0, handtraps = 0, extenders = 0, breakers = 0, bricks = 0;
+  let starters = 0, handtraps = 0, extenders = 0, breakers = 0, bricks = 0, normals = 0;
   const usable = (role: Role) => role === "handtrap" || (goingSecond && role === "handtrap2");
   groups.forEach((group, at) => {
     const held = counts[at];
@@ -127,7 +137,8 @@ function evaluate(counts: number[], deck: ReturnType<typeof groupDeck>, goingSec
     else if (usable(group.role)) handtraps += held;
     else if (group.role === "extender") extenders += held;
     else if (group.role === "breaker") breakers += held;
-    else if (group.role === "brick") bricks += held;
+    else if (group.role === "brick" || group.role === "piece") bricks += held;
+    if (group.normal) normals += held;
   });
   // cheapest way to start: a lone starter costs nothing, a partner that is a hand trap costs that hand trap
   let spent = Infinity;
@@ -145,7 +156,8 @@ function evaluate(counts: number[], deck: ReturnType<typeof groupDeck>, goingSec
       if (partners > 0) spent = Math.min(spent, free > 0 ? 0 : 1);
     });
   const combo = spent !== Infinity;
-  return { combo, handtraps: handtraps - (combo ? spent : 0), extenders, breakers, bricks };
+  // one Normal Summon a turn: every Normal Summon card past the first is dead
+  return { combo, handtraps: handtraps - (combo ? spent : 0), extenders, breakers, bricks: bricks + Math.max(0, normals - 1), normals };
 }
 
 // Every hand of `size` cards by how many of each group it holds, with its exact probability
@@ -198,7 +210,7 @@ export function testHand(card: DeckCard, cards: DeckCard[], size = 5): number[] 
 export function computeOdds(cards: DeckCard[], hand: number): Odds {
   const goingSecond = hand >= 6;
   const deck = groupDeck(cards);
-  const odds: Odds = { hand, combo: 0, comboExtender: 0, comboHandtrap: 0, comboHandtrap2: 0, handtrap: 0, handtrap2: 0, handtrapAvg: 0, breaker: 0, dead: 0, dead2: 0 };
+  const odds: Odds = { hand, combo: 0, comboExtender: 0, comboHandtrap: 0, comboHandtrap2: 0, handtrap: 0, handtrap2: 0, handtrapAvg: 0, breaker: 0, dead: 0, dead2: 0, normal2: 0 };
   if (!deck.groups.length) return odds;
   forEachHand(deck.groups, hand, (counts, p) => {
     const facts = evaluate(counts, deck, goingSecond);
@@ -219,6 +231,7 @@ export function computeOdds(cards: DeckCard[], hand: number): Odds {
     if (facts.breakers > 0) odds.breaker += p;
     if (facts.bricks >= 1) odds.dead += p;
     if (facts.bricks >= 2) odds.dead2 += p;
+    if (facts.normals >= 2) odds.normal2 += p;
   });
   return odds;
 }
@@ -265,7 +278,8 @@ const withCount = (cards: DeckCard[], code: number, change: number, extra?: Deck
 
 // Never offered as cuts: Extenders (what they add, playing through a negate, is not in these numbers)
 // and cards not tagged yet (nothing is known about them)
-const cuttable = (card: DeckCard) => card.tag.role !== "extender" && card.tag.role !== "none";
+const cuttable = (card: DeckCard) => card.tag.role !== "extender" && card.tag.role !== "piece" && card.tag.role !== "none";
+const normals = (cards: DeckCard[]) => cards.filter((card) => card.tag.normal).reduce((sum, card) => sum + card.count, 0);
 
 /**
  * One-for-one swaps that help the goal, best first. `candidates` are the cards that could come in: the Main Deck's
@@ -280,6 +294,8 @@ export function bestSwaps(cards: DeckCard[], candidates: DeckCard[], goal: Goal,
       if (add.code === cut.code) continue;
       const fromSide = side.has(add.code);
       if (!fromSide && room(add.code) <= 0) continue;
+      // never past the Normal Summon limit
+      if (add.tag.normal && normals(without) + 1 > normalLimit(cards.reduce((sum, card) => sum + card.count, 0))) continue;
       const after = score(withCount(without, add.code, 1, add), goal);
       if (after.value - before.value >= 0.001) swaps.push({ cut: cut.code, add: add.code, fromSide, before, after });
     }

@@ -435,3 +435,5 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-engine { font-size: 11px; line-height: 1.35; color: var(--muted); white-space: normal; }
 .opt-engine.warn { color: #ffb36b; }
 .opt-link { padding: 0; border: 0; background: none; color: var(--accent-strong); font: inherit; text-decoration: underline; cursor: pointer; }
+.opt-note.warn { border-left-color: #ffb36b; color: #ffd9a8; }
+.opt-proof { flex-wrap: wrap; }

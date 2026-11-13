@@ -6,7 +6,7 @@ import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type Save
 import type { CardEvidence } from "./engine/probe";
 import type { CardInfo } from "./engine/protocol";
 import {
-  GOALS, ROLES, allProven, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
+  GOALS, ROLES, allProven, normalLimit, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
 
@@ -26,7 +26,7 @@ interface Props {
 const ATTRIBUTE_NAMES = ["EARTH", "WATER", "FIRE", "WIND", "LIGHT", "DARK", "DIVINE"];
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
-const ORDER: Role[] = ["none", "starter", "pair", "extender", "handtrap", "handtrap2", "breaker", "brick", "other"];
+const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
 export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck }: Props) {
   const [second, setSecond] = useState(false);
@@ -51,7 +51,8 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const engineTag = (key: number): Tag | null => {
     const found = evidence.get(key);
     if (!found) return null;
-    if (found.alone.deck > 0) return { role: "starter", engine: true };
+    // a line that opens with a Normal Summon needs the turn's Normal Summon
+    if (found.alone.deck > 0) return { role: "starter", engine: true, normal: found.alone.steps[0]?.startsWith("Normal Summon ") };
     if (found.partners.length) return { role: "pair", with: { codes: found.partners, attributes: 0, levels: [] }, engine: true };
     // "starts nothing" is not "does nothing": a combo piece or a trap is left for you to tag, so it is never cut
     return null;
@@ -109,6 +110,14 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   }, [main, second, evidence]);
   const count = (...roles: Role[]) => main.filter((card) => roles.includes(card.tag.role)).reduce((sum, card) => sum + card.count, 0);
   const untagged = count("none");
+  const normalCards = main.filter((card) => card.tag.normal);
+  const normalCount = normalCards.reduce((sum, card) => sum + card.count, 0);
+  // what the engine's lines take from the Deck: candidates for "Combo piece in the Deck"
+  const takenBy = useMemo(() => {
+    const map = new Map<number, number[]>();
+    for (const entry of evidence.values()) if (entry.alone.deck > 0) for (const code of new Set(entry.alone.taken)) map.set(code, [...(map.get(code) ?? []), entry.code]);
+    return map;
+  }, [evidence]);
   const hasStart = count("starter", "pair") > 0;
 
   // swaps take a moment on big decks: show the odds first, work these out right after
@@ -128,6 +137,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const setTag = (key: number, tag: Tag) => {
     const clean: Tag = tag.role === "pair" ? { role: "pair", with: tag.with ?? { codes: [], attributes: 0, levels: [] } } : { role: tag.role };
     if (tag.proven && (tag.role === "starter" || tag.role === "pair")) clean.proven = true;
+    if (tag.normal && (tag.role === "starter" || tag.role === "pair" || tag.role === "extender")) clean.normal = true;
     storeTagDefault(key, clean);
     onChange({ ...deck, tags: { ...deck.tags, [key]: clean }, updated: Date.now() });
   };
@@ -138,7 +148,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   };
   const setRole = (key: number, role: Role) => {
     const old = tagOf(key);
-    setTag(key, { role, with: role === "pair" ? old.with : undefined }); // a new role has to be proven again
+    setTag(key, { role, with: role === "pair" ? old.with : undefined, normal: old.normal }); // a new role has to be proven again
     if (role === "pair" && !old.with) setPartnerFor(key);
   };
 
@@ -189,7 +199,8 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
         ["Combo + hand trap", odds.comboHandtrap],
         ["Combo + 2 hand traps", odds.comboHandtrap2],
         ...(count("extender") ? ([["Combo + extender", odds.comboExtender, "plays through a negate"]] as [string, number, string][]) : []),
-        ...(count("brick") ? ([["Brick in hand", odds.dead, `two or more: ${pct(odds.dead2)}`]] as [string, number, string][]) : []),
+        ...(normalCount > 1 ? ([["Two Normal Summon cards", odds.normal2, "one of them is dead"]] as [string, number, string][]) : []),
+        ...(count("brick", "piece") || normalCount > 1 ? ([["Dead card in hand", odds.dead, `two or more: ${pct(odds.dead2)}`]] as [string, number, string][]) : []),
       ];
 
   const sorted = [...main].sort((a, b) => ORDER.indexOf(a.tag.role) - ORDER.indexOf(b.tag.role) || nameOf(a.code).localeCompare(nameOf(b.code)));
@@ -262,7 +273,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
           </ul>
           <p className="opt-counts">
             {total} cards: <b>{count("starter")}</b> starter · <b>{count("pair")}</b> with a partner · <b>{count("extender")}</b> extender · <b>{count("handtrap", "handtrap2")}</b> hand trap ·{" "}
-            <b>{count("breaker")}</b> breaker · <b>{count("brick")}</b> brick · <b>{count("other")}</b> other{untagged ? <> · <b className="warn">{untagged}</b> not tagged</> : null}
+            <b>{count("breaker")}</b> breaker · <b>{count("piece")}</b> combo piece · <b>{count("brick")}</b> brick · <b>{count("other")}</b> other{untagged ? <> · <b className="warn">{untagged}</b> not tagged</> : null}
           </p>
         </>
       )}
@@ -336,6 +347,12 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                   </button>
                 </div>
               )}
+              {normalCount > normalLimit(total) && (
+                <p className="opt-note warn">
+                  {normalCount} cards need your Normal Summon ({normalCards.map((card) => `${card.count} ${nameOf(card.code)}`).join(", ")}). Keep it to {normalLimit(total)} in a {total}-card deck:
+                  you hold two of them in {pct(first.normal2)} of hands going first, and only one can be summoned. Swaps never add another.
+                </p>
+              )}
               {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
               {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
                 <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
@@ -366,6 +383,8 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                     own={!!deck.tags?.[card.code]}
                     nameOf={nameOf}
                     withAny={withAny}
+                    takenBy={(takenBy.get(card.code) ?? []).map(nameOf)}
+                    onPiece={() => setRole(card.code, "piece")}
                     onUseEngine={() => {
                       const tags = { ...deck.tags };
                       delete tags[card.code];
@@ -379,6 +398,9 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                   )}
                   {(card.tag.role === "starter" || card.tag.role === "pair") && (
                     <span className="opt-proof">
+                      <button className={`button small ${card.tag.normal ? "on" : "ghost"}`} onClick={() => setTag(card.code, { ...card.tag, normal: !card.tag.normal })} title="Its line uses the turn's Normal Summon">
+                        {card.tag.normal ? "✓ Normal Summon" : "Normal Summon?"}
+                      </button>
                       <button
                         className="button small"
                         onClick={() => {
@@ -416,7 +438,9 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               ))}
             </ul>
             <p>
-              Engine-checked: the duel engine (EDOPro's own card scripts) played every card in the Main Deck alone, then every pair of cards that start nothing alone,
+              Normal Summon: a start whose line uses the turn's Normal Summon (the engine marks the ones whose line opens with one). Holding two, one is
+              dead, so it counts as a dead card, and swaps never take you past 5 in 40 cards (one per 8). Extenders and Combo pieces are never suggested
+              as cuts: what they do (play through a negate, be there to search) isn't in these numbers yet. Engine-checked: the duel engine (EDOPro's own card scripts) played every card in the Main Deck alone, then every pair of cards that start nothing alone,
               trying the actions it allows a few steps deep. A start counts when the hand ends up keeping a new card from the Deck, so a search that has to put a card
               back doesn't count. It finds partners by itself: what the engine lets a card do with each other card in the hand. It says whether a hand gets going,
               not whether it reaches your full board; that's what Proven is for. Every possible opening hand is counted with its exact chance, no sampling. A combo opens with a Starter, or a Starter with a partner plus one of its partners. A hand trap used as the
@@ -443,8 +467,21 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
 }
 
 // How the engine knows, in one line, and where it disagrees with a tag you set
-function EngineLine({ found, tag, own, nameOf, withAny, onUseEngine }: { found?: CardEvidence; tag: Tag; own: boolean; nameOf: (code: number) => string; withAny: (codes: number[]) => boolean; onUseEngine: () => void }) {
+function EngineLine({ found, tag, own, nameOf, withAny, takenBy, onPiece, onUseEngine }: { found?: CardEvidence; tag: Tag; own: boolean; nameOf: (code: number) => string; withAny: (codes: number[]) => boolean; takenBy: string[]; onPiece: () => void; onUseEngine: () => void }) {
   if (!found) return null;
+  // a card that starts nothing but the engine's lines pull from the Deck: maybe one to keep there
+  if (found.alone.deck === 0 && !found.partners.length && takenBy.length && tag.role !== "starter" && tag.role !== "pair")
+    return (
+      <span className="opt-engine">
+        Engine: nothing alone, but {takenBy.slice(0, 3).join(", ")}
+        {takenBy.length > 3 ? ` and ${takenBy.length - 3} more` : ""} take{takenBy.length === 1 ? "s" : ""} it from the Deck.{" "}
+        {tag.role !== "piece" && (
+          <button className="opt-link" onClick={onPiece}>
+            Combo piece?
+          </button>
+        )}
+      </span>
+    );
   const alone = found.alone.deck > 0;
   const partnered = found.partners.length > 0;
   const steps = found.alone.steps.filter((step) => !step.startsWith("pick ")).slice(0, 4).join(" › ");

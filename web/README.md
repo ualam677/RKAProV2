@@ -53,6 +53,9 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   engine-checked starts, proven to a full board. Galaxy list: 4 starters alone (Orbital 7, Infinity Dragon, Delta
   Wing, Wizard), Soldier with any LIGHT monster in the deck, Photon Orbital with Summoner or War Drake, Seventh
   Tachyon with any second card; 93.3% engine-checked. About 20 s for a 43-card deck, kept with the deck.
+- Normal Summon rule: starts whose engine line opens with a Normal Summon are marked (toggle per card); a second one in
+  the hand counts as dead, the odds show how often two meet, and swaps never go past one per 8 cards (5 in 40).
+  "Combo piece in the Deck" role: dead if drawn, never cut; the engine points at cards its lines take from the Deck.
   Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it
   matches v1's own code (93.34% / 96.48%), a separate naive evaluator over every hand, and a 1M-hand simulation.
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
