@@ -8,26 +8,30 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 
 ## Done
 - Engine in a worker, .ydk loading (Omega alternate-art ids accepted), release and pre-release card sets.
-- Playable duel screen: field, hand, piles, prompts as bottom sheets, card text, card pictures.
-- Phone layout like Duel Links with the TCG field: hand fanned along the bottom edge, tap a card for actions floating
-  over it, tap and hold any card (hand, field, pile list) for its text, phase button on the right edge under the field,
-  LP bars for the opponent at the top and you at the bottom, piles and field zones in side columns
-  (yours: Field + Extra on the left, GY + Deck on the right; the opponent's mirrored), New hand / Exit in the ☰ menu.
+- Look: EDOPro's blue and black (navy panels, thin bright-blue borders); every animation is 80 ms so it feels instant.
+- Phones, Duel Links feel with the TCG field: hand fanned along the bottom edge, tap a card for actions floating over it,
+  tap and hold any card for its text, round phase button on the right edge under the field, LP bars top (opponent) and
+  bottom (you), piles and field zones in side columns (yours: Field + Extra left, GY + Deck right; opponent mirrored),
+  New hand / Exit in the ☰ menu.
+- Wide screens (900 px+, landscape), EDOPro arrangement: LP and card info panel on the left (hover a card to read it),
+  field in the middle, phase buttons under it, flat hand along the bottom.
+- Prompts: when every card in a prompt is on the field or in the hand (chain with a hand trap, tribute, targets) the cards
+  glow where they are and a slim bar above the hand asks the question; other card prompts (searches, GY picks) open a
+  grid of cards; yes/no, options and positions are a small dialog. Grids and dialogs have "View field" to peek.
+- Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
+  hand size and chosen cards are remembered on the device.
 
 ## Next, in order
-1. Desktop layout = EDOPro's (the phone layout is used everywhere for now). Effect prompts that name cards
-   ("Chain an effect?") still open a bottom sheet over the hand.
-2. Hand test options: hand size 1-6, chosen opening hand.
-3. Opponent: hand traps (easy / smart), then plays its own turn with board breakers
+1. Opponent: hand traps (easy / smart), then plays its own turn with board breakers
    (Veiler / Imperm on the player's turn, Imperm at the start of its turn, Lightning Storm, Cosmic Cyclone-style cards).
-4. Deck Optimiser: card roles, exact odds, routes learned from saved replays, then end-board suggestion from a random
+2. Deck Optimiser: card roles, exact odds, routes learned from saved replays, then end-board suggestion from a random
    hand (beam search over the core, scored against learned end boards).
-5. Save states (seed + response log), replays, takeover.
-6. Missing prompts: SELECT_SUM, SELECT_COUNTER, ANNOUNCE_RACE / ATTRIB / CARD.
-7. Omega deck folder link with write-back, Google Drive sync.
-8. Replay to mp4 / GIF.
+3. Save states (seed + response log), replays, takeover.
+4. Missing prompts: SELECT_SUM, SELECT_COUNTER, ANNOUNCE_RACE / ATTRIB / CARD.
+5. Omega deck folder link with write-back, Google Drive sync.
+6. Replay to mp4 / GIF.
 
-The C++ fork in `gframe/` already implements 2-5 for desktop (see `deck_optimizer.h`, `handtrap_ai.h`, `single_mode.cpp`);
+The C++ fork in `gframe/` already implements 1-3 for desktop (see `deck_optimizer.h`, `handtrap_ai.h`, `single_mode.cpp`);
 port the logic from there.
 
 ## Handoff notes
@@ -36,15 +40,18 @@ Decisions made by the owner
 - The web app is the product. The Android APK path is parked (it crashed on launch; cause unknown, no crash log).
 - No online play. Built from scratch here, not from the older `ualam677/RKAPro` repo; only its ideas are reused
   (beam line search, Omega replay/deck import, Drive sync through a synced folder first).
-- Phone layout should feel like Duel Links but with TCG rules (5 monster and 5 spell/trap zones). Desktop layout should
-  feel like EDOPro. Colours: blue and black.
+- Styled like EDOPro, blue and black, and as snappy as EDOPro. On phones it should feel like Duel Links but keep TCG
+  rules (5 monster and 5 spell/trap zones).
+- Kept separate from EDOPro itself: nothing goes to edo9300/edopro.
 - Purpose of the optimiser: every saved replay of a correct route teaches it that deck's end boards, until it can work
   out the end board from a random hand.
 - Omega decks: read from Omega's deck folder and write edits back (or a conversion step if that is simpler).
 - Work in small batches; the owner tests on a phone and sends screenshots.
 
 State of the repo
-- Branch `ccr-2d230037-wg0h5q`. Only `web.yml` runs on push; the desktop and Android workflows are manual.
+- Work continues on branch `ccr-ec7bb1b5-cfkgim` (it deploys to Pages; the older `ccr-2d230037-wg0h5q` is merged in).
+- Pull requests must target `ualam677/RKAProV2`, never `edo9300/edopro`: GitHub defaults a fork's PRs to the parent.
+- Only `web.yml` runs on push; the desktop and Android workflows are manual.
 - GitHub Pages is on (source: GitHub Actions) at https://ualam677.github.io/RKAProV2/ and the `github-pages`
   environment allows this branch.
 - `gframe/` holds a working desktop C++ fork with the optimiser, hand-trap opponent (easy / smart), save states,
@@ -61,4 +68,5 @@ Things that cost time
 
 Not yet confirmed by the owner
 - The cropping fix for field cards (cards keep card proportions; defense position is the card turned sideways).
-- The Duel Links-style phone layout (checked here on Pixel 7 and iPhone SE sizes, without card pictures).
+- The phone and wide layouts and the new prompts (checked here on Pixel 7, iPhone SE and 1440x900, without card
+  pictures).

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CardArt } from "./CardArt";
 import { LOCATION, POSITION, TYPE, type CardRef, type CardText, type CardView, type Choice, type DuelView, type PlayerView } from "./engine/protocol";
 
@@ -16,16 +16,20 @@ type Sheet = { kind: "card"; card: CardView } | { kind: "pile"; controller: numb
 // the card whose actions float over it, with where it sits on screen
 type Focus = { card: CardView; rect: DOMRect } | null;
 
-const HOLD_MS = 450;
+const HOLD_MS = 350;
 const START_LP = 8000;
+// wide screens get EDOPro's arrangement: card info on the left, the field in the middle, a flat hand
+const WIDE_QUERY = "(min-width: 900px) and (min-aspect-ratio: 1/1)";
 
 const same = (a: CardRef, b: CardRef) => a.controller === b.controller && a.location === b.location && a.sequence === b.sequence;
+// cards the player can see and tap where they are; anything else is picked from a grid of cards
+const onBoard = (card: CardRef) => card.location === LOCATION.MZONE || card.location === LOCATION.SZONE || (card.location === LOCATION.HAND && card.controller === 0);
 // only cards on the field are ever "set"; the hand and the piles just report a face-down position
 const faceDown = (card: CardView) =>
   (card.location === LOCATION.MZONE || card.location === LOCATION.SZONE) && (card.position & (POSITION.FACEDOWN_ATTACK | POSITION.FACEDOWN_DEFENSE)) !== 0;
 const sideways = (card: CardView) => card.location === LOCATION.MZONE && (card.position & (POSITION.FACEUP_DEFENSE | POSITION.FACEDOWN_DEFENSE)) !== 0;
 
-function frame(card: CardView): string {
+function frame(card: { code: number; type: number }): string {
   if (!card.code) return "back";
   if (card.type & TYPE.SPELL) return "spell";
   if (card.type & TYPE.TRAP) return "trap";
@@ -34,6 +38,17 @@ function frame(card: CardView): string {
   if (card.type & TYPE.SYNCHRO) return "synchro";
   if (card.type & TYPE.FUSION) return "fusion";
   return "monster";
+}
+
+function useMedia(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const update = () => setMatches(list.matches);
+    list.addEventListener("change", update);
+    return () => list.removeEventListener("change", update);
+  }, [query]);
+  return matches;
 }
 
 // Tap and tap-and-hold on the same element. A hold never also counts as a tap.
@@ -80,9 +95,11 @@ interface TileProps {
   style?: React.CSSProperties;
   onTap?: (el: HTMLElement) => void;
   onHold?: () => void;
+  onHover?: () => void;
+  caption?: string;
 }
 
-function CardTile({ card, glow, picked, focused, className, style, onTap, onHold }: TileProps) {
+function CardTile({ card, glow, picked, focused, className, style, onTap, onHold, onHover, caption }: TileProps) {
   const hidden = !card.code;
   // the name stays as the tile's content until its picture has arrived
   const [art, setArt] = useState(0);
@@ -100,7 +117,7 @@ function CardTile({ card, glow, picked, focused, className, style, onTap, onHold
     className ?? "",
   ];
   return (
-    <button className={classes.join(" ")} style={style} {...handlers} aria-label={hidden ? "Face-down card" : card.name}>
+    <button className={classes.join(" ")} style={style} {...handlers} onPointerEnter={onHover} aria-label={hidden ? "Face-down card" : card.name}>
       {!hidden && <CardArt key={card.code} code={card.code} onLoad={() => setArt(card.code)} />}
       {!hidden && !pictured && <span className="tile-name">{card.name}</span>}
       {!hidden && (card.type & TYPE.MONSTER) !== 0 && card.location === LOCATION.MZONE && (
@@ -110,6 +127,7 @@ function CardTile({ card, glow, picked, focused, className, style, onTap, onHold
         </span>
       )}
       {card.materials > 0 && <span className="tile-badge">{card.materials}</span>}
+      {caption && <span className="tile-caption">{caption}</span>}
     </button>
   );
 }
@@ -143,13 +161,34 @@ function LifeBar({ name, lp, extra, mine, active, children }: { name: string; lp
   );
 }
 
+// card picture, name, stats line and text: the detail sheet on phones, the left panel on wide screens
+function CardInfo({ card, text, children }: { card: CardView | null; text?: CardText; children?: ReactNode }) {
+  if (!card) return <p className="muted info-empty">Tap or point at a card to read it.</p>;
+  return (
+    <>
+      <div className="info-head">
+        <div className="info-art">{card.code ? <CardArt key={card.code} code={card.code} /> : null}</div>
+        <div>
+          <h2>{card.code ? card.name : "Face-down card"}</h2>
+          {text?.line && <p className="muted">{text.line}</p>}
+        </div>
+      </div>
+      {children}
+      {text?.text && <p className="card-text">{text.text}</p>}
+    </>
+  );
+}
+
 const PHASE_SHORT: Record<string, string> = { Draw: "DP", Standby: "SP", "Main 1": "M1", Battle: "BP", Damage: "BP", "Main 2": "M2", End: "EP" };
 
 export function Duel({ view, texts, requestText, answer, restart, leave }: Props) {
+  const wide = useMedia(WIDE_QUERY);
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [info, setInfo] = useState<CardView | null>(null);
   const [focus, setFocus] = useState<Focus>(null);
   const [phaseOpen, setPhaseOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [promptHidden, setPromptHidden] = useState(false);
   const [picks, setPicks] = useState<number[]>([]);
   const prompt = view.prompt;
 
@@ -159,11 +198,15 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
     setSheet(null);
     setFocus(null);
     setPhaseOpen(false);
+    setPromptHidden(false);
   }, [prompt]);
 
   const idle = prompt?.kind === "choice" && prompt.idle;
-  const zonePrompt = prompt?.kind === "multi" && prompt.choices.every((choice) => choice.zone);
   const choices = prompt?.choices ?? [];
+  const zonePrompt = prompt?.kind === "multi" && choices.length > 0 && choices.every((choice) => choice.zone);
+  const cardPrompt = !!prompt && !idle && choices.length > 0 && choices.every((choice) => choice.card);
+  // how a prompt is shown: on the board itself, as a grid of cards, or as a small dialog of buttons
+  const promptMode: "none" | "board" | "grid" | "dialog" = !prompt || idle ? "none" : zonePrompt || (cardPrompt && choices.every((choice) => onBoard(choice.card!))) ? "board" : cardPrompt ? "grid" : "dialog";
 
   const actionsFor = (card: CardRef) => choices.map((choice, index) => ({ choice, index })).filter(({ choice }) => choice.card && same(choice.card, card));
   const hasAction = (card: CardRef) => !!prompt && !zonePrompt && choices.some((choice) => choice.card && same(choice.card, card));
@@ -179,11 +222,17 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
     else setPicks(next);
   };
 
-  const showDetail = (card: CardView) => {
+  const inspect = (card: CardView) => {
     if (card.code) requestText(card.code);
+    setInfo(card);
+  };
+
+  const showDetail = (card: CardView) => {
+    inspect(card);
     setFocus(null);
     setPhaseOpen(false);
-    setSheet({ kind: "card", card });
+    // the wide layout always has the card panel open
+    if (!wide) setSheet({ kind: "card", card });
   };
 
   // tap: pick it, or float its actions over it; a card with nothing to do shows its text
@@ -191,11 +240,14 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
     setPhaseOpen(false);
     if (prompt?.kind === "multi" && !zonePrompt) {
       const index = choices.findIndex((choice) => choice.card && same(choice.card, card));
-      if (index >= 0) return togglePick(index);
+      if (index >= 0) {
+        inspect(card);
+        return togglePick(index);
+      }
     }
     if (focus && same(focus.card, card)) return setFocus(null);
-    if ((idle || prompt?.kind === "choice") && actionsFor(card).length > 0) {
-      if (card.code) requestText(card.code);
+    if (prompt?.kind === "choice" && actionsFor(card).length > 0) {
+      inspect(card);
       return setFocus({ card, rect: el.getBoundingClientRect() });
     }
     showDetail(card);
@@ -209,6 +261,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
       focused={!!focus && same(focus.card, card)}
       onTap={(el) => (index >= 0 ? togglePick(index) : tapCard(card, el))}
       onHold={() => showDetail(card)}
+      onHover={wide ? () => inspect(card) : undefined}
     />
   );
 
@@ -220,7 +273,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
       <div
         className={`zone ${extraClass} ${index >= 0 ? "open" : ""} ${picks.includes(index) ? "picked" : ""}`}
         key={`${controller}-${location}-${sequence}`}
-        onClick={index >= 0 && !card ? () => togglePick(index) : undefined}
+        onClick={index >= 0 && !card ? (event) => (event.stopPropagation(), togglePick(index)) : undefined}
       >
         {card && fieldCard(card, index)}
       </div>
@@ -235,7 +288,13 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
     const label = { deck: "Deck", grave: "GY", banished: "Banished", extra: "Extra" }[name];
     const open = name !== "deck" && count > 0 ? () => setSheet({ kind: "pile", controller, pile: name }) : undefined;
     return (
-      <button key={`${controller}-${name}`} className={`zone pile pile-${name} ${cards.some(hasAction) ? "glow" : ""}`} onClick={open} disabled={!open} aria-label={`${label} ${count}`}>
+      <button
+        key={`${controller}-${name}`}
+        className={`zone pile pile-${name} ${cards.some(hasAction) ? "glow" : ""}`}
+        onClick={open && ((event) => (event.stopPropagation(), open()))}
+        disabled={!open}
+        aria-label={`${label} ${count}`}
+      >
         {count > 0 && (top ? <PileFace card={top} /> : <span className="tile back pile-top" />)}
         <span className="pile-label">{label}</span>
         <span className="pile-count">{count}</span>
@@ -260,7 +319,14 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
 
   const phaseChoices = idle ? choices.map((choice, index) => ({ choice, index })).filter(({ choice }) => choice.phase) : [];
   const pickButton = (choice: Choice, index: number, className = "button") => (
-    <button className={className} key={index} onClick={() => answer([index])}>
+    <button
+      className={className}
+      key={index}
+      onClick={(event) => {
+        event.stopPropagation();
+        answer([index]);
+      }}
+    >
       {choice.label}
     </button>
   );
@@ -271,28 +337,119 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
   useLayoutEffect(() => {
     if (!focus || !floatRef.current) return setFloatPos(null);
     const box = floatRef.current.getBoundingClientRect();
-    const margin = 8;
-    const left = Math.min(Math.max(margin, focus.rect.left + focus.rect.width / 2 - box.width / 2), window.innerWidth - box.width - margin);
+    // a hand card lifts when it is picked, after its place was measured
+    const margin = focus.card.location === LOCATION.HAND ? 30 : 8;
+    const left = Math.min(Math.max(8, focus.rect.left + focus.rect.width / 2 - box.width / 2), window.innerWidth - box.width - 8);
     const above = focus.rect.top - box.height - margin;
-    const top = above >= margin ? above : Math.min(focus.rect.bottom + margin, window.innerHeight - box.height - margin);
+    const top = above >= 8 ? above : Math.min(focus.rect.bottom + 8, window.innerHeight - box.height - 8);
     setFloatPos({ left, top });
   }, [focus]);
 
-  const sheetBody = useMemo(() => {
+  const ready = prompt?.kind === "multi" && picks.length >= prompt.min && picks.length <= prompt.max;
+  const cancelLabel = prompt?.kind === "choice" ? prompt.cancel : prompt?.kind === "multi" && prompt.cancel ? "Cancel" : null;
+  const count = prompt?.kind === "multi" ? (prompt.min === prompt.max ? `${prompt.min}` : `${prompt.min}-${prompt.max}`) : "";
+  const promptButtons = (
+    <>
+      {prompt?.kind === "multi" && prompt.min !== prompt.max && (
+        <button className="button primary" disabled={!ready} onClick={(event) => (event.stopPropagation(), answer(picks))}>
+          Confirm{picks.length ? ` (${picks.length})` : ""}
+        </button>
+      )}
+      {cancelLabel && (
+        <button className="button ghost" onClick={(event) => (event.stopPropagation(), answer(null))}>
+          {cancelLabel}
+        </button>
+      )}
+    </>
+  );
+
+  // the question asked by a board prompt sits in a slim bar above the hand, so nothing is covered
+  const promptBar =
+    promptMode === "board" ? (
+      <div className="prompt-bar" onClick={(event) => event.stopPropagation()}>
+        <span className="prompt-title">
+          {zonePrompt ? `${prompt!.title}: tap a highlighted zone` : prompt!.title}
+          {count && !zonePrompt && <b> ({count})</b>}
+        </span>
+        {promptButtons}
+      </div>
+    ) : (promptMode === "grid" || promptMode === "dialog") && promptHidden ? (
+      <div className="prompt-bar" onClick={(event) => event.stopPropagation()}>
+        <span className="prompt-title">{prompt!.title}</span>
+        <button className="button primary" onClick={() => setPromptHidden(false)}>
+          Back to choice
+        </button>
+      </div>
+    ) : null;
+
+  // a selection window with the cards themselves, like EDOPro's
+  const promptGrid = promptMode === "grid" && !promptHidden && (
+    <div className="sheet prompt-sheet" onClick={(event) => event.stopPropagation()}>
+      <div className="sheet-title">
+        <h2>
+          {prompt!.title}
+          {count && <b> ({count})</b>}
+        </h2>
+        <button className="button ghost small" onClick={() => setPromptHidden(true)}>
+          View field
+        </button>
+      </div>
+      <div className="card-grid">
+        {choices.map((choice, index) => {
+          const ref = choice.card!;
+          const card: CardView = { ...ref, type: ref.type ?? 0, attack: 0, defense: 0, level: 0, position: POSITION.FACEUP_ATTACK, materials: 0, location: ref.location };
+          const label = choice.label && choice.label !== ref.name ? choice.label.replace(`${ref.name}: `, "") : "";
+          return (
+            <CardTile
+              key={index}
+              card={card}
+              className="grid-card"
+              picked={picks.includes(index)}
+              caption={label}
+              onTap={() => {
+                inspect(card);
+                if (prompt!.kind === "multi") togglePick(index);
+                else answer([index]);
+              }}
+              onHold={() => showDetail(card)}
+              onHover={wide ? () => inspect(card) : undefined}
+            />
+          );
+        })}
+      </div>
+      <div className="prompt-actions">{promptButtons}</div>
+    </div>
+  );
+
+  const promptDialog = promptMode === "dialog" && !promptHidden && (
+    <div className="dialog" onClick={(event) => event.stopPropagation()}>
+      <h2>{prompt!.title}</h2>
+      <div className="actions">
+        {prompt!.kind === "choice"
+          ? choices.map((choice, index) => pickButton(choice, index))
+          : choices.map((choice, index) => (
+              <button className={`list-row ${picks.includes(index) ? "picked" : ""}`} key={index} onClick={() => togglePick(index)}>
+                {choice.label}
+              </button>
+            ))}
+      </div>
+      <div className="prompt-actions">
+        {promptButtons}
+        <button className="button ghost small" onClick={() => setPromptHidden(true)}>
+          View field
+        </button>
+      </div>
+    </div>
+  );
+
+  const sheetBody = (() => {
     if (sheet?.kind === "card") {
-      const text = texts.get(sheet.card.code);
-      const actions = idle || prompt?.kind === "choice" ? actionsFor(sheet.card) : [];
+      const actions = prompt?.kind === "choice" ? actionsFor(sheet.card) : [];
       return (
         <>
-          <div className="sheet-head">
-            <CardArt key={sheet.card.code} code={sheet.card.code} />
-            <div>
-              <h2>{sheet.card.code ? sheet.card.name : "Face-down card"}</h2>
-              {text?.line && <p className="muted">{text.line}</p>}
-            </div>
-          </div>
-          {actions.length > 0 && <div className="actions">{actions.map(({ choice, index }) => pickButton(choice, index))}</div>}
-          {text?.text && <p className="card-text">{text.text}</p>}
+          <CardInfo card={sheet.card} text={texts.get(sheet.card.code)}>
+            {actions.length > 0 && <div className="actions">{actions.map(({ choice, index }) => pickButton(choice, index))}</div>}
+          </CardInfo>
           <button className="button ghost" onClick={() => setSheet(null)}>
             Close
           </button>
@@ -307,21 +464,23 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
             {sheet.controller === 1 ? "Opponent's " : ""}
             {sheet.pile === "grave" ? "Graveyard" : sheet.pile === "banished" ? "Banished" : "Extra Deck"}
           </h2>
-          <div className="pile-grid">
+          <div className="card-grid">
             {cards.map((card, index) => (
               <CardTile
                 key={index}
                 card={card}
+                className="grid-card"
                 glow={hasAction(card)}
                 picked={isPicked(card)}
-                onTap={() => {
-                  if (prompt?.kind === "multi" && !zonePrompt) {
-                    const pick = choices.findIndex((choice) => choice.card && same(choice.card, card));
-                    if (pick >= 0) return togglePick(pick);
+                onTap={(el) => {
+                  if (hasAction(card) || (prompt?.kind === "multi" && !zonePrompt)) {
+                    setSheet(null);
+                    return tapCard(card, el);
                   }
                   showDetail(card);
                 }}
                 onHold={() => showDetail(card)}
+                onHover={wide ? () => inspect(card) : undefined}
               />
             ))}
           </div>
@@ -331,48 +490,10 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
         </>
       );
     }
-    if (!prompt || idle || zonePrompt) return null;
-    if (prompt.kind === "choice") {
-      return (
-        <>
-          <h2>{prompt.title}</h2>
-          <div className="actions">{prompt.choices.map((choice, index) => pickButton(choice, index))}</div>
-          {prompt.cancel && (
-            <button className="button ghost" onClick={() => answer(null)}>
-              {prompt.cancel}
-            </button>
-          )}
-        </>
-      );
-    }
-    const ready = picks.length >= prompt.min && picks.length <= prompt.max;
-    return (
-      <>
-        <h2>
-          {prompt.title} ({prompt.min === prompt.max ? prompt.min : `${prompt.min}-${prompt.max}`})
-        </h2>
-        <div className="list">
-          {prompt.choices.map((choice, index) => (
-            <button className={`list-row ${picks.includes(index) ? "picked" : ""}`} key={index} onClick={() => togglePick(index)}>
-              {choice.label}
-            </button>
-          ))}
-        </div>
-        <div className="actions">
-          <button className="button primary" disabled={!ready} onClick={() => answer(picks)}>
-            Confirm
-          </button>
-          {prompt.cancel && (
-            <button className="button ghost" onClick={() => answer(null)}>
-              Cancel
-            </button>
-          )}
-        </div>
-      </>
-    );
-  }, [sheet, prompt, picks, texts, view]);
+    return null;
+  })();
 
-  // the hand fans out from the bottom edge; with many cards they overlap more
+  // the hand fans out from the bottom edge on phones; wide screens lay it flat like EDOPro
   const handRef = useRef<HTMLDivElement>(null);
   const [handWidth, setHandWidth] = useState(360);
   useLayoutEffect(() => {
@@ -381,32 +502,76 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
     const observer = new ResizeObserver(() => setHandWidth(el.clientWidth));
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
-  const cardWidth = Math.min(108, Math.max(72, handWidth / 4.2));
-  const count = me.hand.length;
-  const step = count > 1 ? Math.min(cardWidth * 0.92, (handWidth - cardWidth - 28) / (count - 1)) : 0;
+  }, [wide]);
+  const cardWidth = wide ? 96 : Math.min(108, Math.max(72, handWidth / 4.2));
+  const handCount = me.hand.length;
+  const step = handCount > 1 ? Math.min(cardWidth * (wide ? 1.06 : 0.92), (handWidth - cardWidth - 28) / (handCount - 1)) : 0;
 
   const focusActions = focus ? actionsFor(focus.card) : [];
   const myTurn = view.turnPlayer === 0;
 
-  return (
-    // a tap anywhere else closes the floating actions and the menus
-    <div className="duel" onClick={() => (setFocus(null), setPhaseOpen(false), setMenuOpen(false))}>
-      <LifeBar name="Opponent" lp={them.lp} extra={`Hand ${them.hand.length}`} active={!myTurn}>
+  const menu = (
+    <>
+      <button className="button" onClick={restart}>
+        New hand
+      </button>
+      <button className="button ghost" onClick={leave}>
+        Exit
+      </button>
+    </>
+  );
+
+  const phaseControl = wide ? (
+    <div className="phase-strip" onClick={(event) => event.stopPropagation()}>
+      <span className="phase-now">
+        Turn {view.turn} · {view.phase}
+      </span>
+      {phaseChoices.map(({ choice, index }) => pickButton(choice, index, "button primary"))}
+    </div>
+  ) : (
+    <div className="phase-dock">
+      <button
+        className={`phase-button ${phaseChoices.length ? "ready" : ""}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          setFocus(null);
+          if (phaseChoices.length) setPhaseOpen(!phaseOpen);
+        }}
+        aria-label={`Phase: ${view.phase}`}
+      >
+        <span className="phase-short">{PHASE_SHORT[view.phase] ?? view.phase}</span>
+        <span className="phase-turn">T{view.turn}</span>
+      </button>
+      {phaseOpen && <div className="phase-menu">{phaseChoices.map(({ choice, index }) => pickButton(choice, index, "button primary"))}</div>}
+    </div>
+  );
+
+  const opponentBar = (
+    <LifeBar name="Opponent" lp={them.lp} extra={`Hand ${them.hand.length}`} active={!myTurn}>
+      {!wide && (
         <button className="icon-button" aria-label="Menu" onClick={(event) => (event.stopPropagation(), setMenuOpen(!menuOpen))}>
           ☰
         </button>
-      </LifeBar>
-      {menuOpen && (
-        <div className="menu" onClick={() => setMenuOpen(false)}>
-          <button className="button" onClick={restart}>
-            New hand
-          </button>
-          <button className="button ghost" onClick={leave}>
-            Exit
-          </button>
-        </div>
       )}
+    </LifeBar>
+  );
+  const myBar = <LifeBar name="You" lp={me.lp} mine active={myTurn} />;
+
+  return (
+    // a tap anywhere else closes the floating actions and the menus
+    <div className={`duel ${wide ? "wide" : "phone"}`} onClick={() => (setFocus(null), setPhaseOpen(false), setMenuOpen(false))}>
+      {wide && (
+        <aside className="side">
+          {opponentBar}
+          {myBar}
+          <div className="info-panel">
+            <CardInfo card={info} text={info ? texts.get(info.code) : undefined} />
+          </div>
+          <div className="side-menu">{menu}</div>
+        </aside>
+      )}
+      {!wide && opponentBar}
+      {!wide && menuOpen && <div className="menu">{menu}</div>}
 
       <div className="board">
         <div className="field-area">
@@ -438,49 +603,35 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
         </div>
 
         <div className="board-foot">
-          <div className="phase-dock">
-            <button
-              className={`phase-button ${phaseChoices.length ? "ready" : ""}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                setFocus(null);
-                if (phaseChoices.length) setPhaseOpen(!phaseOpen);
-              }}
-              aria-label={`Phase: ${view.phase}`}
-            >
-              <span className="phase-short">{PHASE_SHORT[view.phase] ?? view.phase}</span>
-              <span className="phase-turn">T{view.turn}</span>
-            </button>
-            {phaseOpen && <div className="phase-menu">{phaseChoices.map(({ choice, index }) => pickButton(choice, index, "button primary"))}</div>}
-          </div>
+          {promptBar}
+          {phaseControl}
         </div>
 
-        {zonePrompt && <p className="banner">{prompt!.title}: tap a highlighted zone</p>}
         {view.ended && <p className="banner">The duel has ended.</p>}
+        {promptDialog}
       </div>
 
-      <LifeBar name="You" lp={me.lp} mine active={myTurn} />
+      {!wide && myBar}
 
-      <div className="hand" ref={handRef}>
+      <div className={`hand ${wide ? "flat" : "fan"}`} ref={handRef}>
         {me.hand.map((card, i) => {
-          const offset = i - (count - 1) / 2;
+          const offset = i - (handCount - 1) / 2;
           const lifted = (focus && same(focus.card, card)) || isPicked(card);
+          const transform = wide
+            ? `translateY(${lifted ? -14 : 0}px)`
+            : `translateY(${Math.abs(offset) * Math.abs(offset) * 2 - (lifted ? 22 : 0)}px) rotate(${offset * (handCount > 6 ? 2 : 3)}deg)`;
           return (
             <CardTile
               key={card.sequence}
               card={card}
               className="hand-card"
-              style={{
-                width: cardWidth,
-                left: `calc(50% + ${offset * step - cardWidth / 2}px)`,
-                transform: `translateY(${Math.abs(offset) * Math.abs(offset) * 2 - (lifted ? 22 : 0)}px) rotate(${offset * (count > 6 ? 2 : 3)}deg)`,
-                zIndex: lifted ? 50 : i + 1,
-              }}
+              style={{ width: cardWidth, left: `calc(50% + ${offset * step - cardWidth / 2}px)`, transform, zIndex: lifted ? 50 : i + 1 }}
               glow={hasAction(card)}
               picked={isPicked(card)}
               focused={!!focus && same(focus.card, card)}
               onTap={(el) => tapCard(card, el)}
               onHold={() => showDetail(card)}
+              onHover={wide ? () => inspect(card) : undefined}
             />
           );
         })}
@@ -488,20 +639,26 @@ export function Duel({ view, texts, requestText, answer, restart, leave }: Props
 
       {focus && focusActions.length > 0 && (
         <>
-          <div className="scrim" onClick={() => setFocus(null)} />
+          <div className="scrim" onClick={(event) => (event.stopPropagation(), setFocus(null))} />
           <div className="float-actions" ref={floatRef} style={floatPos ? { left: floatPos.left, top: floatPos.top } : { visibility: "hidden" }}>
             {focusActions.map(({ choice, index }) => pickButton(choice, index, "float-action"))}
-            <button className="float-action info" onClick={() => showDetail(focus.card)}>
-              Card text
-            </button>
+            {!wide && (
+              <button className="float-action info" onClick={(event) => (event.stopPropagation(), showDetail(focus.card))}>
+                Card text
+              </button>
+            )}
           </div>
         </>
       )}
 
+      {promptGrid}
+
       {sheetBody && (
         <>
-          {sheet && <div className="scrim dim" onClick={() => setSheet(null)} />}
-          <div className="sheet">{sheetBody}</div>
+          <div className="scrim dim" onClick={(event) => (event.stopPropagation(), setSheet(null))} />
+          <div className="sheet" onClick={(event) => event.stopPropagation()}>
+            {sheetBody}
+          </div>
         </>
       )}
     </div>

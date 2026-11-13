@@ -31,7 +31,7 @@ export interface PlayerView {
 
 export interface Choice {
   label: string;
-  card?: CardRef & { code: number; name: string };
+  card?: CardRef & { code: number; name: string; type?: number };
   zone?: CardRef;
   // idle and battle commands that belong to the phase bar, not to a card
   phase?: boolean;
@@ -63,6 +63,8 @@ export interface StartOptions {
   main: number[];
   extra: number[];
   hand: number;
+  // cards to open with; the rest of the hand is drawn at random
+  chosen: number[];
   seed: number;
 }
 

@@ -1,19 +1,47 @@
-import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { parseYdk, shuffled, type Deck } from "./deck";
 import { Duel } from "./Duel";
+import { CardArt } from "./CardArt";
 import type { CardText, DuelView, FromWorker, ToWorker } from "./engine/protocol";
 import "./style.css";
 
+// remembered on this device only, so the phone opens straight to the last deck
+const SAVED = "rka.handtest";
+interface Saved {
+  deckText: string;
+  deckName: string;
+  hand: number;
+  chosen: number[];
+}
+function loadSaved(): Partial<Saved> {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function save(value: Saved) {
+  try {
+    localStorage.setItem(SAVED, JSON.stringify(value));
+  } catch {
+    // private mode or storage full: settings just are not remembered
+  }
+}
+
 function App() {
   const worker = useRef<Worker | null>(null);
+  const saved = useMemo(loadSaved, []);
   const [status, setStatus] = useState("Starting");
   const [ready, setReady] = useState(false);
-  const [deck, setDeck] = useState<Deck | null>(null);
-  const [deckName, setDeckName] = useState("");
+  const [deckText, setDeckText] = useState(saved.deckText ?? "");
+  const [deckName, setDeckName] = useState(saved.deckName ?? "");
+  const [hand, setHand] = useState(saved.hand ?? 5);
+  const [chosen, setChosen] = useState<number[]>(saved.chosen ?? []);
   const [view, setView] = useState<DuelView | null>(null);
   const [texts, setTexts] = useState(new Map<number, CardText>());
   const [error, setError] = useState("");
+  const deck: Deck | null = useMemo(() => (deckText ? parseYdk(deckText) : null), [deckText]);
 
   const post = (message: ToWorker) => worker.current?.postMessage(message);
 
@@ -34,21 +62,44 @@ function App() {
     return () => instance.terminate();
   }, []);
 
+  useEffect(() => save({ deckText, deckName, hand, chosen }), [deckText, deckName, hand, chosen]);
+
+  // card names for the opening hand picker come from the worker once the cards are loaded
+  const unique = useMemo(() => [...new Set(deck?.main ?? [])], [deck]);
+  useEffect(() => {
+    if (ready) unique.forEach((code) => texts.has(code) || post({ type: "text", code }));
+  }, [ready, unique]);
+
   const loadDeck = async (file: File | undefined) => {
     if (!file) return;
-    setDeck(parseYdk(await file.text()));
+    setDeckText(await file.text());
     setDeckName(file.name.replace(/\.ydk$/i, ""));
+    setChosen([]);
+  };
+
+  const copies = (code: number) => deck?.main.filter((card) => card === code).length ?? 0;
+  const picked = (code: number) => chosen.filter((card) => card === code).length;
+  const choose = (code: number) => {
+    if (chosen.length < hand && picked(code) < copies(code)) setChosen([...chosen, code]);
+  };
+  const unchoose = (slot: number) => setChosen(chosen.filter((_, index) => index !== slot));
+  const pickHand = (size: number) => {
+    setHand(size);
+    setChosen(chosen.slice(0, size));
   };
 
   const start = useCallback(() => {
     if (!deck) return;
     setError("");
-    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, hand: 5, seed: Math.floor(Math.random() * 2 ** 31) });
-  }, [deck]);
+    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, hand, chosen, seed: Math.floor(Math.random() * 2 ** 31) });
+  }, [deck, hand, chosen]);
 
-  const requestText = useCallback((code: number) => {
-    if (!texts.has(code)) post({ type: "text", code });
-  }, [texts]);
+  const requestText = useCallback(
+    (code: number) => {
+      if (!texts.has(code)) post({ type: "text", code });
+    },
+    [texts],
+  );
 
   if (view) {
     return (
@@ -63,15 +114,17 @@ function App() {
     );
   }
 
+  const nameOf = (code: number) => texts.get(code)?.name ?? `#${code}`;
   return (
-    <main>
+    <main className="start">
       <header>
         <h1>RKAPro</h1>
         <p className="status">{status}</p>
       </header>
+
       <section className="panel">
         <label className="button">
-          {deck ? `${deckName} (${deck.main.length} cards)` : "Open a deck (.ydk)"}
+          {deck ? `${deckName} (${deck.main.length} + ${deck.extra.length})` : "Open a deck (.ydk)"}
           <input type="file" accept=".ydk" hidden onChange={(event) => loadDeck(event.target.files?.[0])} />
         </label>
         <button className="button primary" disabled={!ready || !deck} onClick={start}>
@@ -79,6 +132,59 @@ function App() {
         </button>
       </section>
       {error && <p className="error">{error}</p>}
+
+      {deck && (
+        <>
+          <section className="box">
+            <h2>Hand size</h2>
+            <div className="segmented">
+              {[1, 2, 3, 4, 5, 6].map((size) => (
+                <button key={size} className={`button ${size === hand ? "on" : ""}`} onClick={() => pickHand(size)}>
+                  {size}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="box">
+            <div className="box-head">
+              <h2>Opening hand</h2>
+              {chosen.length > 0 && (
+                <button className="button ghost small" onClick={() => setChosen([])}>
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="muted">Tap cards below to open with them. Empty slots are drawn at random.</p>
+            <div className="slots">
+              {Array.from({ length: hand }, (_, slot) => {
+                const code = chosen[slot];
+                return code ? (
+                  <button key={slot} className="slot filled" onClick={() => unchoose(slot)} aria-label={`Remove ${nameOf(code)}`}>
+                    <CardArt code={code} />
+                    <span className="slot-name">{nameOf(code)}</span>
+                  </button>
+                ) : (
+                  <span key={slot} className="slot">
+                    Random
+                  </span>
+                );
+              })}
+            </div>
+            <div className="deck-list">
+              {unique.map((code) => {
+                const left = copies(code) - picked(code);
+                return (
+                  <button key={code} className="deck-row" disabled={left === 0 || chosen.length >= hand} onClick={() => choose(code)}>
+                    <span>{nameOf(code)}</span>
+                    <b>×{left}</b>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        </>
+      )}
     </main>
   );
 }

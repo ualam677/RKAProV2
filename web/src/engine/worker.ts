@@ -186,7 +186,7 @@ function system(id: number, fallback: string): string {
 }
 
 function cardChoice(label: string, card: { code: number; controller: number; location: number; sequence: number }): Choice {
-  return { label, card: { controller: card.controller, location: card.location, sequence: card.sequence, code: card.code, name: nameOf(card.code) } };
+  return { label, card: { controller: card.controller, location: card.location, sequence: card.sequence, code: card.code, name: nameOf(card.code), type: cards.get(card.code)?.type ?? 0 } };
 }
 
 function zoneName(zone: CardRef): string {
@@ -473,7 +473,8 @@ function start(options: StartOptions) {
   phase = "";
   ended = false;
   duel = core.createDuel({
-    flags: OcgDuelMode.MODE_MR5,
+    // the page shuffles the deck itself, so the cards asked for can be put on top
+    flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
     seed: [BigInt(options.seed), 2n, 3n, 4n],
     team1: { drawCountPerTurn: 1, startingDrawCount: options.hand, startingLP: 8000 },
     team2: { drawCountPerTurn: 1, startingDrawCount: 0, startingLP: 8000 },
@@ -488,7 +489,16 @@ function start(options: StartOptions) {
   for (const file of ["constant.lua", "utility.lua"]) core.loadScript(handle, file, readScript(file) ?? "");
   const add = (code: number, location: OcgLocation) =>
     core.duelNewCard(handle, { team: 0, duelist: 0, code, controller: 0, location, sequence: 0, position: OcgPosition.FACEDOWN_DEFENSE });
-  for (const code of options.main) add(knownCode(code), OcgLocation.DECK);
+  // chosen cards move to the top of the deck, in order; the last card added ends up on top
+  const main = [...options.main];
+  let placed = 0;
+  for (const wanted of options.chosen) {
+    const at = main.indexOf(wanted, placed);
+    if (at < 0) continue;
+    main.splice(placed, 0, ...main.splice(at, 1));
+    placed++;
+  }
+  for (const code of [...main].reverse()) add(knownCode(code), OcgLocation.DECK);
   for (const code of options.extra) add(knownCode(code), OcgLocation.EXTRA);
   core.startDuel(handle);
   advance();
