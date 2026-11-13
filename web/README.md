@@ -78,6 +78,13 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   The route search aims for the most interruptions (negates first); "full board" is a per-deck setting (default 3).
   Galaxy list, each start + 4 hand traps, 69 s for all seven: Infinity Dragon 3 (Photon Howling, Number 38, Set
   Transmigration); Delta Wing, Orbital 7, Soldier, Seventh Tachyon, Photon Orbital 2; Wizard 0.
+- Opponent's turn: a computer opponent with a copy of the deck (default), any saved deck, or none. On its turn it
+  activates everything it can once, Special and Normal Summons (never a hand trap), then attacks with everything;
+  on yours it chains hand traps only if "Hand traps on my turn" is on. You're asked whenever you can respond. It is
+  deterministic, so replays play the same; saved tests and engine lines get today's opponent when watched.
+  Your own hand traps are only held back on your own turn.
+- The route search learns your picks too, by what they were for (the core's "add to your hand" vs "send to the GY"
+  hint), so a working Orbital 7 line that adds Galaxy Summoner and sends Photon Emperor is followed.
 - "Ignore hand traps" now holds back only known hand traps (src/engine/handtraps.ts); other effects from the hand,
   like Galaxy War Drake summoning itself, stay available in tests and in the search.
   Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it

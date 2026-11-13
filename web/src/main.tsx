@@ -20,6 +20,9 @@ interface Saved {
   hand: number;
   chosen: number[];
   ignoreHandTraps: boolean;
+  // the computer opponent: "none", "copy" (of the deck being tested) or a saved deck's id
+  opponent?: string;
+  opponentHandTraps?: boolean;
   // before decks were saved in a list, the last opened .ydk was kept here
   deckText?: string;
   deckName?: string;
@@ -61,6 +64,8 @@ function App() {
   const [hand, setHand] = useState(saved.hand ?? 5);
   const [chosen, setChosen] = useState<number[]>(saved.chosen ?? []);
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
+  const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
+  const [opponentHandTraps, setOpponentHandTraps] = useState(saved.opponentHandTraps ?? false);
   const [view, setView] = useState<DuelView | null>(null);
   const [texts, setTexts] = useState(new Map<number, CardText>());
   const [cards, setCards] = useState(new Map<number, CardInfo>());
@@ -206,7 +211,12 @@ function App() {
   }, []);
 
   useEffect(() => storeDecks(decks), [decks]);
-  useEffect(() => save({ deckId: deck?.id ?? "", hand, chosen, ignoreHandTraps }), [deck, hand, chosen, ignoreHandTraps]);
+  useEffect(() => save({ deckId: deck?.id ?? "", hand, chosen, ignoreHandTraps, opponent, opponentHandTraps }), [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps]);
+  // the opponent's deck for a new duel, shuffled
+  const opponentDeck = () => {
+    const source = opponent === "none" ? null : opponent === "copy" ? deck : decks.find((one) => one.id === opponent) ?? deck;
+    return source && source.main.length ? { opponent: { main: shuffled(source.main), extra: source.extra }, opponentHandTraps } : {};
+  };
 
   // errors clear themselves so they never sit over the field for long
   useEffect(() => {
@@ -274,7 +284,8 @@ function App() {
     setRouting(next);
     const worked = (target.tests ?? []).filter((one) => one.worked);
     const targets = worked.flatMap((one) => (one.board?.length ? [one.board] : []));
-    const prior = [...new Set(worked.flatMap((one) => one.steps.filter((step) => step.idle && step.code).map((step) => `${step.text.split(/[ :]/)[0]}:${step.code}`)))];
+    // your actions ("Activate:<card>") and your picks ("pick:<card>": what you added, what you sent) in working lines
+    const prior = [...new Set(worked.flatMap((one) => one.steps.filter((step) => step.code).map((step) => (step.idle ? `${step.text.split(/[ :]/)[0]}:${step.code}` : `pick:${step.hint ?? 0}:${step.code}`))))];
     post({ type: "route", id, main: target.main, extra: target.extra, hand, targets, prior, goal: target.fullAt ?? 3 });
   };
   const findLines = (target: SavedDeck, starts: { code: number; hand: number[] }[]) => {
@@ -320,11 +331,14 @@ function App() {
     window.clearTimeout(timer.current);
     timer.current = 0;
     queue.current = [];
+    // a test saved without an opponent (or a line the route search found) gets today's opponent, without hand traps
+    // on your turn, so your recorded choices still play the same and you can go on into their turn
+    const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false };
     // "from": jump straight to that choice and carry on from there yourself; otherwise watch it play
-    if (from > 0) post({ type: "jump", ...saved.options, picks: saved.picks.slice(0, from) });
+    if (from > 0) post({ type: "jump", ...options, picks: saved.picks.slice(0, from) });
     else {
       setReplay({ picks: saved.picks, at: 0 });
-      post({ type: "start", ...saved.options });
+      post({ type: "start", ...options });
     }
   };
   // the next recorded choice, once the prompt it answers is on screen and the animations before it have played
@@ -355,8 +369,8 @@ function App() {
     window.clearTimeout(timer.current);
     timer.current = 0;
     queue.current = [];
-    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, seed: Math.floor(Math.random() * 2 ** 31) });
-  }, [deck, hand, chosen, ignoreHandTraps]);
+    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...opponentDeck(), seed: Math.floor(Math.random() * 2 ** 31) });
+  }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, decks]);
 
   const requestText = useCallback(
     (code: number) => {
@@ -505,7 +519,36 @@ function App() {
                 Ignore
               </button>
             </div>
-            <p className="muted">Ignore: cards in your hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos.</p>
+            <p className="muted">Ignore: on your turn, hand traps in your hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos. On the opponent's turn they always can.</p>
+          </section>
+
+          <section className="box">
+            <h2>Opponent</h2>
+            <select className="select" value={opponent} onChange={(event) => setOpponent(event.target.value)}>
+              <option value="copy">A copy of this deck</option>
+              {decks
+                .filter((one) => one.id !== deck.id)
+                .map((one) => (
+                  <option key={one.id} value={one.id}>
+                    {one.name}
+                  </option>
+                ))}
+              <option value="none">None: my turn only</option>
+            </select>
+            {opponent !== "none" && (
+              <div className="segmented two">
+                <button className={`button ${!opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(false)}>
+                  No hand traps on my turn
+                </button>
+                <button className={`button ${opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(true)}>
+                  Hand traps on my turn
+                </button>
+              </div>
+            )}
+            <p className="muted">
+              End your turn and the computer plays theirs: it activates everything it can, summons, then attacks. You are asked whenever you can respond, so you can see where
+              your interruptions go. Import any deck (a meta deck, board breakers) to play against it.
+            </p>
           </section>
 
           <section className="box">

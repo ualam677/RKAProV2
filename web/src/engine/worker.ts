@@ -23,7 +23,7 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import { probeDeck, routeSearch } from "./probe";
+import { autoAnswer, probeDeck, routeSearch } from "./probe";
 import { isHandTrap } from "./handtraps";
 import { readEffects, readSetConstants, type QuickEffect } from "./interruptions";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
@@ -302,6 +302,13 @@ let ended = false;
 let prompt: Prompt | null = null;
 let events: DuelEvent[] = [];
 let ignoreHandTraps = false;
+// the computer opponent: whether there is one, whether it fights your turn, and what it has done this turn
+let opponentOn = false;
+let opponentHandTraps = false;
+const aiUsed = new Set<string>();
+let aiBattled = false;
+let aiActed = false;
+let aiRetries = 0;
 let winner: number | null = null;
 // what the next selection is for ("Select the card to add to your hand"), sent by the core just before it
 let selectHint = "";
@@ -444,6 +451,16 @@ function buildPrompt(message: OcgMessage): boolean {
     respond = (picks) => (picks === null ? (cancel === null ? null : make(null)) : make(picks[0]));
     return true;
   };
+  // the computer opponent answers everything asked of its side
+  if (opponentOn && "player" in message && message.player === 1) {
+    const response = aiAnswer(message);
+    aiActed = true;
+    if (response) return answer(response);
+    send({ type: "error", text: "The opponent couldn't answer a prompt; its turn ends here." });
+    ended = true;
+    return false;
+  }
+  aiActed = false;
   switch (message.type) {
     case OcgMessageType.SELECT_IDLECMD: {
       // nobody is sitting on the other side yet: its turn ends at once
@@ -516,7 +533,8 @@ function buildPrompt(message: OcgMessage): boolean {
       // with hand traps switched off, known hand traps in the hand are never offered (other hand effects are)
       const offered = message.selects
         .map((card, index) => ({ card, index }))
-        .filter(({ card }) => !(ignoreHandTraps && card.location === OcgLocation.HAND && isHandTrap(card.code, cards.get(card.code)?.alias)));
+        // on your own turn only: on the opponent's turn hand traps are what you are there to use
+        .filter(({ card }) => !(ignoreHandTraps && turnPlayer === 0 && card.location === OcgLocation.HAND && isHandTrap(card.code, cards.get(card.code)?.alias)));
       if (offered.length === 0 && !message.forced) return answer({ type: OcgResponseType.SELECT_CHAIN, index: null });
       // the side with nobody on it never chains
       if (message.player !== 0) return answer({ type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null });
@@ -715,8 +733,66 @@ function playerView(controller: 0 | 1, deck: number): PlayerView {
   };
 }
 
+// The computer opponent: plain and predictable, so a replay plays the same. On its turn it activates everything it
+// can, Special Summons, Normal Summons, then attacks with everything; on yours it only chains hand traps if told to.
+function aiAnswer(message: OcgMessage): OcgResponse | null {
+  switch (message.type) {
+    case OcgMessageType.SELECT_IDLECMD: {
+      const candidates: [SelectIdleCMDAction, { code: number; location: number; sequence: number }[], string][] = [
+        [SelectIdleCMDAction.SELECT_ACTIVATE, message.activates, "a"],
+        [SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, message.special_summons, "s"],
+        [SelectIdleCMDAction.SELECT_SUMMON, message.summons, "n"],
+      ];
+      if (aiUsed.size < 60)
+        for (const [action, list, tag] of candidates)
+          for (let index = 0; index < list.length; index++) {
+            const card = list[index];
+            // Normal Summoning a hand trap only wastes the Normal Summon
+            if (tag === "n" && isHandTrap(card.code, cards.get(card.code)?.alias)) continue;
+            const key = `${tag}:${card.code}:${card.location}:${card.sequence}:${"description" in card ? String(card.description) : ""}`;
+            if (aiUsed.has(key)) continue;
+            aiUsed.add(key);
+            return { type: OcgResponseType.SELECT_IDLECMD, action, index };
+          }
+      if (message.to_bp && !aiBattled && turn > 1) {
+        aiBattled = true;
+        return { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_BP, index: null };
+      }
+      return { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null };
+    }
+    case OcgMessageType.SELECT_BATTLECMD:
+      if (message.attacks.length) return { type: OcgResponseType.SELECT_BATTLECMD, action: SelectBattleCMDAction.SELECT_BATTLE, index: 0 };
+      return { type: OcgResponseType.SELECT_BATTLECMD, action: SelectBattleCMDAction.TO_EP, index: null };
+    case OcgMessageType.SELECT_CHAIN: {
+      if (message.forced) return { type: OcgResponseType.SELECT_CHAIN, index: 0 };
+      // on your turn: its hand traps, if allowed; on its own turn: every effect once
+      const usable = message.selects
+        .map((card, index) => ({ card, index }))
+        .filter(({ card }) => (turnPlayer === 1 ? !aiUsed.has(`c:${card.code}:${String(card.description)}`) : opponentHandTraps && card.location === OcgLocation.HAND));
+      const pick = usable[0];
+      if (!pick) return { type: OcgResponseType.SELECT_CHAIN, index: null };
+      aiUsed.add(`c:${pick.card.code}:${String(pick.card.description)}`);
+      return { type: OcgResponseType.SELECT_CHAIN, index: pick.index };
+    }
+    case OcgMessageType.SELECT_EFFECTYN:
+      return { type: OcgResponseType.SELECT_EFFECTYN, yes: true };
+    case OcgMessageType.SELECT_YESNO:
+      return { type: OcgResponseType.SELECT_YESNO, yes: true };
+    case OcgMessageType.ANNOUNCE_CARD: {
+      const opcodes = message.opcodes.map((opcode) => BigInt(opcode));
+      const card = [...cards.values()].find((one) => declarable(one, opcodes));
+      return card ? { type: OcgResponseType.ANNOUNCE_CARD, card: card.code } : null;
+    }
+    default:
+      return autoAnswer(message);
+  }
+}
+
 // the test being played, as it will be saved; `quiet` holds the views back while a recorded test is fast-forwarded
 let record: TestRecord | null = null;
+// the core's last "Select a card to ..." hint, and the one for the prompt on screen
+let lastHint = 0;
+let promptHint = 0;
 let quiet = false;
 
 // "Normal Summon Galaxy Wizard", "Select a card to add to your hand: Galaxy Defense Robot Orbital 7"
@@ -760,6 +836,8 @@ function advance() {
         case OcgMessageType.NEW_TURN:
           turn++;
           turnPlayer = message.player;
+          aiUsed.clear();
+          aiBattled = false;
           break;
         case OcgMessageType.NEW_PHASE:
           phase = PHASES[message.phase] ?? "";
@@ -797,7 +875,10 @@ function advance() {
               events.push({ kind: "draw", code: card.code, name: nameOf(card.code), controller: 0, location: OcgLocation.HAND, sequence: -1 });
           break;
         case OcgMessageType.HINT:
-          if (message.hint_type === OcgHintType.SELECTMSG && message.player === 0) selectHint = describe(message.hint);
+          if (message.hint_type === OcgHintType.SELECTMSG && message.player === 0) {
+            selectHint = describe(message.hint);
+            lastHint = Number(message.hint);
+          }
           else if (message.hint_type === OcgHintType.MESSAGE && message.player === 0) {
             const text = describe(message.hint);
             if (text) events.push({ kind: "message", code: 0, name: "", controller: 0, location: 0, sequence: 0, text });
@@ -851,10 +932,21 @@ function advance() {
             events.push({ kind: "added", code: message.card, name: nameOf(message.card), controller: 0, location: OcgLocation.HAND, sequence: message.to.sequence });
           break;
         case OcgMessageType.RETRY:
-          send({ type: "error", text: "The duel core did not accept that choice." });
+          // the opponent tries something else (its Main Phase choices are remembered as used); a few times at most
+          if (aiActed) {
+            if (++aiRetries > 8) {
+              send({ type: "error", text: "The opponent got stuck; its turn ends here." });
+              ended = true;
+            }
+          } else send({ type: "error", text: "The duel core did not accept that choice." });
           break;
         default:
-          if (isPrompt(message.type) && buildPrompt(message) && !prompt) ended = true;
+          if (isPrompt(message.type)) {
+            const shows = buildPrompt(message);
+            if (prompt) promptHint = lastHint;
+            lastHint = 0;
+            if (shows && !prompt) ended = true;
+          }
       }
     }
     if (status === OcgProcessResult.END) ended = true;
@@ -865,7 +957,7 @@ function advance() {
 }
 
 async function start(options: StartOptions) {
-  const missing = await prefetchScripts([...options.main, ...options.extra].map(knownCode));
+  const missing = await prefetchScripts([...options.main, ...options.extra, ...(options.opponent?.main ?? []), ...(options.opponent?.extra ?? [])].map(knownCode));
   if (missing.length)
     send({ type: "error", text: `Could not download the card scripts for ${missing.map(nameOf).join(", ")}. Check the connection and tap New hand.` });
   if (duel) core.destroyDuel(duel);
@@ -878,13 +970,18 @@ async function start(options: StartOptions) {
   selectHint = "";
   events = [];
   ignoreHandTraps = options.ignoreHandTraps;
+  opponentOn = !!options.opponent?.main.length;
+  opponentHandTraps = !!options.opponentHandTraps;
+  aiUsed.clear();
+  aiBattled = false;
+  aiRetries = 0;
   chain = [];
   duel = core.createDuel({
     // the page shuffles the deck itself, so the cards asked for can be put on top
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
     seed: [BigInt(options.seed), 2n, 3n, 4n],
     team1: { drawCountPerTurn: 1, startingDrawCount: options.hand, startingLP: 8000 },
-    team2: { drawCountPerTurn: 1, startingDrawCount: 0, startingLP: 8000 },
+    team2: { drawCountPerTurn: 1, startingDrawCount: opponentOn ? 5 : 0, startingLP: 8000 },
     cardReader: (code) => cards.get(code) ?? null,
     scriptReader: (name) => readScript(name) ?? "",
     errorHandler: (_type, text) => {
@@ -907,6 +1004,12 @@ async function start(options: StartOptions) {
   }
   for (const code of [...main].reverse()) add(knownCode(code), OcgLocation.DECK);
   for (const code of options.extra) add(knownCode(code), OcgLocation.EXTRA);
+  if (options.opponent) {
+    const theirs = (code: number, location: OcgLocation) =>
+      core.duelNewCard(handle, { team: 1, duelist: 0, code, controller: 1, location, sequence: 0, position: OcgPosition.FACEDOWN_DEFENSE });
+    for (const code of [...options.opponent.main].reverse()) theirs(knownCode(code), OcgLocation.DECK);
+    for (const code of options.opponent.extra) theirs(knownCode(code), OcgLocation.EXTRA);
+  }
   core.startDuel(handle);
   record = { options: { ...options }, picks: [], steps: [], startHand: [] };
   advance();
@@ -919,8 +1022,9 @@ function choose(picks: number[] | null): boolean {
   const response = duel && respond ? respond(picks) : null;
   if (!response || !shown) return false;
   record?.picks.push(picks);
-  const acted = shown.kind === "choice" && picks?.length === 1 ? shown.choices[picks[0]]?.card?.code : undefined;
-  record?.steps.push({ text: describePick(shown, picks), idle: shown.kind === "choice" && !!shown.idle, code: acted });
+  // the card acted on or picked: what the route search learns your lines from
+  const acted = picks?.length === 1 && "choices" in shown ? shown.choices[picks[0]]?.card?.code : undefined;
+  record?.steps.push({ text: describePick(shown, picks), idle: shown.kind === "choice" && !!shown.idle, code: acted, hint: promptHint || undefined });
   core.duelSetResponse(duel!, response);
   advance();
   if (record && !quiet) send({ type: "record", record });
@@ -1056,7 +1160,9 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
         send({ type: "error", text: `Route search stopped: ${error instanceof Error ? error.message : error}` }),
       );
     } else if (message.type === "text") {
-      send({ type: "text", card: { code: message.code, name: nameOf(message.code), line: cardLine(message.code), text: texts.get(message.code) ?? "" } });
+      // YGO Omega's own artwork numbers read as the card they are
+      const known = knownCode(message.code);
+      send({ type: "text", card: { code: message.code, name: nameOf(known), line: cardLine(known), text: texts.get(known) ?? "" } });
     }
   } catch (error) {
     send({ type: "error", text: error instanceof Error ? error.message : String(error) });

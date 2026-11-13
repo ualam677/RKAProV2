@@ -7,6 +7,7 @@
 
 import {
   OcgDuelMode,
+  OcgHintType,
   OcgLocation,
   OcgMessageType,
   OcgPosition,
@@ -55,9 +56,10 @@ interface Measure {
 }
 
 interface Stop {
-  // the branch point after the plan: what can be chosen there (and the card each acts on)
+  // the branch point after the plan: what can be chosen there, the card each acts on, and what a pick is for
   options: string[];
   codes: number[];
+  hint: number;
   measure: Measure;
   key: string;
   // your monsters and Spells/Traps now, and every choice so far as the duel screen would have taken it
@@ -106,6 +108,7 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
     let solving: number | null = null;
     const path: string[] = [];
     const ui: (number[] | null)[] = [];
+    let hint = 0;
     let step = 0;
     let started = false;
 
@@ -153,8 +156,8 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
           if (card?.code) out.push({ code: card.code, location, materials: card.overlayCards?.length ?? 0 });
       return out;
     };
-    const stop = (options: Option[]): Stop => ({ options: options.map((option) => option.label), codes: options.map((option) => option.code ?? 0), measure: measure(), key: stateKey(), board: board(), ui: [...ui], pieces: pieces() });
-    const failed = (): Stop => ({ options: [], codes: [], measure: measure(), key: "failed:" + path.join(";"), board: [], ui: [], pieces: [], failed: true });
+    const stop = (options: Option[]): Stop => ({ options: options.map((option) => option.label), codes: options.map((option) => option.code ?? 0), hint, measure: measure(), key: stateKey(), board: board(), ui: [...ui], pieces: pieces() });
+    const failed = (): Stop => ({ options: [], codes: [], hint: 0, measure: measure(), key: "failed:" + path.join(";"), board: [], ui: [], pieces: [], failed: true });
 
     for (let guard = 0; guard < 3000; guard++) {
       const status = core.duelProcess(duel);
@@ -179,10 +182,14 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
             break;
           case OcgMessageType.RETRY:
             return failed();
+          case OcgMessageType.HINT:
+            if (message.hint_type === OcgHintType.SELECTMSG && message.player === 0) hint = Number(message.hint);
+            break;
           default:
             if (!isPrompt(message.type)) break;
             if (message.type === OcgMessageType.SELECT_IDLECMD && message.player === 0) {
               started = true;
+              hint = 0;
               const options = idleOptions(env, message);
               if (step >= plan.length) return stop(options);
               const pick = options[plan[step++]];
@@ -199,6 +206,7 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
                 path.push(pick.label);
                 ui.push(pick.ui!);
                 response = pick.response;
+                hint = 0;
               } else {
                 response = autoAnswer(message);
                 // the duel screen asks for this one too: record the same answer the way it would take it
@@ -340,7 +348,7 @@ function uiPicks(message: OcgMessage, response: OcgResponse): number[] | null | 
 }
 
 // Everything else gets the plain answer: yes to optional effects, the first legal cards, the first free zone.
-function autoAnswer(message: OcgMessage): OcgResponse | null {
+export function autoAnswer(message: OcgMessage): OcgResponse | null {
   switch (message.type) {
     case OcgMessageType.SELECT_IDLECMD:
       return { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null };
@@ -627,7 +635,10 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
         yield;
         if (child.failed || seen.has(child.key)) continue;
         seen.add(child.key);
-        const liked = node.liked + (prior.has(`${verbOf(label)}:${node.stop.codes[index]}`) ? 1 : 0);
+        // like your lines: the same action on the same card, or the same pick for the same purpose (add, not send)
+        const verb = verbOf(label);
+        const key = verb === "pick" ? `pick:${node.stop.hint}:${node.stop.codes[index]}` : `${verb}:${node.stop.codes[index]}`;
+        const liked = node.liked + (prior.has(key) ? 3 : 0);
         const steps = [...node.steps, label.replace(/#\d+/, "").replace(/@\d+$/, "")];
         const next: Node = { plan: [...node.plan, index], stop: child, steps, liked, ...judge(child, steps, liked, tried) };
         children.push(next);

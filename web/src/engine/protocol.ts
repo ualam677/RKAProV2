@@ -119,7 +119,8 @@ export interface DuelView {
 export interface TestRecord {
   options: StartOptions;
   picks: (number[] | null)[];
-  steps: { text: string; idle: boolean; code?: number }[];
+  // code: the card acted on or picked; hint: what a pick was for (the core's "Select a card to add to your hand")
+  steps: { text: string; idle: boolean; code?: number; hint?: number }[];
   startHand: number[];
 }
 
@@ -139,6 +140,10 @@ export interface StartOptions {
   // hand traps in the player's hand never ask to be chained (testing a combo without Ash or Fuwalos popping up)
   ignoreHandTraps: boolean;
   seed: number;
+  // the computer opponent's deck, in order; without one, its turn passes at once
+  opponent?: { main: number[]; extra: number[] };
+  // it chains its hand traps against you on your turn
+  opponentHandTraps?: boolean;
 }
 
 // A card as the deck editor needs it.
