@@ -1,11 +1,14 @@
 // Decks kept on this device, and the formats they come in and go out as:
 // .ydk (EDOPro), ydke:// links (EDOPro's "copy deck", YGOPRODeck) and YGO Omega deck codes.
 import { parseYdk, type Deck } from "./deck";
+import type { Tag } from "./optimiser";
 
 export interface SavedDeck extends Deck {
   id: string;
   name: string;
   updated: number;
+  // Deck Optimiser roles, by card (alternate artworks share the original's)
+  tags?: Record<string, Tag>;
 }
 
 const KEY = "rka.decks";
@@ -24,6 +27,23 @@ export function storeDecks(decks: SavedDeck[]) {
     localStorage.setItem(KEY, JSON.stringify(decks));
   } catch {
     // storage full or blocked: the decks stay for this visit only
+  }
+}
+
+// The latest role picked for a card, used for that card in every other deck until told otherwise
+const TAGS = "rka.tags";
+export function loadTagDefaults(): Record<string, Tag> {
+  try {
+    return JSON.parse(localStorage.getItem(TAGS) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+export function storeTagDefault(code: number, tag: Tag) {
+  try {
+    localStorage.setItem(TAGS, JSON.stringify({ ...loadTagDefaults(), [code]: tag }));
+  } catch {
+    // the tag still lives on the deck
   }
 }
 

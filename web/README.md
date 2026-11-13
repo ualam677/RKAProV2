@@ -34,20 +34,28 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   Rank, ATK/DEF, ban-list status), Main / Extra / Side with the size rules, 3 copies and the TCG ban list (Project Ignis
   LFLists), EDOPro's sort. Several decks saved on the device; import a .ydk, a ydke:// link or a YGO Omega code (Main and
   Extra split by card type); export the same three. Phone: deck on top, search below; wide: info | deck | search.
+- Deck Optimiser in the editor ("Optimise"), `src/optimiser.ts` + `src/Optimiser.tsx`: tag each Main Deck card
+  (Starter, Starter with a partner, Extender, Hand trap, Hand trap going 2nd, Board breaker, Brick, Other; known cards
+  are guessed, the latest tag for a card is reused in other decks). Partners are cards or rules ("any LIGHT monster",
+  "any Level 4"). Exact odds over every hand, going first (5) and second (6): open a combo, combo + 1 / 2 hand traps
+  (a hand trap used as a partner is not counted), combo + extender, hand traps held, breakers, bricks. Suggestions:
+  cut to 40 and the best one-for-one swaps (Main or Side Deck cards), judged on both turns equally for the chosen goal,
+  applied with one tap and undone with another. Untagged cards and Extenders are never suggested as cuts.
+  Checked by `node --experimental-sqlite web/tools/check-optimiser.mjs <rkapro v1> <cards.cdb>`: on the Galaxy list it
+  matches v1's own code (93.34% / 96.48%), a separate naive evaluator over every hand, and a 1M-hand simulation.
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order
-1. Deck Optimiser inside the editor: v2's tags and exact odds plus v1's two-card needs (see the comparison below).
-2. Opponent: hand traps (easy / smart), then plays its own turn with board breakers
+1. Opponent: hand traps (easy / smart), then plays its own turn with board breakers
    (Veiler / Imperm on the player's turn, Imperm at the start of its turn, Lightning Storm, Cosmic Cyclone-style cards).
-3. Routes learned from saved replays, then end-board suggestion from a random hand (beam search over the core, scored
+2. Routes learned from saved replays, then end-board suggestion from a random hand (beam search over the core, scored
    against learned end boards).
-4. Save states (seed + response log), replays, takeover.
-5. Omega deck folder link with write-back, Google Drive sync.
-6. Replay to mp4 / GIF.
+3. Save states (seed + response log), replays, takeover.
+4. Omega deck folder link with write-back, Google Drive sync.
+5. Replay to mp4 / GIF.
 
-The C++ fork in `gframe/` already implements 1-3 for desktop (see `deck_optimizer.h`, `handtrap_ai.h`, `single_mode.cpp`);
+The C++ fork in `gframe/` already implements 1-2 for desktop (see `deck_optimizer.h`, `handtrap_ai.h`, `single_mode.cpp`);
 port the logic from there.
 
 ## v1 vs v2 optimiser on the Galaxy-Eyes list (`node web/tools/compare-v1-v2.mjs <path to ualam677/rkapro>`)

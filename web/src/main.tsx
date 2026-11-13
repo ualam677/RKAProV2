@@ -145,7 +145,8 @@ function App() {
       } else if (message.type === "info") {
         setCards((known) => {
           const next = new Map(known);
-          for (const card of message.cards) next.set(card.asked, { ...card, code: card.asked });
+          // a code the database doesn't have (YGO Omega's own alternate artworks) points at the card it stands for
+          for (const card of message.cards) next.set(card.asked, { ...card, code: card.asked, alias: card.asked !== card.code ? card.alias || card.code : card.alias });
           return next;
         });
         infoWaiting.current.shift()?.(message.cards);

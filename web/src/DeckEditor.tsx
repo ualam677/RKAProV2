@@ -2,6 +2,7 @@
 // the ban list and deck size rules shown as you build. Phones get the Duel Links arrangement: deck on top, search below.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CardArt } from "./CardArt";
+import { Optimiser } from "./Optimiser";
 import { EXTRA_TYPES, toOmega, toYdk, toYdke, type SavedDeck } from "./decks";
 import type { CardInfo, CardSearch, CardText } from "./engine/protocol";
 
@@ -79,6 +80,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
   const [detail, setDetail] = useState<{ code: number; from?: Section } | null>(null);
   const [notice, setNotice] = useState("");
   const [menu, setMenu] = useState(false);
+  const [optimising, setOptimising] = useState(false);
 
   // everything in the deck needs its type (to split Main / Extra and sort) and name
   useEffect(() => {
@@ -216,9 +218,14 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
           ‹
         </button>
         <input className="deck-name" value={deck.name} onChange={(event) => update({ name: event.target.value })} aria-label="Deck name" />
-        <button className="button small" onClick={sort}>
-          Sort
+        <button className={`button small ${optimising ? "on" : ""}`} onClick={() => setOptimising(!optimising)}>
+          {optimising ? "Build" : "Optimise"}
         </button>
+        {!optimising && (
+          <button className="button small" onClick={sort}>
+            Sort
+          </button>
+        )}
         <button className="icon-button" onClick={() => setMenu(!menu)} aria-label="More">
           ⋯
         </button>
@@ -244,7 +251,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
       </header>
       <p className={`deck-status ${problems.length ? "bad" : ""}`}>{problems.length ? problems.join(" · ") : `Legal for ${banlist.name || "TCG"}`}</p>
 
-      <div className="editor-body">
+      <div className={`editor-body ${optimising ? "optimising" : ""}`}>
         <aside className="editor-info">
           {detail ? (
             <>
@@ -270,6 +277,9 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
 
         <div className="deck-area">{(["main", "extra", "side"] as Section[]).map(section)}</div>
 
+        {optimising ? (
+          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} />
+        ) : (
         <div className="search-area">
           <div className="search-bar">
             <input className="search" type="search" placeholder="Search name or text" value={query.text ?? ""} onChange={(event) => set({ text: event.target.value })} />
@@ -354,6 +364,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
             {!results.results.length && <p className="muted info-empty">{query.text || filters ? "No cards match." : "Search for cards to add."}</p>}
           </div>
         </div>
+        )}
       </div>
 
       {detail && (
