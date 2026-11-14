@@ -13,6 +13,8 @@ interface Props {
   banlist: { name: string; limits: Record<number, number> };
   requestInfo: (codes: number[]) => void;
   traits: Map<number, string[]>;
+  cutResult: { cut: number; lines?: { start: number; before: number; after: number; board: number[] }[] } | null;
+  onCutTest: (code: number) => void;
   requestTraits: (codes: number[]) => void;
   requestText: (code: number) => void;
   search: (query: CardSearch) => Promise<{ results: CardInfo[]; more: boolean }>;
@@ -82,7 +84,7 @@ function Thumb({ code, card, limit, onTap, onHold }: { code: number; card?: Card
   );
 }
 
-export function DeckEditor({ deck, cards, texts, banlist, requestInfo, traits, requestTraits, requestText, search, onChange, onClose, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
+export function DeckEditor({ deck, cards, texts, banlist, requestInfo, traits, requestTraits, cutResult, onCutTest, requestText, search, onChange, onClose, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
   const [query, setQuery] = useState<CardSearch>({});
   const [results, setResults] = useState<{ results: CardInfo[]; more: boolean }>({ results: [], more: false });
   const [filters, setFilters] = useState(false);
@@ -302,7 +304,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, traits, r
         <div className="deck-area">{(["main", "extra", "side"] as Section[]).map(section)}</div>
 
         {optimising ? (
-          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} traits={traits} requestTraits={requestTraits} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} routing={routing} choking={choking} onFindLines={onFindLines} onCheckChokes={onCheckChokes} onWatchLine={onWatchLine} />
+          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} traits={traits} requestTraits={requestTraits} cutResult={cutResult} onCutTest={onCutTest} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} routing={routing} choking={choking} onFindLines={onFindLines} onCheckChokes={onCheckChokes} onWatchLine={onWatchLine} />
         ) : (
         <div className="search-area">
           <div className="search-bar">

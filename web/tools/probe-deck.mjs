@@ -171,6 +171,24 @@ if (process.env.CHOKE) {
   }
 }
 
+if (process.env.CUT) {
+  // CUT="start|card,card": a line for the start, then the same line replayed without each card
+  const { routeSearch, playAgainst } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const [startName, cutNames] = process.env.CUT.split("|");
+  const find = (n) => [...names].find(([c, name]) => name === n && (main.includes(c) || extra.includes(c)))[0];
+  const start = find(startName);
+  const g = routeSearch(env, [start], rest([start]), extra, { targets: [], budget: Number(process.env.BUDGET ?? 800) });
+  let n; while (!(n = g.next()).done);
+  const line = n.value;
+  const play = (deck) => playAgainst(env, [start], deck, extra, line.keys, 14558127, -1);
+  console.log(`LINE ${names.get(start)}: ${line.interruptions.length} (replayed: ${play(rest([start])).interruptions})`);
+  for (const cutName of cutNames.split(",")) {
+    const cut = find(cutName);
+    const deck = rest([start]); const at = deck.indexOf(cut); if (at >= 0) deck.splice(at, 1);
+    console.log(`  without ${cutName}: ${play(deck).interruptions}`);
+  }
+}
+
 if (process.env.COMBO) {
   const { routeSearch, chokeCombo } = await import(new URL("../src/engine/probe.ts", import.meta.url));
   const find = (n) => [...names].find(([c, name]) => name === n && (main.includes(c) || cards.has(c)))[0];

@@ -1561,6 +1561,36 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       void runRoute(message.id, message.main, message.extra, message.hand, message.targets, message.prior, message.goal).catch((error) =>
         send({ type: "error", text: `Route search stopped: ${error instanceof Error ? error.message : error}` }),
       );
+    } else if (message.type === "cut") {
+      // each line as recorded, then with one copy of the card gone from the deck (from the hand, if the line held it)
+      const canonical = (code: number) => {
+        const known = knownCode(code);
+        const card = cards.get(known);
+        return card?.alias && Math.abs(card.alias - known) < 20 && cards.has(card.alias) ? card.alias : known;
+      };
+      const cut = canonical(message.cut);
+      const main = message.main.map(canonical).filter((code) => cards.has(code));
+      const extra = message.extra.map(canonical).filter((code) => cards.has(code));
+      await prefetchScripts([...main, ...extra, 14558127]);
+      const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
+      const without = (list: number[], code: number) => {
+        const at = list.indexOf(code);
+        return at < 0 ? list : [...list.slice(0, at), ...list.slice(at + 1)];
+      };
+      const run = (hand: number[], deckCards: number[], keys: string[]) => {
+        let deck = [...deckCards];
+        for (const code of hand) deck = without(deck, code);
+        // the hand trap is never used: this is the line's board on its own (Ash only stands in for the opponent)
+        return playAgainst(env, hand, deck, extra, keys, 14558127, -1);
+      };
+      const lines = message.lines.map((line) => {
+        const hand = line.hand.map(canonical);
+        const before = run(hand, main, line.keys);
+        // the card cut: gone from the hand if the line held it, else from the deck
+        const after = hand.includes(cut) ? run(without(hand, cut), without(main, cut), line.keys) : run(hand, without(main, cut), line.keys);
+        return { start: line.start, before: before.interruptions, after: after.interruptions, board: after.board };
+      });
+      send({ type: "cut", id: message.id, cut: message.cut, lines });
     } else if (message.type === "traits") {
       send({ type: "traits", traits: message.codes.map((code) => [code, traitsOf(knownCode(code))]) });
     } else if (message.type === "names") {

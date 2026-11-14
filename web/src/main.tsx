@@ -118,6 +118,14 @@ function App() {
   const [cards, setCards] = useState(new Map<number, CardInfo>());
   // what each card does for deckbuilding (read by the worker from its text)
   const [traits, setTraits] = useState(new Map<number, string[]>());
+  // the cut test on screen: a card, and what each of your lines loses without it
+  const [cutResult, setCutResult] = useState<{ id: number; deckId: string; cut: number; lines?: { start: number; before: number; after: number; board: number[] }[] } | null>(null);
+  const cutTest = (target: SavedDeck, cut: number) => {
+    const lines = Object.entries(target.routes ?? {}).flatMap(([start, route]) => (route.source === "replay" && route.keys ? [{ start: Number(start), hand: route.record.startHand, keys: route.keys }] : []));
+    const id = (cutResult?.id ?? 0) + 1;
+    setCutResult({ id, deckId: target.id, cut });
+    post({ type: "cut", id, main: target.main, extra: target.extra, cut, lines });
+  };
   // card pictures: an alternate artwork the picture servers lack shows the original card's picture
   setArtworkOriginals((code) => {
     const card = cards.get(code);
@@ -271,6 +279,8 @@ function App() {
         // every line found: now where hand traps hurt each of them
         const done = decksRef.current.find((one) => one.id === job.deckId);
         if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "cut") {
+        setCutResult((now) => (now && now.id === message.id ? { ...now, lines: message.lines } : now));
       } else if (message.type === "traits") {
         setTraits((known) => new Map([...known, ...message.traits]));
       } else if (message.type === "names") {
@@ -1094,6 +1104,8 @@ function App() {
         banlist={banlist}
         requestInfo={(codes) => void info(codes)}
         traits={traits}
+        cutResult={cutResult && cutResult.deckId === deck.id ? cutResult : null}
+        onCutTest={(code) => cutTest(deck, code)}
         requestTraits={(codes) => post({ type: "traits", codes })}
         requestText={requestText}
         search={search}

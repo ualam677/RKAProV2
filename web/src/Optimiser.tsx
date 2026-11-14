@@ -28,6 +28,8 @@ interface Props {
   onFindLines: (starts: { code: number; hand: number[] }[]) => void;
   traits: Map<number, string[]>;
   requestTraits: (codes: number[]) => void;
+  cutResult: { cut: number; lines?: { start: number; before: number; after: number; board: number[] }[] } | null;
+  onCutTest: (code: number) => void;
   onCheckChokes: (starts: { code: number; hand: number[] }[]) => void;
   onWatchLine: (line: TestRecord, code: number) => void;
 }
@@ -37,7 +39,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
+export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -451,6 +453,7 @@ export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, o
               <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
               <Clashes main={main} nameOf={nameOf} traits={traits} />
               <TwoStarts routes={routes} nameOf={nameOf} />
+              <CutTest main={main} lines={Object.keys(routes).length} nameOf={nameOf} result={cutResult} onTest={onCutTest} />
               {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
               {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
                 <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
@@ -998,3 +1001,46 @@ function TwoStarts({ routes, nameOf }: { routes: Record<string, SavedRoute>; nam
   );
 }
 
+
+// What a card does for your lines: each worked line played as recorded, then without one copy of the card. Measured on
+// your own lines, so it means the same for any deck; with no worked lines there is nothing to measure.
+function CutTest({ main, lines, nameOf, result, onTest }: { main: DeckCard[]; lines: number; nameOf: (code: number) => string; result: { cut: number; lines?: { start: number; before: number; after: number; board: number[] }[] } | null; onTest: (code: number) => void }) {
+  const [pick, setPick] = useState(0);
+  return (
+    <div className="opt-note">
+      <b>Cut test.</b>{" "}
+      {lines === 0 ? (
+        "Mark replays as working first: this replays your own lines without a card to see what it does for them."
+      ) : (
+        <>
+          What a card does for your {lines} worked line{lines === 1 ? "" : "s"}: each is replayed without one copy of it.{" "}
+          <select value={pick} onChange={(event) => setPick(Number(event.target.value))}>
+            <option value={0}>Pick a card</option>
+            {main.map((card) => (
+              <option key={card.code} value={card.code}>
+                {nameOf(card.code)} ×{card.count}
+              </option>
+            ))}
+          </select>{" "}
+          <button className="button small" disabled={!pick} onClick={() => onTest(pick)}>
+            Test without it
+          </button>
+          {result && (
+            <ul className="opt-clashes">
+              {!result.lines ? (
+                <li>Replaying your lines without {nameOf(result.cut)}…</li>
+              ) : (
+                result.lines.map((line) => (
+                  <li key={line.start}>
+                    {nameOf(line.start)} line: {line.before} → <b>{line.after}</b> interruption{line.after === 1 ? "" : "s"}
+                    {line.after < line.before ? ` (loses ${line.before - line.after})` : line.after === line.before ? " (no loss)" : ""}
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

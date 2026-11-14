@@ -203,6 +203,8 @@ export type ToWorker =
   | { type: "interruptions"; id: string; pieces: Piece[]; startHand: number[]; used?: { code: number; effect?: string }[]; summons?: number; fifth?: Piece[] }
   // card names (from a deck list) to the cards they are
   | { type: "names"; id: string; names: string[] }
+  // each of your lines played as recorded, then without one copy of `cut` in the deck: what each line loses
+  | { type: "cut"; id: number; main: number[]; extra: number[]; cut: number; lines: { start: number; hand: number[]; keys: string[] }[] }
   // what each card does that matters for building a deck, read from its text
   | { type: "traits"; codes: number[] };
 
@@ -223,6 +225,7 @@ export type FromWorker =
   | { type: "choke"; id: number; done?: Choke[]; combo?: ChokeCombo }
   | { type: "interruptions"; id: string; list: Interruption[]; protection: Protection[]; nibiru?: NibiruCheck }
   | { type: "names"; id: string; cards: (CardInfo | null)[] }
+  | { type: "cut"; id: number; cut: number; lines: { start: number; before: number; after: number; board: number[] }[] }
   | { type: "traits"; traits: [number, string[]][] }
   | { type: "error"; text: string };
 
