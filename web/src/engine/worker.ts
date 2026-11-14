@@ -23,7 +23,8 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import { CHOKE_TRAPS, autoAnswer, chokeCombo, chokePoints, probeDeck, routeSearch } from "./probe";
+import { CHOKE_TRAPS, autoAnswer, chokeCombo, chokePoints, isFollow, isNeed, play, playAgainst, probeDeck, routeSearch } from "./probe";
+import type { FromHelper, ToHelper } from "./helper";
 import { isHandTrap } from "./handtraps";
 import { interruptionsOf, readEffects, readSetConstants, type QuickEffect } from "./interruptions";
 import { isFirstTurnHandTrap } from "./handtraps";
@@ -847,11 +848,15 @@ function aiMakePlan() {
 function aiFollow(kind: "idle" | "pick", options: { code: number; tag?: string }[]): number {
   const step = aiPlan[aiStep];
   if (!step) return -1;
-  const [verb, ...rest] = step.split(":");
+  const [head, ...rest] = step.split(":");
+  const [verb, effect] = head.split("#");
   const code = Number(rest[rest.length - 1]);
   const wanted = verb === "pick" ? "pick" : verb === "Normal" ? "n" : verb === "Special" ? "s" : "a";
   if ((kind === "pick") !== (wanted === "pick")) return -1;
-  const at = options.findIndex((option) => option.code === code && (kind === "pick" || option.tag === wanted));
+  const matches = (option: { code: number; tag?: string }) => option.code === code && (kind === "pick" || option.tag === wanted);
+  // the same effect of the card as in the plan (Galaxy Wizard's search, not its Level), else any of its effects
+  let at = effect ? options.findIndex((option) => matches(option) && (option as { effect?: string }).effect === effect) : -1;
+  if (at < 0) at = options.findIndex(matches);
   if (at >= 0) aiStep++;
   // off the plan (something was negated or banished): from here on it plays by what it can
   else aiPlan = [];
@@ -864,7 +869,7 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
       if (turnPlayer === 1 && !aiPlanned) aiMakePlan();
       {
         const offered = [
-          ...message.activates.map((card, index) => ({ code: card.code, tag: "a", action: SelectIdleCMDAction.SELECT_ACTIVATE, index })),
+          ...message.activates.map((card, index) => ({ code: card.code, tag: "a", effect: String(card.description), action: SelectIdleCMDAction.SELECT_ACTIVATE, index })),
           ...message.special_summons.map((card, index) => ({ code: card.code, tag: "s", action: SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, index })),
           ...message.summons.map((card, index) => ({ code: card.code, tag: "n", action: SelectIdleCMDAction.SELECT_SUMMON, index })),
         ];
@@ -1263,6 +1268,106 @@ async function runProbe(id: number, main: number[], extra: number[]) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Helpers: a few more copies of the core, each in its own worker, play a search's tries side by side. Phones get two
+// (memory), computers up to four. Without them (a browser that can't start a worker from a worker) tries play here.
+const HELPERS = Math.max(0, Math.min((navigator.hardwareConcurrency || 2) - 1, /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || ((navigator as { deviceMemory?: number }).deviceMemory ?? 8) <= 4 ? 2 : 4));
+let helpers: Promise<Worker[]> | null = null;
+const helperSent = new Set<string>();
+let helperJob = 0;
+function startHelpers(): Promise<Worker[]> {
+  helpers ??= (async () => {
+    if (typeof Worker === "undefined" || !HELPERS) return [];
+    const list = cards.size ? [...cards] : [];
+    const started = await Promise.all(
+      Array.from({ length: HELPERS }, () =>
+        new Promise<Worker | null>((resolve) => {
+          try {
+            const helper = new Worker(new URL("./helper.ts", import.meta.url), { type: "module" });
+            const timer = setTimeout(() => (helper.terminate(), resolve(null)), 60000);
+            helper.onmessage = (event: MessageEvent<FromHelper>) => event.data.type === "ready" && (clearTimeout(timer), resolve(helper));
+            helper.onerror = () => (clearTimeout(timer), resolve(null));
+            helper.postMessage({ type: "init", cards: list, names: [...names], scripts: [...scripts], scriptsUrl: SCRIPTS_URL } satisfies ToHelper);
+          } catch {
+            resolve(null);
+          }
+        }),
+      ),
+    );
+    for (const name of scripts.keys()) helperSent.add(name);
+    return started.filter((one): one is Worker => !!one);
+  })();
+  return helpers;
+}
+// Spreads work over the helpers a few at a time (whoever is free takes the next few); answers come back in order.
+// Without helpers it is done here, with a pause after each so the duel keeps answering.
+type Env = Parameters<typeof play>[0];
+async function spread<T, R>(items: T[], local: (item: T) => R, ask: (id: number, items: T[]) => ToHelper, read: (answer: FromHelper) => R[] | undefined): Promise<R[]> {
+  const pool = await startHelpers();
+  if (!pool.length) {
+    const out: R[] = [];
+    for (const item of items) {
+      out.push(local(item));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return out;
+  }
+  // scripts fetched here since the helpers started go to them first
+  const fresh = [...scripts].filter(([name]) => !helperSent.has(name));
+  if (fresh.length) {
+    for (const helper of pool) helper.postMessage({ type: "scripts", scripts: fresh } satisfies ToHelper);
+    for (const [name] of fresh) helperSent.add(name);
+  }
+  const out: R[] = new Array(items.length);
+  const chunk = Math.max(1, Math.min(8, Math.ceil(items.length / (pool.length * 3))));
+  let next = 0;
+  await Promise.all(
+    pool.map(async (helper) => {
+      while (next < items.length) {
+        const from = next;
+        next += chunk;
+        const id = ++helperJob;
+        const answer = await new Promise<FromHelper>((resolve) => {
+          const listener = (event: MessageEvent<FromHelper>) => {
+            if ("id" in event.data && event.data.id === id) (helper.removeEventListener("message", listener), resolve(event.data));
+          };
+          helper.addEventListener("message", listener);
+          helper.postMessage(ask(id, items.slice(from, from + chunk)));
+        });
+        if (answer.type === "error") throw new Error(answer.text);
+        read(answer)?.forEach((result, at) => (out[from + at] = result));
+      }
+    }),
+  );
+  return out;
+}
+
+// Runs a search to its end, playing the tries it asks for on the helpers. `alive` says whether it is still wanted;
+// `progress` sees everything else it yields.
+async function drive<R>(steps: Generator<unknown, R, unknown>, env: Env, hand: number[], deck: number[], extra: number[], alive: () => boolean, progress?: (value: unknown) => void): Promise<R | null> {
+  let answer: unknown;
+  let pause = performance.now();
+  for (;;) {
+    if (!alive()) return null;
+    const next = steps.next(answer);
+    answer = undefined;
+    if (next.done) return next.value;
+    const value = next.value;
+    if (isNeed(value)) {
+      answer = await spread(value.need, (plan) => play(env, hand, deck, extra, plan, value.against), (id, plans) => ({ type: "plays", id, hand, deck, extra, against: value.against, plans }), (one) => (one.type === "plays" ? one.stops : undefined));
+    } else if (isFollow(value)) {
+      answer = await spread(value.follow, (job) => playAgainst(env, hand, deck, extra, job.keys, job.trap, job.at, job.fixed), (id, jobs) => ({ type: "follows", id, hand, deck, extra, jobs }), (one) => (one.type === "follows" ? one.results : undefined));
+    } else {
+      progress?.(value);
+      // a breath now and then for the duel and searches
+      if (performance.now() - pause > 30) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        pause = performance.now();
+      }
+    }
+  }
+}
+
 // Route search, between other requests like the probe. The line found comes back as a test the duel screen replays:
 // the same deck order, seed and settings the search played with, and its choices as the screen takes them.
 let routeJob = 0;
@@ -1287,24 +1392,18 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
   const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
   await prefetchScripts([...handCodes, ...deck, ...extraCodes]);
   const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
-  const steps = routeSearch(env, handCodes, deck, extraCodes, { goal, targets: targets.map((board) => board.map(canonical)), prior: new Set(prior) });
+  const steps = routeSearch(env, handCodes, deck, extraCodes, { goal, targets: targets.map((board) => board.map(canonical)), prior: new Set(prior), batch: true });
   let last = 0;
-  for (;;) {
-    if (routeJob !== id) return;
-    const next = steps.next();
-    if (next.done) {
-      const route = next.value;
-
-      const options: StartOptions = { main: [...handCodes, ...[...deck].reverse()], extra: extraCodes, hand: handCodes.length, chosen: [], ignoreHandTraps: true, seed: 1 };
-      const record: TestRecord = { options, picks: route.ui, steps: route.steps.map((text) => ({ text, idle: !text.startsWith("pick ") && !text.startsWith("finish") })), startHand: handCodes };
-      return send({ type: "route", id, tried: route.tried, done: { route, record } });
-    }
-    if (next.value && performance.now() - last > 250) {
-      send({ type: "route", id, tried: next.value.tried });
+  const route = await drive(steps, env, handCodes, deck, extraCodes, () => routeJob === id, (value) => {
+    if (value && typeof value === "object" && "tried" in value && performance.now() - last > 250) {
+      send({ type: "route", id, tried: (value as { tried: number }).tried });
       last = performance.now();
     }
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
+  });
+  if (!route) return;
+  const options: StartOptions = { main: [...handCodes, ...[...deck].reverse()], extra: extraCodes, hand: handCodes.length, chosen: [], ignoreHandTraps: true, seed: 1 };
+  const record: TestRecord = { options, picks: route.ui, steps: route.steps.map((text) => ({ text, idle: !text.startsWith("pick ") && !text.startsWith("finish") })), startHand: handCodes };
+  send({ type: "route", id, tried: route.tried, done: { route, record } });
 }
 
 // Choke points for one line, between other requests like the probe and the route search
@@ -1322,23 +1421,13 @@ async function runChoke(id: number, main: number[], extra: number[], hand: numbe
   const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
   await prefetchScripts([...handCodes, ...deck, ...extraCodes, ...CHOKE_TRAPS]);
   const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
-  const steps = chokePoints(env, handCodes, deck, extraCodes, keys, CHOKE_TRAPS, { goal, budget: 250, replans: 2 });
-  let singles: ReturnType<typeof steps.next>;
-  for (;;) {
-    if (chokeJob !== id) return;
-    singles = steps.next();
-    if (singles.done) break;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
+  const alive = () => chokeJob === id;
+  const singles = await drive(chokePoints(env, handCodes, deck, extraCodes, keys, CHOKE_TRAPS, { goal, budget: 250, replans: 2, batch: true }), env, handCodes, deck, extraCodes, alive);
+  if (!singles) return;
   // then the hand traps the opponent holds together, if more than one
-  if (combo.length < 2) return send({ type: "choke", id, done: singles.value });
-  const together = chokeCombo(env, handCodes, deck, extraCodes, keys, combo.map(canonical), { goal, budget: 250 });
-  for (;;) {
-    if (chokeJob !== id) return;
-    const next = together.next();
-    if (next.done) return send({ type: "choke", id, done: singles.value, combo: next.value });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
+  if (combo.length < 2) return send({ type: "choke", id, done: singles });
+  const together = await drive(chokeCombo(env, handCodes, deck, extraCodes, keys, combo.map(canonical), { goal, budget: 250, batch: true }), env, handCodes, deck, extraCodes, alive);
+  if (together) send({ type: "choke", id, done: singles, combo: together });
 }
 
 function cardLine(code: number): string {

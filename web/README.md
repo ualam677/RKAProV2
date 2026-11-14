@@ -142,9 +142,12 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order (agreed with the owner)
-1. Faster searches: a pool of engine workers (`navigator.hardwareConcurrency`, at most 3 extra) for the probe, route
-   search and choke points. Each worker loads its own card database (about 100 MB), so keep the pool small on phones,
-   start it only for a search and close it after.
+1. Faster searches, part two. Done so far: helper workers (`src/engine/helper.ts`, 2 on phones, up to 4 on
+   computers) play the route search's and hand trap check's tries side by side; the searches ask for each level's tries
+   at once (`batch`: yields `{ need }` / `{ follow }`, answered with `next()`; `drive` in worker.ts). The beam widens
+   (10, 40, 160 kept) when it dies out early, and each step's key names which effect was used
+   (`Activate#<effect>:<code>`), so a line with Galaxy Wizard (Level or search) is followed correctly. Still to do: the
+   engine probe (singles and pairs) on the helpers too; Lua bytecode was tried and saves too little (24 to 20 ms).
 2. Measured success per start, with why it failed: from saved tests, how often each start reached a full board, and
    for the misses, what stopped it (bricked hand, a hand trap, a step missing). Feeds the optimiser's odds.
 3. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).

@@ -55,7 +55,7 @@ interface Measure {
   firstTaker: number | null;
 }
 
-interface Stop {
+export interface Stop {
   // the branch point after the plan: what can be chosen there, the card each acts on, and what a pick is for
   options: string[];
   codes: number[];
@@ -628,6 +628,11 @@ export interface RouteOptions {
   budget?: number;
   width?: number;
   depth?: number;
+  // the tries of each level are asked for together (yielded as { need }), to be played in parallel elsewhere and
+  // handed back with next(stops); otherwise each is played here, one by one
+  batch?: boolean;
+  // for tools: each level of the search as it is kept
+  trace?: (level: number, kept: { steps: string[]; value: number; options: string[]; plan: number[] }[]) => void;
 }
 
 const overlap = (board: number[], target: number[]) => {
@@ -645,13 +650,48 @@ const overlap = (board: number[], target: number[]) => {
 
 // "Normal Summon X" -> "Normal", "Activate: Tribute this card X" -> "Activate"
 export const verbOf = (label: string) => label.split(/[ :]/)[0];
+// A step's key: "Activate#<effect>:<code>" names which of a card's effects (Galaxy Wizard's Level or its search);
+// "Normal:<code>", "Special:<code>", "pick:<hint>:<code>". Without the effect, any effect of that card matches.
+export const stepKey = (label: string, code: number) => {
+  const verb = verbOf(label);
+  const effect = verb === "Activate" ? /#(\d+)/.exec(label)?.[1] : undefined;
+  return effect ? `${verb}#${effect}:${code}` : `${verb}:${code}`;
+};
+export const plainKey = (key: string) => key.replace(/#\d+/, "");
 
 /** Pauses (yields) after every duel tried; returns the best line found. */
-export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extra: number[], options: RouteOptions): Generator<{ tried: number; best: Route | null } | undefined, Route> {
+/** Tries for the caller to play: each a plan from the start, answered in the same order. */
+export interface Need {
+  need: number[][];
+  against?: Against | Against[];
+}
+export const isNeed = (value: unknown): value is Need => !!value && typeof value === "object" && "need" in value;
+/** Lines for the caller to follow against a hand trap (playAgainst), answered in the same order. */
+export interface FollowJob {
+  keys: string[];
+  trap: number;
+  at: number;
+  fixed: Against[];
+}
+export interface Follow {
+  follow: FollowJob[];
+}
+export const isFollow = (value: unknown): value is Follow => !!value && typeof value === "object" && "follow" in value;
+// followed here, or asked for when the caller plays them elsewhere
+function* follows(env: ProbeEnv, hand: number[], deck: number[], extra: number[], jobs: FollowJob[], batch?: boolean): Generator<Follow, FollowResult[], unknown> {
+  if (!batch) return jobs.map((job) => playAgainst(env, hand, deck, extra, job.keys, job.trap, job.at, job.fixed));
+  const answer = (yield { follow: jobs }) as FollowResult[] | undefined;
+  if (!answer || answer.length !== jobs.length) throw new Error("The check was not given its lines");
+  return answer;
+}
+
+/** Pauses (yields) after every duel tried; returns the best line found. */
+export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extra: number[], options: RouteOptions): Generator<{ tried: number; best: Route | null } | Need | undefined, Route, unknown> {
   const budget = options.budget ?? 2500;
   const width = options.width ?? 10;
   const depth = options.depth ?? 80;
-  const prior = options.prior ?? new Set<string>();
+  // your lines' steps name a card, not always which of its effects: compared without it
+  const prior = new Set([...(options.prior ?? [])].map(plainKey));
   const goal = options.goal ?? 3;
   // only what the line built: cards still in the hand it started with are not part of the board
   // (hand traps held are counted by the optimiser's "combo + hand trap" odds, not here)
@@ -685,37 +725,74 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
     return { value, route };
   };
   let tried = 0;
-  const first = play(env, hand, deck, extra, [], options.against);
-  tried++;
+  // every position played once, whichever round reaches it again
+  const played = new Map<string, Stop>();
+  const replay = (plan: number[]) => {
+    const key = plan.join(",");
+    let stop = played.get(key);
+    if (!stop) {
+      stop = play(env, hand, deck, extra, plan, options.against);
+      played.set(key, stop);
+      tried++;
+    }
+    return stop;
+  };
+  const first = replay([]);
   const root: Node = { plan: [], stop: first, steps: [], keys: [], liked: 0, ...judge(first, [], 0, tried) };
   let best = root;
-  const seen = new Set<string>([first.key]);
-  let beam: Node[] = [root];
-  for (let level = 0; level < depth && beam.length && tried < budget; level++) {
-    const children: Node[] = [];
-    for (const node of beam) {
-      for (let index = 0; index < node.stop.options.length && tried < budget; index++) {
-        const label = node.stop.options[index];
-        const child = play(env, hand, deck, extra, [...node.plan, index], options.against);
-        tried++;
-        yield;
-        if (child.failed || seen.has(child.key)) continue;
-        seen.add(child.key);
-        // like your lines: the same action on the same card, or the same pick for the same purpose (add, not send)
-        const verb = verbOf(label);
-        const key = verb === "pick" ? `pick:${node.stop.hint}:${node.stop.codes[index]}` : `${verb}:${node.stop.codes[index]}`;
-        const liked = node.liked + (prior.has(key) ? 3 : 0);
-        const steps = [...node.steps, label.replace(/#\d+/, "").replace(/@\d+$/, "")];
-        const keys = [...node.keys, key];
-        const next: Node = { plan: [...node.plan, index], stop: child, steps, keys, liked, ...judge(child, steps, liked, tried, keys) };
-        children.push(next);
-        if (next.value > best.value) best = next;
-        if (next.route.full) return { ...next.route, tried };
+  // a beam of the most promising positions; when it dies out with budget left and no full board, it starts again
+  // wider (a choice that looks no better at first, like which card Orbital 7 adds, can be the one the line needs)
+  for (let round = 0, keep = width; round < 3 && tried < budget; round++, keep *= 4) {
+    const seen = new Set<string>([first.key]);
+    let beam: Node[] = [root];
+    for (let level = 0; level < depth && beam.length && tried < budget; level++) {
+      const children: Node[] = [];
+      if (options.batch) {
+        // every new try of this level at once, as far as the budget goes
+        const plans: number[][] = [];
+        for (const node of beam)
+          for (let index = 0; index < node.stop.options.length && tried + plans.length < budget; index++) {
+            const plan = [...node.plan, index];
+            if (!played.has(plan.join(","))) plans.push(plan);
+          }
+        if (plans.length) {
+          const stops = (yield { need: plans, against: options.against }) as Stop[] | undefined;
+          if (!stops || stops.length !== plans.length) throw new Error("The search was not given its tries");
+          plans.forEach((plan, at) => played.set(plan.join(","), stops[at]));
+          tried += plans.length;
+        }
       }
-      yield { tried, best: best.route };
+      for (const node of beam) {
+        for (let index = 0; index < node.stop.options.length; index++) {
+          // past the budget, only tries already played are still looked at
+          if (tried >= budget && !played.has([...node.plan, index].join(","))) break;
+          const label = node.stop.options[index];
+          const before = tried;
+          const child = replay([...node.plan, index]);
+          if (tried > before) yield;
+          if (child.failed || seen.has(child.key)) continue;
+          seen.add(child.key);
+          // like your lines: the same action on the same card, or the same pick for the same purpose (add, not send)
+          const verb = verbOf(label);
+          const key = verb === "pick" ? `pick:${node.stop.hint}:${node.stop.codes[index]}` : stepKey(label, node.stop.codes[index]);
+          const liked = node.liked + (prior.has(plainKey(key)) ? 3 : 0);
+          const steps = [...node.steps, label.replace(/#\d+/, "").replace(/@\d+$/, "")];
+          const keys = [...node.keys, key];
+          const next: Node = { plan: [...node.plan, index], stop: child, steps, keys, liked, ...judge(child, steps, liked, tried, keys) };
+          if (next.value > best.value) best = next;
+          if (next.route.full) return { ...next.route, tried };
+          // a position with nothing left to do is a finished line: a candidate for the best, but no room in the beam
+          if (child.options.length) children.push(next);
+        }
+        yield { tried, best: best.route };
+      }
+      // equal positions: the one with more left to do first
+      const rank = (node: Node) => node.value + Math.min(node.stop.options.length, 10) * 0.5;
+      children.sort((a, b) => rank(b) - rank(a));
+      beam = children.slice(0, keep);
+      options.trace?.(level, beam.map((node) => ({ steps: node.steps, value: node.value, options: node.stop.options, plan: node.plan })));
     }
-    children.sort((a, b) => b.value - a.value);
-    beam = children.slice(0, width);
+    options.trace?.(-1, []);
   }
   return { ...best.route, tried };
 }
@@ -740,14 +817,14 @@ export interface Choke {
   windows: ChokeWindow[];
 }
 
-interface FollowResult {
+export interface FollowResult {
   windows: string[];
   used: string | null;
   interruptions: number;
   board: number[];
 }
 
-function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], trap: number, useAt: number, fixed: Against[] = []): FollowResult {
+export function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], trap: number, useAt: number, fixed: Against[] = []): FollowResult {
   const { core } = env;
   const duel = core.createDuel({
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
@@ -796,9 +873,10 @@ function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
     };
     // the first step from `next` on that is on offer (what the hand trap took away is skipped)
     let lastActed = 0;
-    const follow = (offered: { code?: number; key: (k: string) => boolean }[]): number => {
+    const follow = (offered: { code?: number; key: (k: string) => boolean; exact?: (k: string) => boolean }[]): number => {
       for (let step = next; step < keys.length; step++) {
-        const at = offered.findIndex((option) => option.key(keys[step]));
+        let at = offered.findIndex((option) => (option.exact ?? option.key)(keys[step]));
+        if (at < 0) at = offered.findIndex((option) => option.key(keys[step]));
         if (at >= 0) {
           next = step + 1;
           lastActed = offered[at].code ?? lastActed;
@@ -863,7 +941,7 @@ function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
               } else response = autoAnswer(message);
             } else if (message.type === OcgMessageType.SELECT_IDLECMD) {
               hint = 0;
-              const offered = idleOptions(env, message).map((option) => ({ ...option, key: (k: string) => k === `${verbOf(option.label)}:${option.code}` }));
+              const offered = idleOptions(env, message).map((option) => ({ ...option, key: (k: string) => plainKey(k) === `${verbOf(option.label)}:${option.code}`, exact: (k: string) => k === stepKey(option.label, option.code ?? 0) }));
               const at = follow(offered);
               if (at < 0) return finish();
               response = offered[at].response;
@@ -896,18 +974,20 @@ export const CHOKE_TRAPS = [14558127, 10045474, 97268402, 59438930, 27204311, 94
  * Pauses (yields) after every duel.
  */
 export function* chokePoints(
-  env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], traps = CHOKE_TRAPS, options: { goal?: number; budget?: number; replans?: number } = {},
-): Generator<undefined, Choke[]> {
+  env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], traps = CHOKE_TRAPS, options: { goal?: number; budget?: number; replans?: number; batch?: boolean } = {},
+): Generator<unknown, Choke[], unknown> {
   const out: Choke[] = [];
+  const batch = options.batch;
   for (const trap of traps) {
     if (!env.card(trap)) continue;
-    const clean = playAgainst(env, hand, deck, extra, keys, trap, -1);
+    const [clean] = yield* follows(env, hand, deck, extra, [{ keys, trap, at: -1, fixed: [] }], batch);
     yield;
     // one entry per moment, the worst outcome when the same moment comes up more than once
     const byMoment = new Map<string, ChokeWindow>();
-    for (let at = 0; at < Math.min(clean.windows.length, 25); at++) {
-      const result = playAgainst(env, hand, deck, extra, keys, trap, at);
-      yield;
+    const moments = Array.from({ length: Math.min(clean.windows.length, 25) }, (_, at) => ({ keys, trap, at, fixed: [] }));
+    const results = yield* follows(env, hand, deck, extra, moments, batch);
+    for (let at = 0; at < moments.length; at++) {
+      const result = results[at];
       const label = result.used ?? clean.windows[at];
       const seen = byMoment.get(label);
       if (!seen || result.interruptions < seen.interruptions) byMoment.set(label, { at: label, interruptions: result.interruptions, board: result.board });
@@ -921,13 +1001,8 @@ export function* chokePoints(
       const lowest = Math.min(...[...byMoment.values()].map((window) => window.interruptions));
       if (worst.interruptions > lowest) break;
       searched.add(worst.at);
-      const search = routeSearch(env, hand, deck, extra, { targets: [], prior: new Set(keys), goal: options.goal ?? 3, budget: options.budget ?? 350, against: { trap, at: worst.at } });
-      let step = search.next();
-      while (!step.done) {
-        yield;
-        step = search.next();
-      }
-      if (step.value.interruptions.length > worst.interruptions) byMoment.set(worst.at, { at: worst.at, interruptions: step.value.interruptions.length, board: step.value.board, replanned: true });
+      const through = yield* routeSearch(env, hand, deck, extra, { targets: [], prior: new Set(keys), goal: options.goal ?? 3, budget: options.budget ?? 350, against: { trap, at: worst.at }, batch });
+      if (through.interruptions.length > worst.interruptions) byMoment.set(worst.at, { at: worst.at, interruptions: through.interruptions.length, board: through.board, replanned: true });
       else worst.replanned = true;
     }
     out.push({ trap, clean: clean.interruptions, windows: [...byMoment.values()] });
@@ -959,8 +1034,9 @@ const orders = (list: number[]): number[][] =>
 
 /** Pauses (yields) after every duel tried. */
 export function* chokeCombo(
-  env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], traps: number[], options: { goal?: number; budget?: number } = {},
-): Generator<undefined, ChokeCombo> {
+  env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], traps: number[], options: { goal?: number; budget?: number; batch?: boolean } = {},
+): Generator<unknown, ChokeCombo, unknown> {
+  const batch = options.batch;
   let best: ChokeCombo | null = null;
   for (const order of orders(traps)) {
     const fixed: Against[] = [];
@@ -970,7 +1046,7 @@ export function* chokeCombo(
     let board: number[] = [];
     for (const trap of order) {
       // every moment this hand trap has against the line as it now stands (the others already placed)
-      const clean = playAgainst(env, hand, deck, extra, line, trap, -1, fixed);
+      const [clean] = yield* follows(env, hand, deck, extra, [{ keys: line, trap, at: -1, fixed }], batch);
       yield;
       if (!clean.windows.length) {
         unused.push(trap);
@@ -978,20 +1054,15 @@ export function* chokeCombo(
         continue;
       }
       let worst: { at: string; result: FollowResult } | null = null;
-      for (let at = 0; at < Math.min(clean.windows.length, 20); at++) {
-        const result = playAgainst(env, hand, deck, extra, line, trap, at, fixed);
-        yield;
+      const moments = Array.from({ length: Math.min(clean.windows.length, 20) }, (_, at) => ({ keys: line, trap, at, fixed: [...fixed] }));
+      const results = yield* follows(env, hand, deck, extra, moments, batch);
+      for (let at = 0; at < moments.length; at++) {
+        const result = results[at];
         if (!worst || result.interruptions < worst.result.interruptions) worst = { at: result.used ?? clean.windows[at], result };
       }
       fixed.push({ trap, at: worst!.at });
       // your best way through everything placed so far
-      const search = routeSearch(env, hand, deck, extra, { targets: [], prior: new Set(line), goal: options.goal ?? 3, budget: options.budget ?? 250, against: [...fixed] });
-      let step = search.next();
-      while (!step.done) {
-        yield;
-        step = search.next();
-      }
-      const through = step.value;
+      const through = yield* routeSearch(env, hand, deck, extra, { targets: [], prior: new Set(line), goal: options.goal ?? 3, budget: options.budget ?? 250, against: [...fixed], batch });
       if (through.interruptions.length > worst!.result.interruptions) {
         [interruptions, board, line] = [through.interruptions.length, through.board, through.keys];
       } else [interruptions, board] = [worst!.result.interruptions, worst!.result.board];

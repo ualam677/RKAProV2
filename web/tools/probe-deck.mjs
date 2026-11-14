@@ -97,7 +97,7 @@ if (process.env.HAND) {
 }
 
 if (process.env.ROUTE) {
-  const { routeSearch } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const { routeSearch, play } = await import(new URL("../src/engine/probe.ts", import.meta.url));
   const hand = process.env.ROUTE.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
   const targets = process.env.TARGET ? [process.env.TARGET.split(",").map((n) => [...names].find(([, name]) => name === n)[0])] : [];
   const t = performance.now();
@@ -110,9 +110,11 @@ if (process.env.ROUTE) {
     prior = new Set(n.value.keys);
     console.log("PRIOR", n.value.interruptions.length, "interruptions from", process.env.PRIOR_FROM.split(",")[0], n.value.keys.join(" "));
   }
-  const steps = routeSearch(env, hand, rest(hand), extra, { targets, prior, budget: Number(process.env.BUDGET ?? 2500) });
-  let next;
-  while (!(next = steps.next()).done);
+  const steps = routeSearch(env, hand, rest(hand), extra, { targets, prior, budget: Number(process.env.BUDGET ?? 2500), batch: !!process.env.BATCH,
+    trace: process.env.TRACE ? (level, kept) => { console.log(`LEVEL ${level}: ${kept.length} kept`); for (const k of kept.slice(0, Number(process.env.TRACE))) console.log(`   [${k.plan}] ${k.value.toFixed(0)}  ${k.steps.slice(-3).join(" > ")}  || ${k.options.length} options: ${k.options.slice(0, 8).join(" | ")}`); } : undefined });
+  // BATCH=1: the search asks for each level's tries together, as in the app (played here one by one)
+  let next, answer;
+  while (!(next = steps.next(answer)).done) answer = next.value?.need ? next.value.need.map((plan) => play(env, hand, rest(hand), extra, plan)) : undefined;
   const r = next.value;
   console.log(`ROUTE ${(performance.now() - t) / 1000 | 0} s, ${r.tried} tried, full ${r.full}, coverage ${(r.coverage * 100).toFixed(0)}%`);
   console.log("  interruptions:", r.interruptions.map((i) => `${names.get(i.code)} (${i.kind}, ${i.from})`).join("; ") || "none");
@@ -131,6 +133,21 @@ if (process.env.PLAN) {
   }
 }
 
+if (process.env.TIMING) {
+  const { play } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const hand = process.env.TIMING.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const plan = (process.env.PLAN2 ?? "").split(",").filter(Boolean).map(Number);
+  let loads = 0, loadMs = 0;
+  const realLoad = core.loadScript.bind(core);
+  core.loadScript = (...a) => { const t = performance.now(); const r = realLoad(...a); loadMs += performance.now() - t; loads++; return r; };
+  for (const n of [0, plan.length]) {
+    loads = 0; loadMs = 0;
+    const t = performance.now();
+    for (let i = 0; i < 20; i++) play(env, hand, rest(hand), extra, plan.slice(0, n));
+    console.log(`plan length ${n}: ${((performance.now() - t) / 20).toFixed(1)} ms per play, top-level script loads ${loads / 20} taking ${(loadMs / 20).toFixed(1)} ms`);
+  }
+}
+
 if (process.env.CHOKE) {
   const { routeSearch, chokePoints } = await import(new URL("../src/engine/probe.ts", import.meta.url));
   const hand = process.env.CHOKE.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
@@ -138,8 +155,15 @@ if (process.env.CHOKE) {
   let n; while (!(n = g.next()).done);
   console.log(`LINE ${n.value.interruptions.length} interruptions: ${n.value.steps.filter((s) => !s.startsWith("pick")).join(" > ")}`);
   const t = performance.now();
-  const c = chokePoints(env, hand, rest(hand), extra, n.value.keys);
-  let m; while (!(m = c.next()).done);
+  // BATCH=1: the check asks for its replays together, as in the app (answered here one by one)
+  const { play, playAgainst } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  if (process.env.FOLLOW) { console.log("KEYS", n.value.keys.join(" ")); const r = playAgainst(env, hand, rest(hand), extra, n.value.keys, 14558127, -1); console.log("FOLLOWED", JSON.stringify(r)); }
+  const c = chokePoints(env, hand, rest(hand), extra, n.value.keys, undefined, { batch: !!process.env.BATCH });
+  let m, answer;
+  while (!(m = c.next(answer)).done) {
+    const v = m.value;
+    answer = v?.need ? v.need.map((p) => play(env, hand, rest(hand), extra, p, v.against)) : v?.follow ? v.follow.map((j) => playAgainst(env, hand, rest(hand), extra, j.keys, j.trap, j.at, j.fixed)) : undefined;
+  }
   console.log(`choke points in ${((performance.now() - t) / 1000).toFixed(1)} s`);
   for (const one of m.value) {
     const worst = one.windows.reduce((a, w) => (a && a.interruptions <= w.interruptions ? a : w), null);
