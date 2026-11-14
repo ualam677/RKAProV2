@@ -932,6 +932,14 @@ function App() {
     return () => window.clearTimeout(wait);
   }, [view, replay]);
 
+  // a test from Optimise: a dud opponent, 40 cards of Marshmallon (does nothing on its own) with the hand traps picked in
+  // Lines on top (in its opening hand, and the only ones it uses); none picked, none at all
+  const dudOpponent = (traps: number[]) => ({
+    opponent: { main: [...traps, ...Array.from({ length: 40 - traps.length }, () => 31305911)], extra: [] as number[] },
+    opponentHandTraps: traps.length > 0,
+    opponentTraps: traps,
+    goSecond: false,
+  });
   const start = useCallback((test?: { chosen: number[] }) => {
     if (!deck) return;
     setReplay(null);
@@ -949,7 +957,7 @@ function App() {
     timer.current = 0;
     queue.current = [];
     lastRecord.current = null;
-    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...opponentDeck(), seed: Math.floor(Math.random() * 2 ** 31) });
+    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...(test ? dudOpponent(deck.opponentTraps ?? [14558127, 10045474]) : opponentDeck()), seed: Math.floor(Math.random() * 2 ** 31) });
   }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond, decks]);
 
   const requestText = useCallback(
@@ -1416,7 +1424,7 @@ function App() {
                             onClick={() => {
                               const now = deck.opponentTraps ?? [14558127, 10045474];
                               const next = held ? now.filter((code) => code !== trap) : [...now, trap].slice(-3);
-                              if (next.length) changeDeck({ ...deck, opponentTraps: next, updated: Date.now() });
+                              changeDeck({ ...deck, opponentTraps: next, updated: Date.now() });
                             }}
                           >
                             {cards.get(trap)?.name ?? `#${trap}`}

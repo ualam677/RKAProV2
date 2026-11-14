@@ -169,7 +169,8 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
   }, [main, second, deck.routes, fullAt, deck.opponentTraps]);
   const toggleHeld = (trap: number) => {
     const next = holding.includes(trap) ? holding.filter((code) => code !== trap) : [...holding, trap].slice(-3);
-    if (next.length) onChange({ ...deck, opponentTraps: next, updated: Date.now() });
+    // none picked is allowed: no hand traps
+    onChange({ ...deck, opponentTraps: next, updated: Date.now() });
   };
   const checkAgain = () => onCheckChokes(startCards.flatMap((card) => { const hand = handFor(card); return hand && routes[card.code]?.keys ? [{ code: card.code, hand }] : []; }));
   const through = useMemo(
@@ -482,7 +483,10 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
             </span>
           </div>
           <div className="opt-through">
-            <span className="muted">The opponent holds (up to 3):</span>
+            <span className="muted">
+              Test gives a dud opponent (Marshmallon) holding{" "}
+              <b>{holding.length ? holding.map(nameOf).join(" + ") : "no hand traps"}</b>. Pick up to 3, or none.
+            </span>
             <div className="opt-chips">
               {trapChoices.map((trap) => (
                 <button key={trap} className={`button small ${holding.includes(trap) ? "on" : ""}`} onClick={() => toggleHeld(trap)}>
