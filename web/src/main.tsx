@@ -7,6 +7,7 @@ import { CardArt, setArtworkOriginals } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest } from "./decks";
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
 import type { Piece } from "./engine/interruptions";
+import { CHOKE_TRAPS } from "./engine/probe";
 import { Tests } from "./Tests";
 import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
 import { readReplayLink, replayLink, toYdk } from "./decks";
@@ -40,6 +41,8 @@ interface Saved {
   // the computer opponent: "none", "copy" (of the deck being tested) or a saved deck's id
   opponent?: string;
   opponentHandTraps?: boolean;
+  // the opponent opens with the deck's chosen hand traps (the ones Optimise checks against), not random draws
+  fixedTraps?: boolean;
   goSecond?: boolean;
   // before decks were saved in a list, the last opened .ydk was kept here
   deckText?: string;
@@ -102,6 +105,7 @@ function App() {
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
   const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
   const [opponentHandTraps, setOpponentHandTraps] = useState(saved.opponentHandTraps ?? false);
+  const [fixedTraps, setFixedTraps] = useState(saved.fixedTraps ?? true);
   const [goSecond, setGoSecond] = useState(saved.goSecond ?? false);
   const [view, setView] = useState<DuelView | null>(null);
   const [texts, setTexts] = useState(new Map<number, CardText>());
@@ -292,11 +296,27 @@ function App() {
   }, []);
 
   useEffect(() => storeDecks(decks), [decks]);
-  useEffect(() => save({ deckId: deck?.id ?? "", hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, goSecond }), [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, goSecond]);
+  useEffect(() => save({ deckId: deck?.id ?? "", hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond }), [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond]);
+  // names for the hand trap chips on the Test screen
+  useEffect(() => {
+    if (ready && screen === "test" && CHOKE_TRAPS.some((code) => !cards.has(code))) void info(CHOKE_TRAPS);
+  }, [ready, screen]);
   // the opponent's deck for a new duel, shuffled
   const opponentDeck = () => {
     const source = opponent === "none" ? null : opponent === "copy" ? deck : decks.find((one) => one.id === opponent) ?? deck;
-    return source && source.main.length ? { opponent: { main: shuffled(source.main), extra: source.extra }, opponentHandTraps, goSecond } : {};
+    if (!source?.main.length) return {};
+    const main = shuffled(source.main);
+    // the chosen hand traps on top, so they are in the opening hand: taken from the deck, or put in for random cards
+    if (opponentHandTraps && fixedTraps && deck) {
+      const wanted = (deck.opponentTraps ?? [14558127, 10045474]).slice(0, goSecond ? 4 : 5);
+      for (const code of [...wanted].reverse()) {
+        const at = main.indexOf(code);
+        if (at >= 0) main.splice(at, 1);
+        else main.pop();
+        main.unshift(code);
+      }
+    }
+    return { opponent: { main, extra: source.extra }, opponentHandTraps, goSecond };
   };
 
   // errors clear themselves so they never sit over the field for long
@@ -541,6 +561,32 @@ function App() {
     setWorked(current.worked);
     keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
     if (current.pieces) void countBoard({ ...record, id: current.id, date: current.date }).then((counted) => counted?.send());
+  };
+  // going back: the duel is rebuilt from your choices up to the point asked for
+  const rewind = (to: "action" | "turn") => {
+    const current = lastRecord.current;
+    if (!current || !view) return;
+    const steps = current.steps;
+    let at = 0;
+    if (to === "action") {
+      // before your last action, and every choice that came with it
+      for (let index = steps.length - 1; index >= 0; index--)
+        if (steps[index].idle) {
+          at = index;
+          break;
+        }
+    } else {
+      // the start of this turn; if nothing was chosen in it yet, the start of the turn before
+      const turns = steps.map((step) => step.turn ?? 0);
+      const latest = turns.includes(view.turn) ? view.turn : Math.max(0, ...turns.filter((one) => one < view.turn));
+      at = Math.max(0, turns.findIndex((one) => one >= latest));
+    }
+    const saved: SavedTest = { ...current, id: newId(), date: Date.now(), testOf: test.current?.testOf };
+    if (at > 0) return watch(saved, at);
+    // back to the very start: the same hand, the same order, no animations to sit through
+    newTest(saved.testOf);
+    lastRecord.current = null;
+    post({ ...saved.options, type: "start" });
   };
   // save states: where the duel on screen is now, kept with the deck; loading one rebuilds it choice by choice
   const saveState = () => {
@@ -792,7 +838,7 @@ function App() {
     queue.current = [];
     lastRecord.current = null;
     post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...opponentDeck(), seed: Math.floor(Math.random() * 2 ** 31) });
-  }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, goSecond, decks]);
+  }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond, decks]);
 
   const requestText = useCallback(
     (code: number) => {
@@ -935,6 +981,7 @@ function App() {
           states={(decks.find((one) => one.id === test.current?.deckId) ?? deck)?.saves ?? []}
           onSaveState={saveState}
           onLoadState={loadState}
+          onRewind={replay ? undefined : rewind}
         />
       </>
     );
@@ -1215,21 +1262,64 @@ function App() {
                 </button>
               </div>
             )}
-            {opponent !== "none" && (
-              <div className="segmented two">
-                <button className={`button ${!opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(false)}>
-                  No hand traps on my turn
-                </button>
-                <button className={`button ${opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(true)}>
-                  Hand traps on my turn
-                </button>
-              </div>
-            )}
             <p className="muted">
               End your turn and the computer plays theirs: it activates everything it can, summons, then attacks. You are asked whenever you can respond, so you can see where
               your interruptions go. Import any deck (a meta deck, board breakers) to play against it.
             </p>
           </section>
+
+          {opponent !== "none" && (
+            <section className="box">
+              <h2>Opponent's hand traps</h2>
+              <div className="segmented two">
+                <button className={`button ${!opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(false)}>
+                  Off on my turn
+                </button>
+                <button className={`button ${opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(true)}>
+                  On my turn
+                </button>
+              </div>
+              {opponentHandTraps && (
+                <>
+                  <div className="segmented two">
+                    <button className={`button ${fixedTraps ? "on" : ""}`} onClick={() => setFixedTraps(true)}>
+                      Opens with these
+                    </button>
+                    <button className={`button ${!fixedTraps ? "on" : ""}`} onClick={() => setFixedTraps(false)}>
+                      Whatever it draws
+                    </button>
+                  </div>
+                  {fixedTraps && (
+                    <div className="opt-chips">
+                      {CHOKE_TRAPS.map((trap) => {
+                        const held = (deck.opponentTraps ?? [14558127, 10045474]).includes(trap);
+                        return (
+                          <button
+                            key={trap}
+                            className={`button small ${held ? "on" : ""}`}
+                            onClick={() => {
+                              const now = deck.opponentTraps ?? [14558127, 10045474];
+                              const next = held ? now.filter((code) => code !== trap) : [...now, trap].slice(-3);
+                              if (next.length) changeDeck({ ...deck, opponentTraps: next, updated: Date.now() });
+                            }}
+                          >
+                            {cards.get(trap)?.name ?? `#${trap}`}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+              <p className="muted">
+                {!opponentHandTraps
+                  ? "The computer keeps its hand traps for its own turn: a clean combo test."
+                  : fixedTraps
+                    ? "It opens with these (up to 3) and chains them against your combo at the first chance it gets. Optimise checks the same set at every moment."
+                    : "It chains whatever hand traps it happens to draw against your combo, at the first chance it gets."}
+              </p>
+            </section>
+          )}
 
           <section className="box">
             <div className="box-head">

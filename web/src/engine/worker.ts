@@ -1226,7 +1226,7 @@ function choose(picks: number[] | null): boolean {
   record?.picks.push(picks);
   // the card acted on or picked: what the route search learns your lines from
   const acted = picks?.length === 1 && "choices" in shown ? shown.choices[picks[0]]?.card?.code : undefined;
-  record?.steps.push({ text: describePick(shown, picks), idle: shown.kind === "choice" && !!shown.idle, code: acted, hint: promptHint || undefined });
+  record?.steps.push({ text: describePick(shown, picks), idle: shown.kind === "choice" && !!shown.idle, code: acted, hint: promptHint || undefined, turn });
   core.duelSetResponse(duel!, response);
   advance();
   if (record && !quiet && !collect) send({ type: "record", record });

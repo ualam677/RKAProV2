@@ -121,7 +121,8 @@ export interface TestRecord {
   options: StartOptions;
   picks: (number[] | null)[];
   // code: the card acted on or picked; hint: what a pick was for (the core's "Select a card to add to your hand")
-  steps: { text: string; idle: boolean; code?: number; hint?: number }[];
+  // turn: the turn the choice was made in (older tests don't have it)
+  steps: { text: string; idle: boolean; code?: number; hint?: number; turn?: number }[];
   startHand: number[];
 }
 

@@ -23,6 +23,8 @@ interface Props {
   // save states: keep this moment, or go back to one kept earlier
   states: { id: string; name: string; date: number }[];
   onSaveState: () => string | undefined;
+  // go back: to before your last action, or to the start of this turn (the previous one if nothing was chosen yet)
+  onRewind?: (to: "action" | "turn") => void;
   onLoadState: (id: string) => void;
 }
 
@@ -333,7 +335,7 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   );
 }
 
-export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying, states, onSaveState, onLoadState, viewer, viewerMenu }: Props) {
+export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying, states, onSaveState, onLoadState, onRewind, viewer, viewerMenu }: Props) {
   const [stateList, setStateList] = useState(false);
   // Xyz Materials drawn under their monster, like EDOPro (an option, remembered)
   const [showMaterials, setShowMaterials] = useState(() => {
@@ -846,6 +848,16 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
           </button>
         ))}
       {savedNote && <p className="muted saved-note">{savedNote}</p>}
+      {onRewind && (
+        <>
+          <button className="button" onClick={() => (setMenuOpen(false), onRewind("action"))}>
+            ↶ Undo last action
+          </button>
+          <button className="button" onClick={() => (setMenuOpen(false), onRewind("turn"))}>
+            ⏮ Back a turn
+          </button>
+        </>
+      )}
       {onWorked && (
         <button className={`button ${worked ? "on" : ""}`} onClick={onWorked}>
           {worked ? "✓ Worked (tap to undo)" : "✓ This worked"}
