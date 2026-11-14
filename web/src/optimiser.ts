@@ -529,3 +529,15 @@ export function changed(cards: DeckCard[], out: number, add?: number): SizeRow {
   const next = cards.map((card) => ({ ...card, count: card.count - (card.code === out ? 1 : 0) + (card.code === add ? 1 : 0) })).filter((card) => card.count > 0);
   return rowOf(next, next.reduce((sum, card) => sum + card.count, 0), [out], false, add ? [add] : undefined);
 }
+
+/** The deck with copies taken out and added (one code per copy). Added cards not in the deck come from `pool` (the Side Deck). */
+export function tryChanges(cards: DeckCard[], pool: DeckCard[], out: number[], add: number[]): SizeRow {
+  const next = cards.map((card) => ({ ...card, count: card.count - out.filter((code) => code === card.code).length + add.filter((code) => code === card.code).length }));
+  for (const code of new Set(add)) {
+    if (next.some((card) => card.code === code)) continue;
+    const from = pool.find((card) => card.code === code);
+    if (from) next.push({ ...from, count: add.filter((one) => one === code).length });
+  }
+  const left = next.filter((card) => card.count > 0);
+  return rowOf(left, left.reduce((sum, card) => sum + card.count, 0), out, false, add);
+}

@@ -9,7 +9,7 @@ import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type Save
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
 import {
-  deckSizes, withoutCards, changed, TOP_CUT, type SizeRow, GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
+  deckSizes, withoutCards, changed, tryChanges, TOP_CUT, type SizeRow, GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
 
@@ -405,7 +405,7 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
             </div>
           )}
           {(deck.results ?? []).length > 0 && <Measured results={deck.results ?? []} deck />}
-          <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
+          <DeckSize main={main} side={side} room={room} nameOf={nameOf} takenBy={takenBy} />
           <Clashes main={main} nameOf={nameOf} traits={traits} />
         </>
       )}
@@ -754,7 +754,9 @@ function Measured({ results, deck = false }: { results: TestResult[]; deck?: boo
 }
 
 // Is every card above 40 worth what it dilutes? The deck at each size down to 40, cutting what costs least, and a verdict
-function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: number) => string; takenBy: Map<number, number[]> }) {
+function DeckSize({ main, side, room, nameOf, takenBy }: { main: DeckCard[]; side: DeckCard[]; room: (code: number) => number; nameOf: (code: number) => string; takenBy: Map<number, number[]> }) {
+  // your changes to try: copies taken out and added, at any size
+  const [added, setAdded] = useState<number[]>([]);
   // the engine, by what each card does: starts; pieces your starts pull from the Deck (wanted there, weak to draw); the rest
   const isStart = (card: DeckCard) => card.tag.role === "starter" || card.tag.role === "pair";
   const isPiece = (card: DeckCard) => !isStart(card) && (card.tag.role === "piece" || (takenBy.has(card.code) && !["handtrap", "handtrap2", "breaker"].includes(card.tag.role)));
@@ -800,21 +802,31 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
       <p className="opt-counts" title={`YCS top cut, ${TOP_CUT.decks} decks from ten 2025 YCS top 32s: decks above 40 used the room for non-engine`}>
         Non-engine <b>{nonEngine}</b> ({Math.round((nonEngine / total) * 100)}%) · engine <b>{engine}</b> ({startCount} start, {pieceCount} in-Deck) · top cut at {near}: {theirs.toFixed(0)} / {(near - theirs).toFixed(0)}
       </p>
-      {total > 40 && (
-        <details className="opt-compare">
-          <summary>Compare a 40-card version</summary>
-          <div className="opt-chips">
-            {main.map((card) => {
-              const taken = out.filter((code) => code === card.code).length;
-              return (
-                <button key={card.code} className={`button small ${taken ? "on" : ""}`} onClick={() => setOut(taken < card.count && out.length < total - 40 ? [...out, card.code] : out.filter((code) => code !== card.code))}>
-                  {nameOf(card.code)}
-                  {taken ? ` −${taken}` : ""}
+      <details className="opt-compare">
+        <summary>Try changes: take out or add cards</summary>
+        <div className="opt-try">
+          {[...main, ...side.filter((card) => !main.some((own) => own.code === card.code))].map((card) => {
+            const taken = out.filter((code) => code === card.code).length;
+            const put = added.filter((code) => code === card.code).length;
+            const inMain = main.some((own) => own.code === card.code);
+            const have = (main.find((own) => own.code === card.code)?.count ?? 0) - taken + put;
+            return (
+              <div key={card.code} className={`opt-try-row ${taken || put ? "changed" : ""}`}>
+                <span>
+                  {nameOf(card.code)} <span className="muted">{inMain ? `×${have}` : `Side ×${have}`}</span>
+                </span>
+                <button className="button small" disabled={have <= 0} onClick={() => (put ? setAdded(added.filter((code, at) => at !== added.lastIndexOf(card.code))) : setOut([...out, card.code]))} aria-label={`One fewer ${nameOf(card.code)}`}>
+                  −
                 </button>
-              );
-            })}
-          </div>
-          {mine && (
+                <button className="button small" disabled={have >= 3 || room(card.code) - put + taken <= 0} onClick={() => (taken ? setOut(out.filter((code, at) => at !== out.lastIndexOf(card.code))) : setAdded([...added, card.code]))} aria-label={`One more ${nameOf(card.code)}`}>
+                  +
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        {(out.length > 0 || added.length > 0) && (
+          <>
             <table className="opt-size-table">
               <thead>
                 <tr>
@@ -826,9 +838,9 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
                 </tr>
               </thead>
               <tbody>
-                {[now, mine].map((row) => (
-                  <tr key={row.total} className={row === now ? "now" : ""}>
-                    <td>{row.total}</td>
+                {[now, tryChanges(main, side, out, added)].map((row, at) => (
+                  <tr key={at} className={at === 0 ? "now" : ""}>
+                    <td>{at === 0 ? `Now ${row.total}` : `Then ${row.total}`}</td>
                     <td>{(row.combo1 * 100).toFixed(1)}%</td>
                     <td>{(row.comboTrap1 * 100).toFixed(1)}%</td>
                     <td>{(row.traps2 * 100).toFixed(1)}%</td>
@@ -837,9 +849,12 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
                 ))}
               </tbody>
             </table>
-          )}
-        </details>
-      )}
+            <button className="opt-link" onClick={() => (setOut([]), setAdded([]))}>
+              Clear changes
+            </button>
+          </>
+        )}
+      </details>
     </div>
   );
 }
