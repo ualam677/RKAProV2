@@ -8,7 +8,7 @@ import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type Save
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
 import {
-  deckSizes, withoutCards, type SizeRow, GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
+  deckSizes, withoutCards, TOP_CUT, type SizeRow, GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
 
@@ -853,6 +853,26 @@ function DeckSize({ main, nameOf }: { main: DeckCard[]; nameOf: (code: number) =
           )}
         </div>
       )}
+      {(() => {
+        // against what YCS top cut decks of this size play
+        const sizes = Object.keys(TOP_CUT.nonEngineBySize).map(Number);
+        const near = sizes.reduce((best, size) => (Math.abs(size - total) < Math.abs(best - total) ? size : best), 40);
+        const theirs = TOP_CUT.nonEngineBySize[near];
+        const engine = total - nonEngine;
+        const theirEngine = near - theirs;
+        return (
+          <p className="opt-note">
+            <b>YCS top cut</b> ({TOP_CUT.decks} decks from ten 2025 YCS top 32s): {Math.round((TOP_CUT.atForty / TOP_CUT.decks) * 100)}% play exactly 40, nearly all the rest 41–43, and the
+            ones above 40 use the extra room for non-engine (about {Math.round(Math.min(TOP_CUT.nonEngineBySize[41], TOP_CUT.nonEngineBySize[42], TOP_CUT.nonEngineBySize[43]))}–{Math.round(Math.max(TOP_CUT.nonEngineBySize[41], TOP_CUT.nonEngineBySize[42], TOP_CUT.nonEngineBySize[43]))} non-engine against {TOP_CUT.nonEngineBySize[40].toFixed(0)} at 40). At {near}, they average{" "}
+            {theirs.toFixed(0)} non-engine and {theirEngine.toFixed(0)} engine; yours is {nonEngine} and {engine}.
+            {total > 40 && engine > theirEngine + 1.5
+              ? ` Your cards above 40 went to engine, not non-engine: the opposite of what they do. Either cut engine to 40, or turn those slots into hand traps.`
+              : nonEngine < theirs - 2
+                ? " You run fewer non-engine than they do at this size."
+                : " In line with them."}
+          </p>
+        );
+      })()}
       <p className="opt-note">
         Non-engine (hand traps and breakers): <b>{nonEngine}</b> of {total} ({Math.round((nonEngine / total) * 100)}%).
         {nonEngine / total < 0.35 ? " Guides aim for about 40% so you see two going second; you're below that." : nonEngine / total > 0.5 ? " That's a lot: going first, it can crowd out your starts." : " In the range guides recommend (about 40%)."}

@@ -502,3 +502,15 @@ export function withoutCards(cards: DeckCard[], out: number[]): SizeRow {
   const left = cards.map((card) => ({ ...card, count: card.count - out.filter((code) => code === card.code).length })).filter((card) => card.count > 0);
   return rowOf(left, left.reduce((sum, card) => sum + card.count, 0), out, out.some((code) => cards.find((card) => card.code === code)?.tag.role === "extender"));
 }
+
+// ---- what top cut decks do (YGOPRODeck, top 32 of ten 2025 YCS events: 46 main decks) ----
+// Main deck size: 40 ×19, 41 ×9, 42 ×9, 43 ×4, 45 ×3, 48 and 60 once. Non-engine (hand traps, breakers, generic staples)
+// by size: the decks above 40 used the room for non-engine, not engine. Most played: Mulcharmy Fuwalos (42 of 46, 3
+// copies), Ash Blossom (40, 3), Nibiru (24, 3), Bystial Magnamhut (22, 1), Triple Tactics Talent (20, 1), Infinite
+// Impermanence (20, 3), Droll & Lock Bird (20, 3), Called by the Grave (19, 1).
+export const TOP_CUT = {
+  decks: 46,
+  atForty: 19,
+  nonEngineBySize: { 40: 15.0, 41: 18.9, 42: 17.3, 43: 19.0, 45: 21.3 } as Record<number, number>,
+  medianNonEngine: 17,
+};
