@@ -435,7 +435,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                   you hold two of them in {pct(first.normal2)} of hands going first, and only one can be summoned.
                 </p>
               )}
-              <DeckSize main={main} nameOf={nameOf} />
+              <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
               {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
               {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
                 <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
@@ -759,7 +759,17 @@ function Measured({ results, deck = false }: { results: TestResult[]; deck?: boo
 }
 
 // Is every card above 40 worth what it dilutes? The deck at each size down to 40, cutting what costs least, and a verdict
-function DeckSize({ main, nameOf }: { main: DeckCard[]; nameOf: (code: number) => string }) {
+function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: number) => string; takenBy: Map<number, number[]> }) {
+  // the engine, by what each card does: starts; pieces your starts pull from the Deck (wanted there, weak to draw); the rest
+  const isStart = (card: DeckCard) => card.tag.role === "starter" || card.tag.role === "pair";
+  const isPiece = (card: DeckCard) => !isStart(card) && (card.tag.role === "piece" || (takenBy.has(card.code) && !["handtrap", "handtrap2", "breaker"].includes(card.tag.role)));
+  const engineCards = main.filter((card) => !["handtrap", "handtrap2", "breaker"].includes(card.tag.role));
+  const startCount = engineCards.filter(isStart).reduce((sum, card) => sum + card.count, 0);
+  const pieceCards = engineCards.filter(isPiece);
+  const pieceCount = pieceCards.reduce((sum, card) => sum + card.count, 0);
+  // a one-of that's only ever pulled from the Deck: keep it only if it gives a line or a way through a hand trap that
+  // nothing else gives
+  const singleDuty = pieceCards.filter((card) => card.count === 1);
   const { rows: auto, nonEngine, total } = useMemo(() => deckSizes(main), [main]);
   // your own choice of what goes: tap the cards you'd take out to reach 40
   const [out, setOut] = useState<number[]>([]);
@@ -864,9 +874,12 @@ function DeckSize({ main, nameOf }: { main: DeckCard[]; nameOf: (code: number) =
           <p className="opt-note">
             <b>YCS top cut</b> ({TOP_CUT.decks} decks from ten 2025 YCS top 32s): {Math.round((TOP_CUT.atForty / TOP_CUT.decks) * 100)}% play exactly 40, nearly all the rest 41–43, and the
             ones above 40 use the extra room for non-engine (about {Math.round(Math.min(TOP_CUT.nonEngineBySize[41], TOP_CUT.nonEngineBySize[42], TOP_CUT.nonEngineBySize[43]))}–{Math.round(Math.max(TOP_CUT.nonEngineBySize[41], TOP_CUT.nonEngineBySize[42], TOP_CUT.nonEngineBySize[43]))} non-engine against {TOP_CUT.nonEngineBySize[40].toFixed(0)} at 40). At {near}, they average{" "}
-            {theirs.toFixed(0)} non-engine and {theirEngine.toFixed(0)} engine; yours is {nonEngine} and {engine}.
+            {theirs.toFixed(0)} non-engine and {theirEngine.toFixed(0)} engine; yours is {nonEngine} and {engine} ({startCount} that start, {pieceCount} your starts pull from the Deck,{" "}
+            {engine - startCount - pieceCount} other).
             {total > 40 && engine > theirEngine + 1.5
-              ? ` Your cards above 40 went to engine, not non-engine: the opposite of what they do. Either cut engine to 40, or turn those slots into hand traps.`
+              ? pieceCount >= engine - theirEngine
+                ? ` Your extra engine is mostly pieces your starts pull from the Deck. They don't make hands worse the way extra starters would, but they still dilute: each one-of${singleDuty.length ? ` (${singleDuty.map((card) => nameOf(card.code)).join(", ")})` : ""} should give a line, or a way through a hand trap, that nothing else in the deck gives. The ones that don't are your cuts.`
+                : ` Your cards above 40 went to engine, not non-engine: the opposite of what they do. Either cut engine to 40, or turn those slots into hand traps.`
               : nonEngine < theirs - 2
                 ? " You run fewer non-engine than they do at this size."
                 : " In line with them."}
