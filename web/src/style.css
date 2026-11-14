@@ -666,3 +666,8 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 
 /* the duel never scrolls itself: cards fanned past the bottom edge are clipped, the top bar stays in view */
 .duel { overflow: clip; }
+
+/* text always fits its box: card names wrap in Optimise (the count and tags stay in view); pile words never overflow */
+.opt-name { white-space: normal; overflow: visible; text-overflow: clip; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 2px; line-height: 1.25; }
+.pile-info { flex-wrap: nowrap; overflow: hidden; padding-inline: 2px; }
+.pile-label { overflow: hidden; text-overflow: clip; white-space: nowrap; min-width: 0; }

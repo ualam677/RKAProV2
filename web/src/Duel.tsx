@@ -549,6 +549,8 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     const count = name === "deck" ? player.deck : cards.length;
     const top = name === "grave" || name === "banished" ? cards[cards.length - 1] : undefined;
     const label = { deck: "Deck", grave: "GY", banished: "Banished", extra: "Extra", hand: "Hand" }[name];
+    // the pile is a card wide: a short word fits it (the full name is read out)
+    const short = { deck: "Deck", grave: "GY", banished: "Ban", extra: "Extra", hand: "Hand" }[name];
     const open = name !== "deck" && count > 0 ? () => setSheet({ kind: "pile", controller, pile: name }) : undefined;
     return (
       <button
@@ -560,7 +562,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
       >
         {count > 0 && <PileFace card={top} />}
         <span className="pile-info">
-          <span className="pile-label">{label}</span>
+          <span className="pile-label">{short}</span>
           <b className="pile-count">{count}</b>
         </span>
       </button>
