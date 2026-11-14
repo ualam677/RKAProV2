@@ -141,30 +141,26 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
   hand size and chosen cards are remembered on the device.
 
-## Next, in order (agreed with the owner)
-0. Built from `docs/DECKBUILDING.md` (all five steps, for any deck): deck-size verdict split, card traits, clash
-   check, two starts in hand (lead order from each line's hand trap check), principled suggestions. Read it first: the deckbuilding and combo principles to build into the optimiser for every deck,
-   and the build order (deck-size verdict split, role reader, clash check, two-route order check, suggestions).
-1. Faster searches, part two. Done so far: helper workers (`src/engine/helper.ts`, 2 on phones, up to 4 on
-   computers) play the route search's and hand trap check's tries side by side; the searches ask for each level's tries
-   at once (`batch`: yields `{ need }` / `{ follow }`, answered with `next()`; `drive` in worker.ts). The beam widens
-   (10, 40, 160 kept) when it dies out early, and each step's key names which effect was used
-   (`Activate#<effect>:<code>`), so a line with Galaxy Wizard (Level or search) is followed correctly. The engine
-   probe (singles and pairs) runs on the helpers too, a dozen hands at a time (30 s to 13 s). Lua bytecode was tried and saves too little (24 to 20 ms).
-   Boards are now read for negate type (monster, Spell, Spell/Trap, board, omni: `scopeOf` in interruptions.ts),
-   rank-ups on their turn (Eternal Galaxy into an Extra Deck monster with a negate, `rankUp`), once per turn by name,
-   protection left in place (Cipher X: `protects`, worded from the card text) and Nibiru (`NibiruCheck`: a monster or
-   omni-negate on the field or usable from the hand right after your 5th summon). The search prefers Nibiru-proof full
-   boards (up to 600 more tries). Worked replays are counted by replaying them (`countBoard` in main.tsx); `COUNTING`
-   redoes older counts when the rules change.
-   Removed at the owner's request (not trustworthy): the swap/cut suggestions (they only measured opening a start, so
-   they cut hand traps and engine pieces) and the engine's own "Find a line" (it played lines like Number 90 into Photon
-   Howling). A worked replay is now its start's line (`source: "replay"` in `routes`), checked against hand traps and
-   Nibiru. The search code stays in probe.ts (the computer opponent plans with it).
-2. Done: measured success per start (`results` on the deck, counted when you move on from a test: full, hand trap,
-   short, brick) and a deck size check (`deckSizes` / `withoutCards`: the deck at each size down to 40, cutting
-   Bricks, Other, then Extenders; or your own cuts; judged with starts counting double). Next: suggestions rebuilt on
-   these (locked cards, hand trap targets going 1st and 2nd, trade-offs shown, measured results weighed in).
+## Where things stand (14 Nov 2026)
+Read `docs/DECKBUILDING.md` first: the deckbuilding and combo principles the owner taught (dilution against dead cards,
+roles, clashes, hand trap resilience, which start to lead with). Judge the owner's choices; never just justify them.
+- Optimise has two tabs: Odds (odds, deck size and top cut on one line, "Try changes" to take out or add any card at any
+  size, clashes) and Cards (multiple-choice roles: a card can be a hand trap and a breaker; "2nd only" on hand traps;
+  traits read from card text; nothing card-specific hard-coded).
+- Test is the one place to test: every test faces a dud opponent (40 Marshmallon) holding only the hand traps picked
+  (up to 3, or none), the only ones it uses on your turn. Its Starts section has each start's Test button, its line,
+  its record (split by the hand traps held), which start to lead with, and the cut test (each worked line replayed
+  without a card).
+- "Save as a working line" (duel menu, or Mark as working in Replays) counts the test as a full board and makes it the
+  start's line; the hand trap check (tagged hand traps + common staples) and Nibiru / protection run on it.
+- Removed at the owner's request: suggestions of any kind, the engine's own line finder (its code stays: the computer
+  opponent plans with it), the real-deck opponent, going second in tests.
+- Hand traps: `src/engine/handtraps.ts`, checked against a current TCG tier list and the card database (Magnificent
+  Maestros format). "Kuriboh - Multiply!" isn't in the card database yet.
+- Open: a thin 30x62 Xyz card seen at the end of the Galaxy Wizard line in the replay viewer (not looked into); the owner
+  saw a "bar" flash when activating Photon Orbital (not reproduced in the viewer).
+
+## Next (ask the owner)
 3. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).
 Not wanted: a Side Deck planner, WindBot Ignite. Maybe later: drill mode, custom odds conditions, OCG / Master Duel ban
 lists.
