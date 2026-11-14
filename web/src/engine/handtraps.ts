@@ -7,6 +7,12 @@ export const HAND_TRAPS = [
   58655504, 78661338,
   // Dominus Spark, Dominus Spiral (Traps from the hand), Sauravis, the Ancient and Ascended, Ghost Fairy Elfobia, Token Collector
   6325660, 42091632, 4810828, 44663232, 43534808,
+  // from a TCG hand trap tier list (Magnificent Maestros format): Sneaky "C", Gravekeeper's Watcher, Ally of Justice Cycle
+  // Reader, PSY-Framegear Delta, Chaos Hunter, Herald of Green / Purple / Orange Light, Rescue-ACE Impulse, Veidos the Eruption
+  // Dragon of Extinction, Songs of the Dominators, K9-17 Izuna, Hecahands Godos, Shiina, Twin Tempests of Celestial Thunder,
+  // Fydraulis Harmonia, Griffoh, Angelechy Opening to E4, Synchro Emergency
+  25137581, 26084285, 8233522, 74203495, 97940434, 21074344, 94689635, 17266660, 38339996, 78783557, 58053438, 92248362,
+  68144894, 12197223, 70088809, 97462632, 80565021, 49415281,
 ];
 // "If you control no cards": only useful going second
 export const HAND_TRAPS_SECOND = [42141493, 84192580, 87126721];
