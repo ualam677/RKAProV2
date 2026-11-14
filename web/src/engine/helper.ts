@@ -5,14 +5,15 @@
 import createCore, { type OcgCardData, type OcgCoreSync } from "ocgcore-wasm";
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import { readEffects, readSetConstants, type QuickEffect } from "./interruptions";
-import { play, playAgainst, type Against, type FollowJob, type FollowResult, type Stop } from "./probe";
+import { play, playAgainst, probe, type Against, type FollowJob, type FollowResult, type ProbeOptions, type ProbeResult, type Stop } from "./probe";
 
 export type ToHelper =
   | { type: "init"; cards: [number, OcgCardData][]; names: [number, string][]; scripts: [string, string | null][]; scriptsUrl: string }
   | { type: "scripts"; scripts: [string, string | null][] }
   | { type: "plays"; id: number; hand: number[]; deck: number[]; extra: number[]; against?: Against | Against[]; plans: number[][] }
-  | { type: "follows"; id: number; hand: number[]; deck: number[]; extra: number[]; jobs: FollowJob[] };
-export type FromHelper = { type: "ready" } | { type: "plays"; id: number; stops: Stop[] } | { type: "follows"; id: number; results: FollowResult[] } | { type: "error"; id: number; text: string };
+  | { type: "follows"; id: number; hand: number[]; deck: number[]; extra: number[]; jobs: FollowJob[] }
+  | { type: "probes"; id: number; extra: number[]; probes: { hand: number[]; deck: number[]; options: ProbeOptions }[] };
+export type FromHelper = { type: "ready" } | { type: "plays"; id: number; stops: Stop[] } | { type: "follows"; id: number; results: FollowResult[] } | { type: "probes"; id: number; results: ProbeResult[] } | { type: "error"; id: number; text: string };
 
 let core: OcgCoreSync | null = null;
 const cards = new Map<number, OcgCardData>();
@@ -69,10 +70,11 @@ self.onmessage = async (event: MessageEvent<ToHelper>) => {
     send({ type: "ready" });
   } else if (message.type === "scripts") {
     for (const [name, text] of message.scripts) if (!scripts.has(name)) scripts.set(name, text);
-  } else if (message.type === "plays" || message.type === "follows") {
+  } else if (message.type === "plays" || message.type === "follows" || message.type === "probes") {
     try {
       const env = { core: core!, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: (code: number) => names.get(code) ?? (code ? `#${code}` : ""), effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
-      if (message.type === "plays") send({ type: "plays", id: message.id, stops: message.plans.map((plan) => play(env, message.hand, message.deck, message.extra, plan, message.against)) });
+      if (message.type === "probes") send({ type: "probes", id: message.id, results: message.probes.map((one) => probe(env, one.hand, one.deck, message.extra, one.options)) });
+      else if (message.type === "plays") send({ type: "plays", id: message.id, stops: message.plans.map((plan) => play(env, message.hand, message.deck, message.extra, plan, message.against)) });
       else send({ type: "follows", id: message.id, results: message.jobs.map((job) => playAgainst(env, message.hand, message.deck, message.extra, job.keys, job.trap, job.at, job.fixed)) });
     } catch (error) {
       send({ type: "error", id: message.id, text: error instanceof Error ? error.message : String(error) });

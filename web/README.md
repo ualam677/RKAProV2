@@ -146,8 +146,8 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
    computers) play the route search's and hand trap check's tries side by side; the searches ask for each level's tries
    at once (`batch`: yields `{ need }` / `{ follow }`, answered with `next()`; `drive` in worker.ts). The beam widens
    (10, 40, 160 kept) when it dies out early, and each step's key names which effect was used
-   (`Activate#<effect>:<code>`), so a line with Galaxy Wizard (Level or search) is followed correctly. Still to do: the
-   engine probe (singles and pairs) on the helpers too; Lua bytecode was tried and saves too little (24 to 20 ms).
+   (`Activate#<effect>:<code>`), so a line with Galaxy Wizard (Level or search) is followed correctly. The engine
+   probe (singles and pairs) runs on the helpers too, a dozen hands at a time (30 s to 13 s). Lua bytecode was tried and saves too little (24 to 20 ms).
    Boards are now read for negate type (monster, Spell, Spell/Trap, board, omni: `scopeOf` in interruptions.ts),
    rank-ups on their turn (Eternal Galaxy into an Extra Deck monster with a negate, `rankUp`), once per turn by name,
    protection left in place (Cipher X: `protects`, worded from the card text) and Nibiru (`NibiruCheck`: a monster or

@@ -23,7 +23,7 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import { CHOKE_TRAPS, autoAnswer, chokeCombo, chokePoints, isFollow, isNeed, play, playAgainst, probeDeck, routeSearch } from "./probe";
+import { CHOKE_TRAPS, autoAnswer, chokeCombo, chokePoints, isFollow, isNeed, isProbes, play, playAgainst, probe, probeDeck, routeSearch, type CardEvidence } from "./probe";
 import type { FromHelper, ToHelper } from "./helper";
 import { isHandTrap } from "./handtraps";
 import { interruptionsOf, nibiruStopper, readEffects, readSetConstants, type NibiruCheck, type Protection, type QuickEffect } from "./interruptions";
@@ -1248,24 +1248,19 @@ async function runProbe(id: number, main: number[], extra: number[]) {
   const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
   await prefetchScripts([...mainCodes, ...extraCodes]);
   const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf };
-  const steps = probeDeck(env, mainCodes, extraCodes);
   let last = 0;
-  for (;;) {
-    if (probeJob !== id) return;
-    const next = steps.next();
-    if (next.done) return;
-    if (!next.value) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      continue;
-    }
-    const { done, total, evidence } = next.value;
-    if (done >= total) return send({ type: "probe", id, done, total, evidence: [...evidence.values()] });
-    if (performance.now() - last > 200) {
-      send({ type: "probe", id, done, total });
+  let finished: { done: number; total: number; evidence: Map<number, CardEvidence> } | null = null;
+  await drive(probeDeck(env, mainCodes, extraCodes, true), env, [], [], extraCodes, () => probeJob === id, (value) => {
+    if (!value || typeof value !== "object" || !("evidence" in value)) return;
+    const progress = value as { done: number; total: number; evidence: Map<number, CardEvidence> };
+    if (progress.done >= progress.total) finished = progress;
+    else if (performance.now() - last > 200) {
+      send({ type: "probe", id, done: progress.done, total: progress.total });
       last = performance.now();
     }
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
+  });
+  const result = finished as { done: number; total: number; evidence: Map<number, CardEvidence> } | null;
+  if (result && probeJob === id) send({ type: "probe", id, done: result.done, total: result.total, evidence: [...result.evidence.values()] });
 }
 
 // ---------------------------------------------------------------------------
@@ -1355,6 +1350,8 @@ async function drive<R>(steps: Generator<unknown, R, unknown>, env: Env, hand: n
     const value = next.value;
     if (isNeed(value)) {
       answer = await spread(value.need, (plan) => play(env, hand, deck, extra, plan, value.against), (id, plans) => ({ type: "plays", id, hand, deck, extra, against: value.against, plans }), (one) => (one.type === "plays" ? one.stops : undefined));
+    } else if (isProbes(value)) {
+      answer = await spread(value.probes, (one) => probe(env, one.hand, one.deck, extra, one.options), (id, probes) => ({ type: "probes", id, extra, probes }), (one) => (one.type === "probes" ? one.results : undefined));
     } else if (isFollow(value)) {
       answer = await spread(value.follow, (job) => playAgainst(env, hand, deck, extra, job.keys, job.trap, job.at, job.fixed), (id, jobs) => ({ type: "follows", id, hand, deck, extra, jobs }), (one) => (one.type === "follows" ? one.results : undefined));
     } else {

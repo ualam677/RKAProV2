@@ -505,7 +505,7 @@ export function probe(env: ProbeEnv, hand: number[], deck: number[], extra: numb
   }
 }
 
-interface ProbeOptions {
+export interface ProbeOptions {
   budget?: number;
   depth?: number;
   untilDeck?: boolean;
@@ -560,7 +560,14 @@ export const starts = (result: ProbeResult) => result.deck > 0;
  * caller can keep answering other requests and stop when the deck changes.
  */
 // yields undefined after every duel (a pause point) and the progress after every hand
-export function* probeDeck(env: ProbeEnv, main: number[], extra: number[]): Generator<{ done: number; total: number; evidence: Map<number, CardEvidence> } | undefined> {
+/** Hands for the caller to probe elsewhere (probe() on each), answered in the same order. */
+export interface Probes {
+  probes: { hand: number[]; deck: number[]; options: ProbeOptions }[];
+}
+export const isProbes = (value: unknown): value is Probes => !!value && typeof value === "object" && "probes" in value;
+
+// With `batch`, hands are asked for a dozen at a time (to be probed side by side) instead of probed here one by one
+export function* probeDeck(env: ProbeEnv, main: number[], extra: number[], batch = false): Generator<{ done: number; total: number; evidence: Map<number, CardEvidence> } | Probes | undefined, void, unknown> {
   const distinct = [...new Set(main)];
   const copies = (code: number) => main.filter((one) => one === code).length;
   const rest = (hand: number[]) => {
@@ -573,8 +580,25 @@ export function* probeDeck(env: ProbeEnv, main: number[], extra: number[]): Gene
   let done = 0;
   // pairs are only known once the singles are: estimate them as if every card failed alone
   let total = distinct.length + (distinct.length * (distinct.length + 1)) / 2;
-  for (const code of distinct) {
-    const alone = yield* probeSteps(env, [code], rest([code]), extra, { budget: 150, depth: 6 });
+  // each hand probed: here, or a dozen at a time by the caller
+  const results = new Map<string, ProbeResult>();
+  const probed = function* (hands: number[][], options: ProbeOptions, at: number): Generator<Probes | undefined, ProbeResult, unknown> {
+    const hand = hands[at];
+    const key = hand.join(",");
+    if (!results.has(key)) {
+      if (!batch) results.set(key, yield* probeSteps(env, hand, rest(hand), extra, options));
+      else {
+        const group = hands.slice(at, at + 12);
+        const answer = (yield { probes: group.map((one) => ({ hand: one, deck: rest(one), options })) }) as ProbeResult[] | undefined;
+        if (!answer || answer.length !== group.length) throw new Error("The engine check was not given its hands");
+        group.forEach((one, index) => results.set(one.join(","), answer[index]));
+      }
+    }
+    return results.get(key)!;
+  };
+  const singles = distinct.map((code) => [code]);
+  for (const [at, code] of distinct.entries()) {
+    const alone = yield* probed(singles, { budget: 150, depth: 6 }, at);
     evidence.set(code, { code, alone, partners: [], checked: 0 });
     if (!starts(alone)) lone.push(code);
     done++;
@@ -583,8 +607,8 @@ export function* probeDeck(env: ProbeEnv, main: number[], extra: number[]): Gene
   const pairs: [number, number][] = [];
   lone.forEach((a, i) => lone.slice(i).forEach((b) => (a !== b || copies(a) > 1) && pairs.push([a, b])));
   total = done + pairs.length;
-  for (const [a, b] of pairs) {
-    const result = yield* probeSteps(env, [a, b], rest([a, b]), extra, { budget: 60, depth: 6, untilDeck: true });
+  for (const [at, [a, b]] of pairs.entries()) {
+    const result = yield* probed(pairs, { budget: 60, depth: 6, untilDeck: true }, at);
     evidence.get(a)!.checked++;
     if (a !== b) evidence.get(b)!.checked++;
     if (starts(result)) {
@@ -600,6 +624,8 @@ export function* probeDeck(env: ProbeEnv, main: number[], extra: number[]): Gene
     done++;
     yield { done, total, evidence };
   }
+  // every card started alone: nothing to pair, and the check is done
+  if (!pairs.length) yield { done, total: done, evidence };
 }
 
 // ---------------------------------------------------------------------------
