@@ -242,6 +242,10 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 /* the zone of a monster just summoned: the card drops in with a ring of light */
 .zone.cue-summon .tile { animation: summon-drop 300ms cubic-bezier(0.2, 0.8, 0.3, 1.2); }
 .zone.cue-summon .tile.sideways { animation-name: summon-drop-side; }
+/* the stats strip, Level/Rank badge and Xyz Materials arrive as the card lands, not before it */
+.zone.cue-summon .zone-level, .zone.cue-summon .zone-stats, .zone.cue-summon .zone-counters { animation: land-in 160ms ease-out 200ms backwards; }
+.zone.cue-summon .overlay-unit { animation-delay: calc(220ms + var(--at) * 50ms); }
+@keyframes land-in { from { opacity: 0; } }
 .zone.cue-summon::after { content: ""; position: absolute; inset: -4px; border-radius: 8px; border: 2px solid #9cc8ff; box-shadow: 0 0 18px var(--accent-strong); pointer-events: none; animation: summon-ring 320ms ease-out forwards; }
 @keyframes summon-drop { from { transform: scale(1.6); opacity: 0; filter: brightness(2.5); } }
 @keyframes summon-drop-side { from { transform: rotate(90deg) scale(1.6); opacity: 0; filter: brightness(2.5); } }

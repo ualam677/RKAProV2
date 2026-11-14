@@ -46,7 +46,7 @@ const CUE_MS: Record<DuelEvent["kind"], number> = {
 export const cueTime = (events: DuelEvent[]) => events.reduce((longest, event) => Math.max(longest, CUE_MS[event.kind]), 0);
 
 type Pile = "grave" | "banished" | "extra" | "hand";
-type Sheet = { kind: "card"; card: CardView } | { kind: "pile"; controller: number; pile: Pile } | null;
+type Sheet = { kind: "card"; card: CardView } | { kind: "pile"; controller: number; pile: Pile } | { kind: "materials"; card: CardView } | null;
 // the card whose actions float over it, with where it sits on screen
 type Focus = { card: CardView; rect: DOMRect } | null;
 
@@ -406,6 +406,18 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   };
 
   const materialNames = (card: CardView) => card.overlay.map((code) => texts.get(code)?.name ?? "…");
+  // an Xyz Monster's materials, as cards of their own (face-up, nothing attached)
+  const openMaterials = (card: CardView) => {
+    card.overlay.forEach(requestText);
+    setFocus(null);
+    setSheet({ kind: "materials", card });
+  };
+  const materialsButton = (card: CardView, className: string) =>
+    card.overlay.length > 0 && (
+      <button className={className} onClick={(event) => (event.stopPropagation(), openMaterials(card))}>
+        Xyz Materials ({card.overlay.length})
+      </button>
+    );
   const inspect = (card: CardView) => {
     if (card.code) requestText(card.code);
     card.overlay.forEach(requestText);
@@ -744,6 +756,24 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
           <CardInfo card={sheet.card} text={texts.get(sheet.card.code)} materials={materialNames(sheet.card)}>
             {actions.length > 0 && <div className="actions">{actions.map(({ choice, index }) => pickButton(choice, index))}</div>}
           </CardInfo>
+          {materialsButton(sheet.card, "button")}
+          <button className="button ghost" onClick={() => setSheet(null)}>
+            Close
+          </button>
+        </>
+      );
+    }
+    if (sheet?.kind === "materials") {
+      const owner = sheet.card;
+      return (
+        <>
+          <h2>Xyz Materials: {texts.get(owner.code)?.name ?? "this card"}</h2>
+          <div className="card-grid">
+            {owner.overlay.map((code, index) => {
+              const material: CardView = { ...owner, code, name: texts.get(code)?.name ?? "", type: 0, overlay: [], materials: 0, counters: [], position: 1 };
+              return <CardTile key={index} card={material} className="grid-card" onTap={() => showDetail(material)} onHold={() => showDetail(material)} onHover={wide ? () => inspect(material) : undefined} />;
+            })}
+          </div>
           <button className="button ghost" onClick={() => setSheet(null)}>
             Close
           </button>
@@ -1030,6 +1060,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
               const twin = focusActions.some((other) => other.index !== index && other.choice.label === choice.label);
               return pickButton(twin && choice.card ? { ...choice, label: `${choice.label}: ${choice.card.name}` } : choice, index, "float-action");
             })}
+            {materialsButton(focus.card, "float-action info")}
             {!wide && (
               <button className="float-action info" onClick={(event) => (event.stopPropagation(), showDetail(focus.card))}>
                 Card text
