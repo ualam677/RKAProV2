@@ -211,7 +211,13 @@ export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, o
   }, [main]);
   const takenBy = useMemo(() => {
     const map = new Map<number, number[]>();
-    for (const entry of evidence.values()) if (entry.alone.deck > 0) for (const code of new Set(entry.alone.taken)) map.set(code, [...(map.get(code) ?? []), entry.code]);
+    // credited to the card whose effect took it (Afterglow takes Galaxy-Eyes Photon Dragon in a Schwarzschild line), not to the
+    // line's start; evidence from before this was recorded credits no one until the deck is checked again
+    for (const entry of evidence.values())
+      entry.alone.taken.forEach((code, at) => {
+        const by = entry.alone.takers?.[at];
+        if (by && by !== code && !(map.get(code) ?? []).includes(by)) map.set(code, [...(map.get(code) ?? []), by]);
+      });
     return map;
   }, [evidence]);
   const hasStart = count("starter", "pair") > 0;
@@ -445,7 +451,6 @@ export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, o
               <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
               <Clashes main={main} nameOf={nameOf} traits={traits} />
               <TwoStarts routes={routes} nameOf={nameOf} />
-              <Suggestions main={main} nameOf={nameOf} traits={traits} takenBy={takenBy} results={deck.results ?? []} room={room} />
               {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
               {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
                 <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
@@ -469,7 +474,6 @@ export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, o
                     {nameOf(card.code)} <span className="muted">×{card.count}</span>
                     {card.tag.guessed && <span className="opt-guess">guess</span>}
                     {card.tag.engine && <span className="opt-guess engine">engine</span>}
-                    {takenBy.has(card.code) && <span className="opt-trait">pulled from the Deck by {takenBy.get(card.code)!.map(nameOf).join(", ")}</span>}
                     {(traits.get(card.code) ?? []).map((trait) => (
                       <span key={trait} className="opt-trait">
                         {trait}
@@ -786,7 +790,9 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
   // a one-of that's only ever pulled from the Deck: keep it only if it gives a line or a way through a hand trap that
   // nothing else gives
   const singleDuty = pieceCards.filter((card) => card.count === 1);
-  const { rows: auto, nonEngine, total } = useMemo(() => deckSizes(main), [main]);
+  const { rows: all, nonEngine, total } = useMemo(() => deckSizes(main), [main]);
+  // only your deck as it is: the size check makes no cuts of its own (you pick yours below)
+  const auto = all.slice(0, 1);
   // your own choice of what goes: tap the cards you'd take out to reach 40
   const [out, setOut] = useState<number[]>([]);
   const mine = out.length ? withoutCards(main, out) : null;
@@ -805,22 +811,10 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
     codes.forEach((code) => tally.set(code, (tally.get(code) ?? 0) + 1));
     return [...tally].map(([code, n]) => `${n > 1 ? `${n}× ` : ""}${nameOf(code)}`).join(", ");
   };
-  let verdict: string;
-  if (total === 40)
-    verdict = plus
-      ? `40 cards. A 41st card (another ${nameOf(plus.added![0])}) would change opening a combo by ${delta(plus.combo1, now.combo1)} and seeing 2 hand traps going 2nd by ${delta(plus.traps2, now.traps2)}: worth it only if that hand trap matters more to you than the starts.`
-      : "40 cards: the most consistent size for what's in it.";
-  else if (!forty)
-    verdict = `${total} cards, and nothing to cut without touching a starter, hand trap, breaker or combo piece: tag a card as Brick, Other or Extender if it could go. Each card above 40 is a deliberate trade.`;
-  else {
-    const gain = forty.combo1 - now.combo1;
-    const loss = now.traps2 - forty.traps2;
-    verdict =
-      gain < 0.005 && loss < 0.005
-        ? `Going to 40 (cutting ${names(forty.cut)}) changes almost nothing: ${total} is fine.`
-        : `Cutting ${names(forty.cut)} to reach 40: opening a combo ${delta(forty.combo1, now.combo1)}, combo + hand trap ${delta(forty.comboTrap1, now.comboTrap1)}, 2 hand traps going 2nd ${delta(forty.traps2, now.traps2)}.` +
-          ` ${judge(forty, "40")}` + (forty.extenders ? " It cuts Extenders, which play through negates: the odds don't show that, so weigh it yourself." : "");
-  }
+  const verdict =
+    total === 40
+      ? "40 cards: your best draws come up as often as they can."
+      : `${total} cards: each card above 40 dilutes your best draws. Tap the cards you'd take out below to see what reaching 40 would cost and gain.`;
   return (
     <div className="opt-size">
       <p className="opt-note">
@@ -894,8 +888,8 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
             {engine - startCount - pieceCount} other).
             {total > 40 && engine > theirEngine + 1.5
               ? pieceCount >= engine - theirEngine
-                ? ` Your extra engine is mostly pieces your starts pull from the Deck. They don't make hands worse the way extra starters would, but they still dilute: each one-of${singleDuty.length ? ` (${singleDuty.map((card) => nameOf(card.code)).join(", ")})` : ""} should give a line, or a way through a hand trap, that nothing else in the deck gives. The ones that don't are your cuts.`
-                : ` Your cards above 40 went to engine, not non-engine: the opposite of what they do. Either cut engine to 40, or turn those slots into hand traps.`
+                ? " Your extra engine is mostly pieces your starts pull from the Deck, where theirs went to non-engine."
+                : " Your cards above 40 went to engine, where theirs went to non-engine."
               : nonEngine < theirs - 2
                 ? " You run fewer non-engine than they do at this size."
                 : " In line with them."}
@@ -1004,89 +998,3 @@ function TwoStarts({ routes, nameOf }: { routes: Record<string, SavedRoute>; nam
   );
 }
 
-// Suggestions, built on the deckbuilding principles (docs/DECKBUILDING.md), for any deck. Only principled candidates: a
-// one-of only ever pulled from the Deck (must earn its slot), Normal Summon starts over the limit, the third copy of a
-// once-per-turn start, Bricks and Other cards; each cut alone and swapped for another copy of a hand trap you run fewer
-// than three of. Every change shows its trade-off going first and second; nothing is applied for you.
-function Suggestions({ main, nameOf, traits, takenBy, results, room }: { main: DeckCard[]; nameOf: (code: number) => string; traits: Map<number, string[]>; takenBy: Map<number, number[]>; results: TestResult[]; room: (code: number) => number }) {
-  const rows = useMemo(() => {
-    const total = main.reduce((sum, card) => sum + card.count, 0);
-    const isStart = (card: DeckCard) => card.tag.role === "starter" || card.tag.role === "pair";
-    const trait = (code: number, name: string) => (traits.get(code) ?? []).some((one) => one.startsWith(name));
-    const normals = main.filter((card) => isStart(card) && card.tag.normal);
-    const normalCount = normals.reduce((sum, card) => sum + card.count, 0);
-    const candidates: { code: number; why: string }[] = [];
-    for (const card of main) {
-      if (!isStart(card) && card.count === 1 && (takenBy.has(card.code) || card.tag.role === "piece")) candidates.push({ code: card.code, why: takenBy.has(card.code) ? `one-of, pulled by ${takenBy.get(card.code)!.map(nameOf).join(", ")}` : "one-of kept in the Deck" });
-      else if (card.tag.role === "brick" || card.tag.role === "other") candidates.push({ code: card.code, why: card.tag.role === "brick" ? "Brick" : "Other" });
-      else if (isStart(card) && card.count === 3 && trait(card.code, "once per turn by name")) candidates.push({ code: card.code, why: "3rd copy, once per turn" });
-    }
-    if (normalCount > normalLimit(total)) for (const card of normals) candidates.push({ code: card.code, why: `too many Normal Summon starts (${normalCount})` });
-    const traps = main.filter((card) => card.tag.role === "handtrap" && room(card.code) > 0);
-    const now = changed(main, -1);
-    // starts count double (every game), a hand trap kept going first and two going second once each
-    const worth = (row: SizeRow) => (row.combo1 - now.combo1) * 2 + (row.comboTrap1 - now.comboTrap1) + (row.traps2 - now.traps2);
-    const out: { label: string; why: string; row: SizeRow; worth: number }[] = [];
-    for (const { code, why } of candidates) {
-      const cut = changed(main, code);
-      out.push({ label: `−1 ${nameOf(code)}`, why, row: cut, worth: worth(cut) });
-      for (const trap of traps) {
-        const swap = changed(main, code, trap.code);
-        out.push({ label: `−1 ${nameOf(code)}, +1 ${nameOf(trap.code)}`, why, row: swap, worth: worth(swap) });
-      }
-    }
-    // one row per card: its best version (cut, or the best swap)
-    const best = new Map<string, (typeof out)[number]>();
-    for (const one of out) {
-      const key = one.label.split(",")[0];
-      if (!best.has(key) || best.get(key)!.worth < one.worth) best.set(key, one);
-    }
-    return { now, list: [...best.values()].sort((a, b) => b.worth - a.worth).slice(0, 4) };
-  }, [main, traits, takenBy]);
-  const delta = (after: number, before: number) => `${after >= before ? "+" : ""}${((after - before) * 100).toFixed(1)}%`;
-  // a start your tests show failing often is worth knowing about whatever the odds say
-  const measured = main
-    .filter((card) => card.tag.role === "starter" || card.tag.role === "pair")
-    .flatMap((card) => {
-      const mine = results.filter((one) => one.start === card.code);
-      const full = mine.filter((one) => one.kind === "full").length;
-      return mine.length >= 5 && full / mine.length < 0.6 ? [`${nameOf(card.code)} reached a full board in only ${full} of ${mine.length} of your tests`] : [];
-    });
-  if (!rows.list.length && !measured.length) return null;
-  return (
-    <div className="opt-note">
-      <b>Suggestions</b> <span className="muted">(nothing is applied: your call)</span>
-      {rows.list.length > 0 && (
-        <table className="opt-size-table">
-          <thead>
-            <tr>
-              <th>Change</th>
-              <th>Combo 1st</th>
-              <th>+ trap</th>
-              <th>2 traps 2nd</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.list.map((one) => (
-              <tr key={one.label} title={one.why}>
-                <td>
-                  {one.label}
-                  <br />
-                  <small className="muted">{one.why}</small>
-                </td>
-                <td>{delta(one.row.combo1, rows.now.combo1)}</td>
-                <td>{delta(one.row.comboTrap1, rows.now.comboTrap1)}</td>
-                <td>{delta(one.row.traps2, rows.now.traps2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <ul className="opt-clashes">
-        {measured.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}

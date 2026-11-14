@@ -42,6 +42,8 @@ export interface ProbeResult {
   steps: string[];
   // cards taken from the Deck on the way there, and the card whose effect took the first one
   taken: number[];
+  // for each card taken, the card whose effect took it (0: none)
+  takers?: number[];
   firstTaker: number | null;
   // branches tried, and whether the budget ran out before the search space did
   tried: number;
@@ -52,6 +54,8 @@ interface Measure {
   deck: number;
   extra: number;
   taken: number[];
+  // for each card taken, the card whose effect took it (the one resolving), 0 if none (a summon by its own rule)
+  takers?: number[];
   firstTaker: number | null;
 }
 
@@ -119,6 +123,7 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
     const extra0 = extra.length;
     const extraCodes = new Set(extra);
     const taken: number[] = [];
+    const takers: number[] = [];
     let firstTaker: number | null = null;
     const chain: number[] = [];
     let solving: number | null = null;
@@ -148,7 +153,7 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
         if (at >= 0) left.splice(at, 1);
         else if (!extraCodes.has(code)) gained++;
       }
-      return { deck: gained, extra: extra0 - core.duelQueryCount(duel, 0, OcgLocation.EXTRA), taken: [...taken], firstTaker };
+      return { deck: gained, extra: extra0 - core.duelQueryCount(duel, 0, OcgLocation.EXTRA), taken: [...taken], takers: [...takers], firstTaker };
     };
     const stateKey = () => {
       const codes = (location: OcgLocation) =>
@@ -206,6 +211,7 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
           case OcgMessageType.MOVE:
             if (message.from.location === OcgLocation.DECK && message.from.controller === 0 && message.to.location !== OcgLocation.DECK && started && message.card) {
               taken.push(message.card);
+              takers.push(solving ?? 0);
               if (firstTaker === null) firstTaker = solving ?? message.card;
             }
             break;

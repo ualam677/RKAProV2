@@ -75,7 +75,7 @@ console.log(`one branch: ${(performance.now() - t0).toFixed(0)} ms\n`);
 for (const code of distinct) {
   const t = performance.now();
   const r = probe(env, [code], rest([code]), extra, { budget: 150, depth: 6 });
-  console.log(`${names.get(code).padEnd(34)} deck ${r.deck} extra ${r.extra}  (${r.tried} tried${r.exhausted ? ", all" : ""}, ${(performance.now() - t).toFixed(0)} ms)  ${r.steps.join(" > ")}${r.taken.length ? `  | took ${r.taken.map((c) => names.get(c)).join(", ")}` : ""}`);
+  console.log(`${names.get(code).padEnd(34)} deck ${r.deck} extra ${r.extra}  (${r.tried} tried${r.exhausted ? ", all" : ""}, ${(performance.now() - t).toFixed(0)} ms)  ${r.steps.join(" > ")}${r.taken.length ? `  | took ${r.taken.map((c, i) => `${names.get(c)} (by ${names.get(r.takers?.[i]) ?? "its own rule"})`).join(", ")}` : ""}`);
 }
 
 if (process.env.PAIRS) {
