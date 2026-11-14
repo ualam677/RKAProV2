@@ -272,6 +272,26 @@ function App() {
       } else if (message.type === "interruptions") {
         // a working test's board, counted: kept with the test
         setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list, protection: message.protection, nibiru: message.nibiru, counted: COUNTING } : test)) } : one)));
+        // a worked replay is its start's line in Optimise: checked against each hand trap and Nibiru
+        window.setTimeout(() => {
+          const owner = decksRef.current.find((one) => one.tests?.some((test) => test.id === message.id));
+          const test = owner?.tests?.find((one) => one.id === message.id);
+          if (!owner || !test?.worked) return;
+          const starter = (code: number) => ["starter", "pair"].includes(owner.tags?.[code]?.role ?? "") || !!owner.engine?.evidence.some((entry) => entry.code === code && entry.alone.deck > 0);
+          const start = test.testOf ?? test.startHand.find(starter) ?? test.startHand[0];
+          if (start === undefined) return;
+          const before = owner.routes?.[start];
+          // the start keeps its best worked line
+          if (before?.source === "replay" && before.testId !== test.id && (before.interruptions?.length ?? 0) > message.list.length) return;
+          const keys = test.steps.flatMap((step) => (!step.code ? [] : step.idle ? [`${step.text.split(/[ :]/)[0]}:${step.code}`] : [`pick:${step.hint ?? 0}:${step.code}`]));
+          const line = {
+            keys, board: test.board ?? [], interruptions: message.list, protection: message.protection, nibiru: message.nibiru, coverage: 1, full: message.list.length >= (owner.fullAt ?? 3),
+            aimed: true, tried: 0, date: Date.now(), signature: deckSignature(owner), record: { options: test.options, picks: test.picks, steps: test.steps, startHand: test.startHand }, source: "replay" as const, testId: test.id,
+          };
+          const updated = { ...owner, routes: { ...owner.routes, [start]: line } };
+          setDecks((all) => all.map((one) => (one.id === owner.id ? updated : one)));
+          if (!chokingRef.current) checkChokes(updated, [{ code: start, hand: test.startHand }]);
+        }, 50);
       } else if (message.type === "choke") {
         const job = chokingRef.current;
         if (!job || job.id !== message.id || !message.done) return;
@@ -618,6 +638,23 @@ function App() {
   type Frame = { index: number; label: string; picks: number };
   // fast: playing straight through, nothing described until paused; mini: the bar folded down to one line
   const [viewing, setViewing] = useState<{ test: SavedTest; views: DuelView[]; frames: Frame[]; at: number; back: boolean; playing: boolean; fast?: boolean; mini?: boolean } | null>(null);
+  // the phone's back button steps back through the app (replay, duel, editor, a section) and only leaves it from the menu
+  const goBack = useRef<() => boolean>(() => false);
+  goBack.current = () => {
+    if (viewing) return setViewing(null), true;
+    if (view) return skip(), setReplay(null), setView(null), true;
+    if (editing) return setEditing(false), true;
+    if (screen !== "menu") return setScreen("menu"), true;
+    return false;
+  };
+  useEffect(() => {
+    history.pushState({ rka: true }, "");
+    const onBack = () => {
+      if (goBack.current()) history.pushState({ rka: true }, "");
+    };
+    window.addEventListener("popstate", onBack);
+    return () => window.removeEventListener("popstate", onBack);
+  }, []);
   // what matters on the opponent's turn, from a view: field (with Xyz Materials), hand, GY
   const piecesOf = (shown: DuelView) => {
     const mine = shown.players[0];
@@ -654,7 +691,8 @@ function App() {
     const target = decks.find((one) => one.tests?.some((test) => test.id === saved.id)) ?? deck;
     if (!target) return;
     if (saved.worked) {
-      changeDeck({ ...target, tests: (target.tests ?? []).map((test) => (test.id === saved.id ? { ...test, worked: false, board: undefined, pieces: undefined, interruptions: undefined } : test)) });
+      const routes = Object.fromEntries(Object.entries(target.routes ?? {}).filter(([, route]) => route.testId !== saved.id));
+      changeDeck({ ...target, routes, tests: (target.tests ?? []).map((test) => (test.id === saved.id ? { ...test, worked: false, board: undefined, pieces: undefined, interruptions: undefined } : test)) });
       return;
     }
     const counted = await countBoard(saved, views);

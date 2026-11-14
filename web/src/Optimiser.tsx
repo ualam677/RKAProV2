@@ -1,5 +1,5 @@
 // The Deck Optimiser panel inside the deck editor: tag what each Main Deck card is for, read the exact odds for both
-// turns, and apply the swaps it finds with one tap (and undo them just as fast).
+// turns, and check your worked lines against hand traps.
 import { useEffect, useMemo, useState } from "react";
 import { describeInterruption, describeNibiru, describeProtection } from "./interruptText";
 import { CardArt } from "./CardArt";
@@ -120,7 +120,8 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const proven = useMemo(() => computeOdds(provenOnly(main), second ? 6 : 5), [main, second]);
   const startCardsAll = main.filter((card) => card.tag.role === "starter" || card.tag.role === "pair");
   // the lines the route search found, for the deck as it is now
-  const routes = deck.routes ?? {};
+  // the lines checked against hand traps: your worked replays only (the engine's own searches are no longer shown)
+  const routes = Object.fromEntries(Object.entries(deck.routes ?? {}).filter(([, route]) => route.source === "replay"));
   const routeOf = (code: number) => (routes[code]?.signature === signature ? routes[code] : undefined);
   const fullBoards = (deck.tests ?? []).filter((one) => one.worked && one.board?.length).length;
   // a full board: at least this many interruptions on the opponent's turn
@@ -207,19 +208,6 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   }, [evidence]);
   const hasStart = count("starter", "pair") > 0;
 
-  // swaps take a moment on big decks: show the odds first, work these out right after
-  useEffect(() => {
-    setSuggestions(null);
-    if (!hasStart || !main.length) return;
-    const wait = window.setTimeout(() => {
-      const candidates = [...main, ...side.filter((card) => !main.some((own) => own.code === card.code))];
-      setSuggestions({
-        swaps: bestSwaps(main, candidates, goal, room, sideKeys),
-        cut: total > 40 ? bestCuts(main, goal) : null,
-      });
-    }, 30);
-    return () => window.clearTimeout(wait);
-  }, [main, side, goal]);
 
   const setTag = (key: number, tag: Tag) => {
     const clean: Tag = tag.role === "pair" ? { role: "pair", with: tag.with ?? { codes: [], attributes: 0, levels: [] } } : { role: tag.role };
@@ -381,9 +369,6 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
           )}
           {startCards.length > 0 && (
             <div className="opt-find">
-              <button className="button small" onClick={findAll} disabled={!!routing}>
-                {routing ? `Finding lines… ${routing.waiting.length + 1} start${routing.waiting.length ? "s" : ""} to go` : "Find a line for every start"}
-              </button>
               <span className="opt-fullat">
                 Full board: at least
                 <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.max(1, fullAt - 1), updated: Date.now() })} aria-label="Fewer">
@@ -429,68 +414,14 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
 
       {main.length > 0 && (
         <section className="opt-section">
-          <h3>Suggestions</h3>
+          <h3>Deck checks</h3>
           {!hasStart ? (
             <p className="opt-note">Tag your starters first: pick "Starter" next to each card below that starts your combo by itself. Everything else is worked out from that.</p>
           ) : (
             <>
-              <p className="muted">Improve the chance to:</p>
-              <div className="segmented three opt-goals">
-                {GOALS.map((entry) => (
-                  <button
-                    key={entry.goal}
-                    className={`button small ${goal === entry.goal ? "on" : ""}`}
-                    onClick={() => (setGoal(entry.goal), localStorage.setItem("rka.goal", entry.goal))}
-                  >
-                    {entry.name}
-                  </button>
-                ))}
-              </div>
-              {undo && (
-                <div className="opt-card done">
-                  <span>{undo.what}.</span>
-                  <button className="button small" onClick={() => (onChange({ ...undo.deck, updated: Date.now() }), setUndo(null))}>
-                    Undo
-                  </button>
-                </div>
-              )}
-              {!suggestions && <p className="muted">Working out swaps…</p>}
-              {suggestions?.cut && suggestions.cut.cuts.length > 0 && (
-                <div className="opt-card">
-                  <div>
-                    <b>Cut to 40: take out {grouped(suggestions.cut.cuts)}</b>
-                    <span className="muted">{GOALS.find((entry) => entry.goal === goal)!.name}: </span>
-                    {change(suggestions.cut.before, suggestions.cut.after)}
-                  </div>
-                  <button className="button small primary" onClick={() => applyCuts(suggestions.cut!.cuts)}>
-                    Apply
-                  </button>
-                </div>
-              )}
-              {suggestions?.swaps.map((swap) => (
-                <div className="opt-card" key={`${swap.cut}-${swap.add}`}>
-                  <div>
-                    <b>
-                      −1 {nameOf(swap.cut)}, +1 {nameOf(swap.add)}
-                      {swap.fromSide && <small> (from Side)</small>}
-                    </b>
-                    <span className="muted">{GOALS.find((entry) => entry.goal === goal)!.name}: </span>
-                    {change(swap.before, swap.after)}
-                    {Math.abs(swap.after.first.combo - swap.before.first.combo) >= 0.001 && (
-                      <span className="opt-change">
-                        Open a combo going 1st: {pct(swap.before.first.combo)} → {pct(swap.after.first.combo)}
-                      </span>
-                    )}
-                  </div>
-                  <button className="button small primary" onClick={() => applySwap(swap)}>
-                    Apply
-                  </button>
-                </div>
-              ))}
-              {suggestions && !suggestions.swaps.length && !suggestions.cut?.cuts.length && <p className="opt-note">No single swap improves {goalName}. The ratios are solid for this goal.</p>}
               {untagged > 0 && (
                 <div className="opt-note">
-                  {untagged} card{untagged === 1 ? " is" : "s are"} not tagged. They count as never starting a combo and are never suggested as cuts (Extenders aren't either).{" "}
+                  {untagged} card{untagged === 1 ? " is" : "s are"} not tagged. They count as never starting a combo.{" "}
                   <button className="button small" onClick={tagRest}>
                     Tag the rest as Other
                   </button>
@@ -560,9 +491,6 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                       >
                         Test
                       </button>
-                      <button className="button small" disabled={!!routing || !handFor(card)} onClick={() => { const hand = handFor(card); if (hand) onFindLines([{ code: card.code, hand }]); }}>
-                        Find a line
-                      </button>
                       <button
                         className={`button small ${card.tag.proven ? "on" : "ghost"}`}
                         disabled={card.tag.provenByTest}
@@ -608,8 +536,8 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
             </ul>
             <p>
               Normal Summon: a start whose line uses the turn's Normal Summon (the engine marks the ones whose line opens with one). Holding two, one is
-              dead, so it counts as a dead card, and swaps never take you past 5 in 40 cards (one per 8). Extenders and Combo pieces are never suggested
-              as cuts: what they do (play through a negate, be there to search) isn't in these numbers yet. Engine-checked: the duel engine (EDOPro's own card scripts) played every card in the Main Deck alone, then every pair of cards that start nothing alone,
+              dead, so it counts as a dead card. More than 5 in 40 cards (one per 8) is flagged. Lines: mark a test as working in Replays and it becomes
+              that start's line here, checked against each hand trap and Nibiru. Engine-checked: the duel engine (EDOPro's own card scripts) played every card in the Main Deck alone, then every pair of cards that start nothing alone,
               trying the actions it allows a few steps deep. A start counts when the hand ends up keeping a new card from the Deck, so a search that has to put a card
               back doesn't count. It finds partners by itself: what the engine lets a card do with each other card in the hand. It says whether a hand gets going,
               not whether it reaches your full board; that's what Proven is for. Every possible opening hand is counted with its exact chance, no sampling. A combo opens with a Starter, or a Starter with a partner plus one of its partners. A hand trap used as the
@@ -644,7 +572,7 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
   const stops = route.interruptions ?? [];
   return (
     <span className={`opt-engine route ${full ? "full" : ""}`}>
-      Engine line ({route.tried} tried): ends on {board}. {full ? "✓ " : ""}
+      Your line: ends on {board}. {full ? "✓ " : ""}
       {stops.length
         ? `${stops.length} interruption${stops.length > 1 ? "s" : ""}: ${stops.map((one) => describeInterruption(one, nameOf)).join(", ")}`
         : "No interruptions"}

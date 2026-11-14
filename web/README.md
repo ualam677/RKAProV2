@@ -154,6 +154,10 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
    omni-negate on the field or usable from the hand right after your 5th summon). The search prefers Nibiru-proof full
    boards (up to 600 more tries). Worked replays are counted by replaying them (`countBoard` in main.tsx); `COUNTING`
    redoes older counts when the rules change.
+   Removed at the owner's request (not trustworthy): the swap/cut suggestions (they only measured opening a start, so
+   they cut hand traps and engine pieces) and the engine's own "Find a line" (it played lines like Number 90 into Photon
+   Howling). A worked replay is now its start's line (`source: "replay"` in `routes`), checked against hand traps and
+   Nibiru. The search code stays in probe.ts (the computer opponent plans with it).
 2. Measured success per start, with why it failed: from saved tests, how often each start reached a full board, and
    for the misses, what stopped it (bricked hand, a hand trap, a step missing). Feeds the optimiser's odds.
 3. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).

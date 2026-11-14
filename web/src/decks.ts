@@ -81,6 +81,10 @@ export interface SavedRoute {
   date: number;
   signature: string;
   record: TestRecord;
+  // "replay": the line is one of your worked replays (the only kind shown); otherwise an old engine search
+  source?: "replay";
+  // the worked replay it came from
+  testId?: string;
 }
 
 // Changes whenever the cards the engine checks change (Main and Extra, any order)
