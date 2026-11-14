@@ -142,6 +142,8 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order (agreed with the owner)
+0. Read `docs/DECKBUILDING.md` first: the deckbuilding and combo principles to build into the optimiser for every deck,
+   and the build order (deck-size verdict split, role reader, clash check, two-route order check, suggestions).
 1. Faster searches, part two. Done so far: helper workers (`src/engine/helper.ts`, 2 on phones, up to 4 on
    computers) play the route search's and hand trap check's tries side by side; the searches ask for each level's tries
    at once (`batch`: yields `{ need }` / `{ follow }`, answered with `next()`; `drive` in worker.ts). The beam widens
