@@ -5,6 +5,7 @@ import { describeInterruption, describeNibiru, describeProtection } from "./inte
 import { hasRole, rolesOf, secondOnly } from "./optimiser";
 import type { TestResult } from "./decks";
 import { CardArt } from "./CardArt";
+import { RoleBadges, TraitGlyphs } from "./CardGlyphs";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
@@ -306,6 +307,7 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
 
   // the card whose roles are open for changing (the rest show only the roles they have)
   const [editingRoles, setEditingRoles] = useState<number | null>(null);
+  const [explained, setExplained] = useState<{ code: number; full: string } | null>(null);
   const [tab, setTab] = useState<"odds" | "cards" | "lines">(() => {
     try {
       const saved = localStorage.getItem("rka.optTab");
@@ -423,29 +425,33 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
             const start = roles.includes("starter") || roles.includes("pair");
             return (
               <div className={`opt-tag ${card.tag.role === "none" ? "untagged" : ""}`} key={card.code}>
-                <button className="opt-thumb" onClick={() => onShow(card.code)} aria-label={`Read ${nameOf(card.code)}`}>
+                <button className={`opt-thumb framed ${frameOf(cards.get(card.code)?.type ?? 0)} ${start ? "lit" : ""}`} onClick={() => onShow(card.code)} aria-label={`Read ${nameOf(card.code)}`}>
                   <CardArt code={card.code} />
+                  <span className="opt-count">×{card.count}</span>
+                  <RoleBadges roles={card.tag.role === "none" ? [] : roles} />
                 </button>
                 <div className="opt-tag-text">
                   <button className="opt-name" onClick={() => onShow(card.code)}>
-                    {nameOf(card.code)} <span className="muted">×{card.count}</span>
+                    {nameOf(card.code)}
                     {card.tag.engine && <span className="opt-guess engine">engine</span>}
                   </button>
+                  <TraitGlyphs traits={traits.get(card.code) ?? []} normal={start && card.tag.normal} open={explained?.code === card.code ? explained.full : null} onOpen={(full) => setExplained(full ? { code: card.code, full } : null)} />
                   <div className="opt-role-chips">
-                    {ROLE_CHIPS.filter((chip) => editingRoles === card.code || roles.includes(chip.role)).map((chip) => (
-                      <button key={chip.role} className={`opt-chip ${roles.includes(chip.role) ? "on" : ""}`} onClick={() => toggleRole(card.code, chip.role)}>
-                        {chip.label}
-                      </button>
-                    ))}
-                    <button className="opt-chip" onClick={() => setEditingRoles(editingRoles === card.code ? null : card.code)} aria-label={editingRoles === card.code ? "Done" : `Change the roles of ${nameOf(card.code)}`}>
-                      {editingRoles === card.code ? "Done" : roles.length && card.tag.role !== "none" ? "✎" : "Set role"}
+                    {editingRoles === card.code &&
+                      ROLE_CHIPS.map((chip) => (
+                        <button key={chip.role} className={`opt-chip ${roles.includes(chip.role) ? "on" : ""}`} onClick={() => toggleRole(card.code, chip.role)}>
+                          {chip.label}
+                        </button>
+                      ))}
+                    <button className={`opt-chip ${card.tag.role === "none" ? "warn" : ""}`} onClick={() => setEditingRoles(editingRoles === card.code ? null : card.code)} aria-label={editingRoles === card.code ? "Done" : `Change the roles of ${nameOf(card.code)}`}>
+                      {editingRoles === card.code ? "Done" : card.tag.role !== "none" ? "✎ Roles" : "Set role"}
                     </button>
-                    {roles.includes("handtrap") && (
+                    {editingRoles === card.code && roles.includes("handtrap") && (
                       <button className={`opt-chip ${secondOnly(card.tag) ? "on" : ""}`} onClick={() => setTag(card.code, { ...card.tag, second: !secondOnly(card.tag) })} title="Only works going second, like the Mulcharmy cards">
                         2nd only
                       </button>
                     )}
-                    {start && (
+                    {editingRoles === card.code && start && (
                       <button className={`opt-chip ${card.tag.normal ? "on" : ""}`} onClick={() => setTag(card.code, { ...card.tag, normal: !card.tag.normal })} title="Its line uses the turn's Normal Summon">
                         Normal Summon
                       </button>
@@ -455,15 +461,6 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
                     <button className="opt-partners" onClick={() => setPartnerFor(card.code)}>
                       with {card.tag.with && withAny(card.tag.with.codes) && !card.tag.with.attributes && !card.tag.with.levels.length ? "any other card" : describePartners(card.tag.with, nameOf)} <u>Edit</u>
                     </button>
-                  )}
-                  {(traits.get(card.code) ?? []).length > 0 && (
-                    <div className="opt-traits">
-                      {(traits.get(card.code) ?? []).map((trait) => (
-                        <span key={trait} className="opt-trait">
-                          {trait}
-                        </span>
-                      ))}
-                    </div>
                   )}
                 </div>
               </div>
@@ -1010,3 +1007,6 @@ function CutTest({ main, lines, nameOf, result, onTest }: { main: DeckCard[]; li
     </div>
   );
 }
+
+// a Main Deck card's frame colour, as the duel draws it
+const frameOf = (type: number) => (type & 0x2 ? "spell" : type & 0x4 ? "trap" : "monster");

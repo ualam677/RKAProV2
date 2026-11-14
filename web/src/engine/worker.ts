@@ -1402,13 +1402,15 @@ function traitsOf(code: number): string[] {
   // each effect on its own: its condition and what it does
   // (a Spell or Trap's activation is its effect; "You can only use ... once per turn" is a limit, not an effect)
   const effects = type & 1 ? text.split(/(?<=\.) (?=[A-Z(●])/).filter((one) => /You can|Quick Effect|:/.test(one) && !/^\(?You can only/.test(one)) : [text];
-  if (effects.some((one) => /\bDeck\b/.test(one) && /(add|Special Summon|send|take)/i.test(one))) weak.push("Ash");
+  // Ash: adds, summons or sends from the Main Deck (the Extra Deck is out of its reach)
+  if (effects.some((one) => /\bDeck\b/.test(one.replace(/Extra Deck/g, "")) && /(add|Special Summon|send|take)/i.test(one))) weak.push("Ash");
   if (/add [^.]*to your hand/i.test(text)) weak.push("Droll after it");
   // a monster effect used while it's face-up on the field (not one from the hand or the GY)
   const fromElsewhere = /this card (from|in) your (hand|GY)|this card is sent to the GY|this card is in your GY|this card from your hand/i;
   if (type & 1 && effects.some((one) => /You can|Quick Effect/.test(one) && !fromElsewhere.test(one))) weak.push("Veiler / Imperm on the field");
   if (weak.length) out.push(`stopped by ${weak.join(", ")}`);
-  if (/(in your GY|from your GY|is sent to the GY|this card in your GY)/i.test(text)) out.push("has a GY effect: out of Veiler / Imperm's reach");
+  // the card's own effect from the GY (not one that targets another card there)
+  if (/this card (is )?(in|from) your GY|(If|When) this card is sent to the GY|banish this card from your GY/i.test(text)) out.push("has a GY effect: out of Veiler / Imperm's reach");
   return out;
 }
 
