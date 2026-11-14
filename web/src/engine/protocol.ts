@@ -40,6 +40,8 @@ export interface Choice {
   zone?: CardRef;
   // idle and battle commands that belong to the phase bar, not to a card
   phase?: boolean;
+  // the same as another choice (a summon the core offers twice the same way): kept for numbering, not shown
+  hidden?: boolean;
   // a plain pick (Xyz materials and the like): tapping the card answers at once
   pick?: boolean;
   // already picked; picking it again takes it back

@@ -380,7 +380,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   // how a prompt is shown: on the board itself, as a grid of cards, or as a small dialog of buttons
   const promptMode: "none" | "board" | "grid" | "dialog" | "announce" = !prompt || idle ? "none" : prompt.kind === "announce" ? "announce" : prompt.kind === "counter" ? "dialog" : zonePrompt || (cardPrompt && choices.every((choice) => onBoard(choice.card!))) ? "board" : cardPrompt ? "grid" : "dialog";
 
-  const actionsFor = (card: CardRef) => choices.map((choice, index) => ({ choice, index })).filter(({ choice }) => choice.card && same(choice.card, card));
+  const actionsFor = (card: CardRef) => choices.map((choice, index) => ({ choice, index })).filter(({ choice }) => choice.card && !choice.hidden && same(choice.card, card));
   const hasAction = (card: CardRef) => !!prompt && !zonePrompt && choices.some((choice) => choice.card && same(choice.card, card));
   const zoneIndex = (zone: CardRef) => (zonePrompt ? choices.findIndex((choice) => choice.zone && same(choice.zone, zone)) : -1);
   const isPicked = (card: CardRef) =>

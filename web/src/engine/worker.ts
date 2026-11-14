@@ -538,7 +538,11 @@ function buildPrompt(message: OcgMessage): boolean {
         // offered more than once: say what each way uses, from the card's own text (the scripts register the usual
         // materials first, then each "you can also ... Summon this card by using ..." way)
         const twice = message.special_summons.filter((other) => other.location === card.location && other.sequence === card.sequence && other.code === card.code).length > 1;
-        choices.push(cardChoice(twice ? summonWay(card.code, how, count) : how, card));
+        // the core doesn't say which way each one is: a way whose materials aren't on the field can't be it, and the
+        // same way offered twice is shown once
+        const label = twice ? summonWay(card.code, how, usualReady(card.code) ? count : Math.max(2, count)) : how;
+        const again = twice && choices.some((choice) => choice.label === label && choice.card?.code === card.code && choice.card.location === card.location);
+        choices.push(again ? { ...cardChoice(label, card), hidden: true } : cardChoice(label, card));
         actions.push([SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, index]);
       });
       add(system(1155, "Change position"), SelectIdleCMDAction.SELECT_POS_CHANGE, message.pos_changes);
@@ -948,6 +952,17 @@ const phaseTitle = (name: string) => (name.startsWith("Main") ? `Main Phase ${na
 // the monster summoned last, until the next action: a chance to respond right after it is about that summon
 let lastSummon = 0;
 // "Xyz Summon: 3 Level 8 monsters", "Xyz Summon using a "Galaxy-Eyes" Xyz Monster you control"
+// Whether the card's usual materials ("3 Level 8 monsters") are face-up on your field now. Xyz and Link Monsters have
+// no Level, so they never count. Materials the text puts some other way are taken as possible.
+function usualReady(code: number): boolean {
+  const text = texts.get(code) ?? texts.get(cards.get(code)?.alias ?? 0) ?? "";
+  const usual = /^(\d+)\+? Level (\d+) monsters?$/i.exec(text.split(/\r?\n/)[0].trim());
+  if (!usual) return true;
+  const [need, level] = [Number(usual[1]), Number(usual[2])];
+  const ready = cardsIn(0, OcgLocation.MZONE).filter((one) => one && one.code && one.position & 0x5 && !((cards.get(one.code)?.type ?? 0) & (0x800000 | 0x4000000)) && one.level === level).length;
+  return ready >= need;
+}
+
 function summonWay(code: number, how: string, nth: number): string {
   const text = texts.get(code) ?? texts.get(cards.get(code)?.alias ?? 0) ?? "";
   const materials = text.split(/\r?\n/)[0].trim();
