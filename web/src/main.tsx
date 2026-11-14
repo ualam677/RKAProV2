@@ -765,10 +765,13 @@ function App() {
     const frame = viewing.frames[viewing.at];
     const previous = viewing.frames[viewing.at - 1];
     // going forward shows what happened since the last step; going back or jumping shows the position only
-    const events = !viewing.back && !viewing.fast && previous ? viewing.views.slice(previous.index + 1, frame.index + 1).flatMap((one) => one.events) : [];
+    // fast forward keeps the small animations on the board (summons, attacks) and skips the big ones
+    const between = !viewing.back && previous ? viewing.views.slice(previous.index + 1, frame.index + 1).flatMap((one) => one.events) : [];
+    const events = viewing.fast && viewing.playing ? between.filter((event) => event.kind === "summon" || event.kind === "attack") : between;
     const shown = { ...viewing.views[frame.index], prompt: null, events };
     const undone = viewing.back ? viewing.frames[viewing.at + 1]?.label : null;
-    const caption = viewing.fast && viewing.playing ? "Fast forward… pause to see what happened" : undone ? `Undone: ${undone}` : frame.label;
+    const fastForward = viewing.fast && viewing.playing;
+    const caption = fastForward ? <span className="ff-blink" aria-label="Fast forwarding">⏩</span> : undone ? `Undone: ${undone}` : frame.label;
     const saved = viewing.test.id && decks.some((one) => one.tests?.some((test) => test.id === viewing.test.id)) ? (deck?.tests ?? []).find((test) => test.id === viewing.test.id) : undefined;
     const isWorked = !!(saved ?? viewing.test).worked;
     const controls = viewing.mini ? (

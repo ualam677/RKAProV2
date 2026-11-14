@@ -534,7 +534,10 @@ function buildPrompt(message: OcgMessage): boolean {
         const key = `${card.location}:${card.sequence}:${card.code}`;
         const count = (seenSummons.get(key) ?? 0) + 1;
         seenSummons.set(key, count);
-        choices.push(cardChoice(count > 1 ? `${how} (another way${count > 2 ? ` ${count - 1}` : ""})` : how, card));
+        // offered more than once: say what each way uses, from the card's own text (the scripts register the usual
+        // materials first, then each "you can also ... Summon this card by using ..." way)
+        const twice = message.special_summons.filter((other) => other.location === card.location && other.sequence === card.sequence && other.code === card.code).length > 1;
+        choices.push(cardChoice(twice ? summonWay(card.code, how, count) : how, card));
         actions.push([SelectIdleCMDAction.SELECT_SPECIAL_SUMMON, index]);
       });
       add(system(1155, "Change position"), SelectIdleCMDAction.SELECT_POS_CHANGE, message.pos_changes);
@@ -939,6 +942,16 @@ let record: TestRecord | null = null;
 const phaseTitle = (name: string) => (name.startsWith("Main") ? `Main Phase ${name.slice(5)}` : name ? `${name} Phase` : "turn");
 // the monster summoned last, until the next action: a chance to respond right after it is about that summon
 let lastSummon = 0;
+// "Xyz Summon: 3 Level 8 monsters", "Xyz Summon using a "Galaxy-Eyes" Xyz Monster you control"
+function summonWay(code: number, how: string, nth: number): string {
+  const text = texts.get(code) ?? texts.get(cards.get(code)?.alias ?? 0) ?? "";
+  const materials = text.split(/\r?\n/)[0].trim();
+  const others = [...text.matchAll(/you can also (?:Xyz |Synchro |Link |Fusion |Special )?Summon (?:this card|"[^"]+") by using (.+?)(?: as (?:the )?materials?)?(?:\.|,| \()/gi)].map((match) => match[1].trim());
+  if (nth === 1) return materials && materials.length < 80 ? `${how}: ${materials}` : how;
+  const other = others[nth - 2];
+  return other ? `${how} using ${other}` : `${how} (another way)`;
+}
+
 // the card whose effect is resolving, and the cards last picked (an option is often about them)
 let solvingCode = 0;
 let lastPicked: number[] = [];

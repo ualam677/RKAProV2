@@ -524,3 +524,12 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .viewer.mini { display: flex; align-items: center; gap: 6px; }
 .viewer.mini .viewer-caption { flex: 1; font-size: 13px; }
 .viewer-bar:has(.viewer.mini) { padding: 4px 6px 4px 12px; }
+
+/* Xyz Materials under their monster: an edge per material, sliding in as it is attached */
+.overlay-stack { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.overlay-unit { position: absolute; inset: 2px; border: 1px solid #c9a400; border-radius: 3px; background: linear-gradient(160deg, #3a2f0a, #14110a); transform: translate(calc(var(--at) * -3px), calc(var(--at) * 3px)); animation: overlay-in 260ms ease-out both; animation-delay: calc(var(--at) * 50ms); }
+@keyframes overlay-in { from { opacity: 0; transform: translate(0, -18px) scale(0.9); } }
+.zone .tile { z-index: 1; }
+.zone-materials { position: absolute; left: 2px; bottom: 16px; z-index: 2; padding: 0 3px; border-radius: 4px; background: rgba(60, 46, 6, 0.92); color: #ffd36b; font-size: 9px; font-weight: 800; line-height: 1.4; }
+.ff-blink { display: inline-block; font-size: 18px; color: var(--accent-strong); animation: ff-blink 0.7s steps(2, start) infinite; }
+@keyframes ff-blink { to { visibility: hidden; } }
