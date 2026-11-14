@@ -774,32 +774,39 @@ function App() {
     const caption = fastForward ? <span className="ff-blink" aria-label="Fast forwarding">⏩</span> : undone ? `Undone: ${undone}` : frame.label;
     const saved = viewing.test.id && decks.some((one) => one.tests?.some((test) => test.id === viewing.test.id)) ? (deck?.tests ?? []).find((test) => test.id === viewing.test.id) : undefined;
     const isWorked = !!(saved ?? viewing.test).worked;
+    const where = `Turn ${shown.turn} · ${shown.turnPlayer === 0 ? "You" : "Opponent"} · ${shown.phase}`;
+    // the caption strip of the saved videos: what just happened, and where in the duel
+    const strip = (
+      <div className="viewer-strip">
+        <p className="viewer-caption">{caption}</p>
+        {!fastForward && (
+          <small>
+            {where} · step {viewing.at} of {viewing.frames.length - 1}
+          </small>
+        )}
+      </div>
+    );
+    const playButton = (
+      <button className="button small primary" onClick={() => setViewing({ ...viewing, playing: !viewing.playing, fast: false, back: false })} aria-label={viewing.playing ? "Pause" : "Play"}>
+        {viewing.playing ? "⏸" : "▶︎"}
+      </button>
+    );
     const controls = viewing.mini ? (
       <div className="viewer mini">
-        <p className="viewer-caption">{caption}</p>
-        <button className="button small primary" onClick={() => setViewing({ ...viewing, playing: !viewing.playing, fast: false, back: false })} aria-label={viewing.playing ? "Pause" : "Play"}>
-          {viewing.playing ? "⏸" : "▶︎"}
-        </button>
+        {strip}
+        {playButton}
         <button className="button small" onClick={() => setViewing({ ...viewing, mini: false })} aria-label="Show the controls">
           ⌃
         </button>
       </div>
     ) : (
       <div className="viewer">
-        <p className="viewer-caption">
-          {caption}
-          <small>
-            {" "}
-            · step {viewing.at} of {viewing.frames.length - 1}
-          </small>
-        </p>
+        {strip}
         <input className="viewer-scrub" type="range" min={0} max={viewing.frames.length - 1} value={viewing.at} onChange={(event) => viewTo(Number(event.target.value), false)} aria-label="Step" />
         <div className="viewer-buttons">
           <button className="button small" onClick={() => viewTo(0, false)} aria-label="Start">⏮</button>
           <button className="button small" onClick={() => viewTo(viewing.at - 1, false)} aria-label="Back a play">◀</button>
-          <button className="button small primary" onClick={() => setViewing({ ...viewing, playing: !viewing.playing, fast: false, back: false })} aria-label={viewing.playing ? "Pause" : "Play"}>
-            {viewing.playing ? "⏸" : "▶︎"}
-          </button>
+          {playButton}
           <button className="button small" onClick={() => viewTo(viewing.at + 1, false)} aria-label="Forward a play">▶</button>
           <button className={`button small ${viewing.fast && viewing.playing ? "on" : ""}`} onClick={() => setViewing({ ...viewing, playing: !(viewing.fast && viewing.playing), fast: !(viewing.fast && viewing.playing), back: false })} aria-label="Fast forward">
             ⏩
@@ -808,31 +815,36 @@ function App() {
           <button className="button small" onClick={() => setViewing({ ...viewing, mini: true })} aria-label="Minimise">
             ⌄
           </button>
-          <button
-            className={`button small ${isWorked ? "on" : ""}`}
-            onClick={async () => {
-              await markTestWorked({ ...viewing.test, ...(saved ?? {}) }, viewing.views[viewing.frames[viewing.frames.length - 1].index]);
-              setViewing((now) => now && { ...now, test: { ...now.test, worked: !isWorked } });
-            }}
-          >
-            {isWorked ? "✓ Worked" : "Mark as working"}
-          </button>
-          <button
-            className="button small"
-            onClick={() => {
-              const { test: saved } = viewing;
-              setViewing(null);
-              if (frame.picks > 0) watch(saved, frame.picks);
-              else {
-                newTest(saved.testOf);
-                post({ ...(saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false }), type: "start" });
-              }
-            }}
-          >
-            Play from here
-          </button>
         </div>
       </div>
+    );
+    // marking it as working and playing on from here sit in the menu
+    const viewerMenu = (
+      <>
+        <button
+          className={`button ${isWorked ? "on" : ""}`}
+          onClick={async () => {
+            await markTestWorked({ ...viewing.test, ...(saved ?? {}) }, viewing.views[viewing.frames[viewing.frames.length - 1].index]);
+            setViewing((now) => now && { ...now, test: { ...now.test, worked: !isWorked } });
+          }}
+        >
+          {isWorked ? "✓ Worked" : "Mark as working"}
+        </button>
+        <button
+          className="button"
+          onClick={() => {
+            const { test: saved } = viewing;
+            setViewing(null);
+            if (frame.picks > 0) watch(saved, frame.picks);
+            else {
+              newTest(saved.testOf);
+              post({ ...(saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false }), type: "start" });
+            }
+          }}
+        >
+          Play from here
+        </button>
+      </>
     );
     return (
       <Duel
@@ -849,6 +861,7 @@ function App() {
         onSaveState={() => undefined}
         onLoadState={() => {}}
         viewer={controls}
+        viewerMenu={viewerMenu}
       />
     );
   }

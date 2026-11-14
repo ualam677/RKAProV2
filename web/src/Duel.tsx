@@ -13,6 +13,8 @@ interface Props {
   skip: () => void;
   // watching a replay: these controls instead of the duel's own, nothing to answer
   viewer?: ReactNode;
+  // more replay actions, kept in the menu so the controls stay one row
+  viewerMenu?: ReactNode;
   // "This worked": keeps the test and the board it ended on; undefined while nothing has been played yet
   worked: boolean;
   onWorked?: () => void;
@@ -331,7 +333,7 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   );
 }
 
-export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying, states, onSaveState, onLoadState, viewer }: Props) {
+export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying, states, onSaveState, onLoadState, viewer, viewerMenu }: Props) {
   const [stateList, setStateList] = useState(false);
   // Xyz Materials drawn under their monster, like EDOPro (an option, remembered)
   const [showMaterials, setShowMaterials] = useState(() => {
@@ -793,11 +795,13 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     observer.observe(el);
     return () => observer.disconnect();
   }, [wide]);
-  const cardWidth = wide ? 96 : Math.min(108, Math.max(72, handWidth / 4.2));
+  // a replay on a phone lays the hand flat in a small row, like the saved videos, so the board keeps its room
+  const flat = wide || !!viewer;
+  const cardWidth = wide ? 96 : viewer ? 50 : Math.min(108, Math.max(72, handWidth / 4.2));
   const handCount = me.hand.length;
   // the cards just drawn are the last ones in the hand; they slide in from the Deck
   const drawn = view.events.filter((event) => event.kind === "draw").length;
-  const step = handCount > 1 ? Math.min(cardWidth * (wide ? 1.06 : 0.92), (handWidth - cardWidth - 28) / (handCount - 1)) : 0;
+  const step = handCount > 1 ? Math.min(cardWidth * (flat ? 1.06 : 0.92), (handWidth - cardWidth - 28) / (handCount - 1)) : 0;
 
   const focusActions = focus ? actionsFor(focus.card) : [];
   const myTurn = view.turnPlayer === 0;
@@ -809,6 +813,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   );
   const menu = viewer ? (
     <>
+      {viewerMenu}
       {materialsToggle}
       <button className="button ghost" onClick={leave}>
         Exit
@@ -880,6 +885,12 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     </div>
   );
 
+  const viewerBar = (
+    <div className="viewer-bar" onClick={(event) => event.stopPropagation()}>
+      {viewer}
+    </div>
+  );
+
   const opponentBar = (
     <LifeBar
       name="Opponent"
@@ -916,11 +927,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
       )}
       {!wide && opponentBar}
       {!wide && menuOpen && <div className="menu">{menu}</div>}
-      {viewer && (
-        <div className="viewer-bar" onClick={(event) => event.stopPropagation()}>
-          {viewer}
-        </div>
-      )}
+      {viewer && wide && viewerBar}
       {replaying && (
         <div className="replay-bar" onClick={(event) => event.stopPropagation()}>
           <span>
@@ -962,10 +969,12 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
           </div>
         </div>
 
-        <div className="board-foot">
-          {promptBar}
-          {phaseControl}
-        </div>
+        {!(viewer && !wide) && (
+          <div className="board-foot">
+            {promptBar}
+            {phaseControl}
+          </div>
+        )}
 
         {view.ended && <p className="banner">{view.winner === 0 ? "You win" : view.winner === 1 ? "You lose" : "The duel has ended."}</p>}
         {promptDialog}
@@ -973,11 +982,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
 
       {!wide && myBar}
 
-      <div className={`hand ${wide ? "flat" : "fan"}`} ref={handRef}>
+      <div className={`hand ${flat ? "flat" : "fan"}`} ref={handRef}>
         {me.hand.map((card, i) => {
           const offset = i - (handCount - 1) / 2;
           const lifted = (focus && same(focus.card, card)) || isPicked(card);
-          const transform = wide
+          const transform = flat
             ? `translateY(${lifted ? -14 : 0}px)`
             : `translateY(${Math.abs(offset) * Math.abs(offset) * 2 - (lifted ? 22 : 0)}px) rotate(${offset * (handCount > 6 ? 2 : 3)}deg)`;
           return (
@@ -997,6 +1006,8 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
           );
         })}
       </div>
+
+      {viewer && !wide && viewerBar}
 
       {focus && focusActions.length > 0 && (
         <>

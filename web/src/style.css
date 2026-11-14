@@ -518,12 +518,24 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .screen-head h2 { margin: 0; font-size: 18px; color: var(--accent-strong); letter-spacing: 0.04em; text-transform: uppercase; }
 .start-test { min-height: 52px; font-size: 17px; }
 @media (min-width: 900px) { .menu-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-/* the replay bar takes its own room at the bottom, so it never covers the hand */
-.duel.with-viewer { padding-bottom: 168px; }
-.duel.with-viewer:has(.viewer.mini) { padding-bottom: 56px; }
-.viewer.mini { display: flex; align-items: center; gap: 6px; }
-.viewer.mini .viewer-caption { flex: 1; font-size: 13px; }
-.viewer-bar:has(.viewer.mini) { padding: 4px 6px 4px 12px; }
+/* replay on a phone: laid out like the saved videos. The board keeps its room, the hand is a small flat row and the
+   controls sit under it, in the flow, never over the cards */
+.duel.phone.with-viewer { padding-bottom: 0; }
+.duel.phone.with-viewer .hand { height: 78px; margin: 0; }
+.duel.phone.with-viewer .hand-card { bottom: 2px; transform-origin: 50% 50%; }
+.duel.phone .viewer-bar { position: static; flex: 0 0 auto; margin: 0 -6px; padding: 0 0 calc(6px + env(safe-area-inset-bottom)); border: 0; border-radius: 0; box-shadow: none; max-width: none; }
+.viewer-strip { display: grid; gap: 2px; padding: 8px 12px; background: #2a5ec4; color: #fff; text-align: center; }
+.duel.wide .viewer-strip { border-radius: 6px; }
+.viewer-strip .viewer-caption { font-size: 15px; font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.viewer-strip small { font-size: 11px; color: rgba(255, 255, 255, 0.75); }
+.duel.phone .viewer-scrub { margin: 0 12px; width: calc(100% - 24px); }
+.duel.phone .viewer-buttons { flex-wrap: nowrap; padding: 0 8px; }
+.duel.phone .viewer-buttons .button { flex: 1; min-width: 0; min-height: 38px; padding: 0; }
+.viewer.mini { display: flex; align-items: stretch; gap: 0; }
+.viewer.mini .viewer-strip { flex: 1; min-width: 0; }
+.viewer.mini .viewer-caption { font-size: 14px; }
+.viewer.mini > .button { border-radius: 0; min-width: 48px; border: 0; }
+.duel.wide .viewer-bar:has(.viewer.mini) { padding: 4px; }
 
 /* Xyz Materials under their monster: an edge per material, sliding in as it is attached */
 .overlay-stack { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
