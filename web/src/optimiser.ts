@@ -358,6 +358,7 @@ const GUESSES: Record<number, Tag> = {
   14532163: { role: "breaker" }, 12580477: { role: "breaker" }, 54693926: { role: "breaker" }, 15693423: { role: "breaker" },
   18144506: { role: "breaker" }, 24299458: { role: "breaker" }, 102380: { role: "breaker" }, 55063751: { role: "breaker" },
   48130397: { role: "breaker" }, 8267140: { role: "breaker" },
+  14883228: { role: "breaker" }, // Typhoon (a Trap you can activate from the hand)
   // staples
   24224830: { role: "other" }, 65681983: { role: "other" }, 25311006: { role: "other" }, 41420027: { role: "other" }, 23002292: { role: "other" },
 };
