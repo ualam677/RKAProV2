@@ -117,6 +117,9 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   Duel and Neuron text exports). Names match exactly, then ignoring case and punctuation, then the shortest name
   holding every word; Extra Deck monsters go to the Extra Deck without a heading; unknown names are listed. Every
   imported code is translated to a card the database knows.
+- Main menu: the current deck on top (tap to change), then Edit deck, Optimise (opens on the optimiser), Test (hand
+  size, opening hand, hand traps, opponent, going first or second, Start), Replays (saved tests), Decks (pick, new,
+  open, paste, delete) and Sync. Leaving a test or the editor returns to the section it came from.
 - Phases as EDOPro shows them: a DP SP M1 BP M2 EP bar lit in your colour or the opponent's, and a banner at every
   phase change on both turns. Chances to respond say what to ("Respond to Seventh Tachyon?", "Respond to the summon
   of Galaxy Wizard?", "Opponent's End Phase: activate an effect?").
@@ -132,6 +135,9 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order
+0. Agreed with the owner: faster searches (several workers in parallel), install as an app that works offline,
+   choke points with a chosen number of hand traps, shareable replays (a link that carries a saved test); later, a full
+   UI overhaul so the site looks less busy.
 1. Going second: the opponent goes first and builds a board to break. Then choke points: replay lines with the
    opponent holding one hand trap, at every moment the engine allows it, then the
    opponent: hand traps (easy / smart), then plays its own turn with board breakers

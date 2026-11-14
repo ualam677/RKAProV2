@@ -64,6 +64,17 @@ function App() {
   decksRef.current = decks;
   const [deckId, setDeckId] = useState(saved.deckId ?? decks[0]?.id ?? "");
   const [editing, setEditing] = useState(false);
+  // the main menu, or one of its sections
+  const [screen, setScreen] = useState<"menu" | "decks" | "test" | "replays" | "sync">("menu");
+  // the editor opens on the deck (Edit deck) or on the optimiser (Optimise)
+  const openEditor = (optimise: boolean) => {
+    try {
+      sessionStorage.setItem("rka.optimising", optimise ? "1" : "0");
+    } catch {
+      // the editor opens on the deck
+    }
+    setEditing(true);
+  };
   const [pasting, setPasting] = useState(false);
   const [paste, setPaste] = useState("");
   const [hand, setHand] = useState(saved.hand ?? 5);
@@ -804,6 +815,58 @@ function App() {
         </p>
       )}
 
+      {screen === "menu" && (
+        <nav className="main-menu">
+          <button className="deck-card" onClick={() => setScreen("decks")}>
+            {deck ? (
+              <>
+                <b>{deck.name}</b>
+                <span className="muted">
+                  {deck.main.length} + {deck.extra.length}
+                  {deck.side.length ? ` + ${deck.side.length}` : ""} · change deck
+                </span>
+              </>
+            ) : (
+              <b>Choose or import a deck</b>
+            )}
+          </button>
+          <div className="menu-grid">
+            <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(false)}>
+              <b>Edit deck</b>
+              <span>Search, build, ban list</span>
+            </button>
+            <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(true)}>
+              <b>Optimise</b>
+              <span>Odds, lines, choke points</span>
+            </button>
+            <button className="menu-tile primary" disabled={!ready || !deck?.main.length} onClick={() => setScreen("test")}>
+              <b>Test</b>
+              <span>Hands, opponent, going first or second</span>
+            </button>
+            <button className="menu-tile" disabled={!deck} onClick={() => setScreen("replays")}>
+              <b>Replays</b>
+              <span>{deck?.tests?.length ? `${deck.tests.length} saved test${deck.tests.length === 1 ? "" : "s"}` : "Saved tests"}</span>
+            </button>
+            <button className="menu-tile" onClick={() => setScreen("decks")}>
+              <b>Decks</b>
+              <span>New, import, delete</span>
+            </button>
+            <button className="menu-tile" onClick={() => setScreen("sync")}>
+              <b>Sync</b>
+              <span>Backup, deck folder, Drive</span>
+            </button>
+          </div>
+        </nav>
+      )}
+
+      {screen === "decks" && (
+        <>
+          <div className="screen-head">
+            <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
+              ‹
+            </button>
+            <h2>Decks</h2>
+          </div>
       <section className="box">
         <div className="box-head">
           <h2>Decks</h2>
@@ -842,11 +905,8 @@ function App() {
         </div>
         {deck && (
           <div className="row">
-            <button className="button primary" disabled={!ready || deck.main.length === 0} onClick={() => start()}>
-              Test hand
-            </button>
-            <button className="button" disabled={!ready} onClick={() => setEditing(true)}>
-              Edit deck
+            <button className="button primary" onClick={() => setScreen("menu")}>
+              Use "{deck.name}"
             </button>
             <button className="button ghost" onClick={() => { if (confirm(`Delete "${deck.name}"?`)) setDecks((all) => all.filter((one) => one.id !== deck.id)); }}>
               Delete
@@ -854,8 +914,18 @@ function App() {
           </div>
         )}
       </section>
+        </>
+      )}
 
-      <details className="box sync">
+      {screen === "sync" && (
+        <>
+          <div className="screen-head">
+            <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
+              ‹
+            </button>
+            <h2>Sync</h2>
+          </div>
+      <details className="box sync" open>
         <summary>
           <h2>Sync</h2>
           {syncNote && <span className="muted">{syncNote}</span>}
@@ -912,9 +982,17 @@ function App() {
             : "Google Drive needs a one-time setup for this site (a Google sign-in ID, see the README). Until then, back up to a file and keep it in Drive yourself."}
         </p>
       </details>
+        </>
+      )}
 
-      {deck && (
+      {screen === "test" && deck && (
         <>
+          <div className="screen-head">
+            <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
+              ‹
+            </button>
+            <h2>Test</h2>
+          </div>
           <section className="box">
             <h2>Hand size</h2>
             <div className="segmented">
@@ -1015,8 +1093,25 @@ function App() {
               })}
             </div>
           </section>
+          <button className="button primary start-test" disabled={!ready || deck.main.length === 0} onClick={() => start()}>
+            Start the test
+          </button>
+        </>
+      )}
 
-          {deck.tests && deck.tests.length > 0 && <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />}
+      {screen === "replays" && deck && (
+        <>
+          <div className="screen-head">
+            <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
+              ‹
+            </button>
+            <h2>Replays</h2>
+          </div>
+          {deck.tests?.length ? (
+            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />
+          ) : (
+            <p className="muted">No saved tests yet. Every hand you test is saved here as you play.</p>
+          )}
         </>
       )}
     </main>

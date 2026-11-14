@@ -499,3 +499,22 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .viewer-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .viewer-buttons .button { min-width: 40px; }
 .lifebar-extra.link { padding: 0; border: 0; background: none; color: var(--accent-strong); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+
+/* ---- main menu ---- */
+.main-menu { display: grid; gap: 10px; }
+.deck-card { display: grid; gap: 2px; padding: 14px 16px; border: 1px solid var(--line-bright); border-radius: var(--radius); background: var(--panel-raised); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.deck-card b { font-size: 18px; }
+.deck-card .muted { margin: 0; }
+.menu-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.menu-tile { display: grid; gap: 4px; align-content: start; min-height: 96px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--fast), transform var(--fast); }
+.menu-tile:hover:not(:disabled) { border-color: var(--line-bright); }
+.menu-tile:active:not(:disabled) { transform: scale(0.98); }
+.menu-tile:disabled { opacity: 0.45; cursor: default; }
+.menu-tile b { font-size: 17px; color: var(--accent-strong); }
+.menu-tile span { font-size: 13px; color: var(--muted); line-height: 1.3; }
+.menu-tile.primary { border-color: var(--line-bright); background: var(--panel-raised); }
+.menu-tile.primary b { color: var(--text); }
+.screen-head { display: flex; align-items: center; gap: 10px; }
+.screen-head h2 { margin: 0; font-size: 18px; color: var(--accent-strong); letter-spacing: 0.04em; text-transform: uppercase; }
+.start-test { min-height: 52px; font-size: 17px; }
+@media (min-width: 900px) { .menu-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
