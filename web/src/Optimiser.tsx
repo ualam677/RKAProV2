@@ -2,6 +2,7 @@
 // turns, and check your worked lines against hand traps.
 import { useEffect, useMemo, useState } from "react";
 import { describeInterruption, describeNibiru, describeProtection } from "./interruptText";
+import { hasRole, rolesOf, secondOnly } from "./optimiser";
 import type { TestResult } from "./decks";
 import { CardArt } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
@@ -44,7 +45,6 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
   const [undo, setUndo] = useState<{ deck: SavedDeck; what: string } | null>(null);
-  const [suggestions, setSuggestions] = useState<{ swaps: Swap[]; cut: { cuts: number[]; before: Score; after: Score } | null } | null>(null);
   const defaults = useMemo(loadTagDefaults, [deck.tags]);
 
   // what the engine found, for the deck as it is now or (while it checks again) as it was
@@ -201,7 +201,7 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
     });
     return computeOdds(checked, second ? 6 : 5);
   }, [main, second, evidence]);
-  const count = (...roles: Role[]) => main.filter((card) => roles.includes(card.tag.role)).reduce((sum, card) => sum + card.count, 0);
+  const count = (...roles: Role[]) => main.filter((card) => roles.some((role) => hasRole(card.tag, role))).reduce((sum, card) => sum + card.count, 0);
   const untagged = count("none");
   const normalCards = main.filter((card) => card.tag.normal);
   const normalCount = normalCards.reduce((sum, card) => sum + card.count, 0);
@@ -226,7 +226,9 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
 
 
   const setTag = (key: number, tag: Tag) => {
-    const clean: Tag = tag.role === "pair" ? { role: "pair", with: tag.with ?? { codes: [], attributes: 0, levels: [] } } : { role: tag.role };
+    const clean: Tag = hasRole(tag, "pair") ? { role: tag.role, with: tag.with ?? { codes: [], attributes: 0, levels: [] } } : { role: tag.role };
+    if (tag.roles && tag.roles.length > 1) clean.roles = tag.roles;
+    if (tag.second) clean.second = true;
     if (tag.proven && (tag.role === "starter" || tag.role === "pair")) clean.proven = true;
     if (tag.normal && (tag.role === "starter" || tag.role === "pair" || tag.role === "extender")) clean.normal = true;
     storeTagDefault(key, clean);
@@ -236,6 +238,20 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
     const rest = main.filter((card) => card.tag.role === "none");
     rest.forEach((card) => storeTagDefault(card.code, { role: "other" }));
     onChange({ ...deck, tags: { ...deck.tags, ...Object.fromEntries(rest.map((card) => [card.code, { role: "other" }])) }, updated: Date.now() });
+  };
+  // roles are multiple choice: a card can be a hand trap and a board breaker. Starter and "needs a partner" exclude each
+  // other; Other means none of the rest.
+  const PRIMARY: Role[] = ["starter", "pair", "extender", "piece", "handtrap", "breaker", "brick", "other"];
+  const toggleRole = (key: number, role: Role) => {
+    const old = tagOf(key);
+    let roles: Role[] = rolesOf(old).filter((one) => one !== "none" && one !== "handtrap2");
+    if (roles.includes(role)) roles = roles.filter((one) => one !== role);
+    else if (role === "other") roles = ["other"];
+    else roles = [...roles.filter((one) => one !== "other" && !(role === "starter" && one === "pair") && !(role === "pair" && one === "starter")), role];
+    roles.sort((a, b) => PRIMARY.indexOf(a) - PRIMARY.indexOf(b));
+    const primary = roles[0] ?? "none";
+    setTag(key, { role: primary, roles, with: roles.includes("pair") ? old.with : undefined, normal: old.normal, second: roles.includes("handtrap") ? old.second : undefined });
+    if (role === "pair" && roles.includes("pair") && !old.with) setPartnerFor(key);
   };
   const setRole = (key: number, role: Role) => {
     const old = tagOf(key);
@@ -250,18 +266,6 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
   const apply = (next: Partial<SavedDeck>, what: string) => {
     setUndo({ deck, what });
     onChange({ ...deck, ...next, updated: Date.now() });
-  };
-  const applySwap = (swap: Swap) => {
-    const main = removeOne(deck.main, swap.cut);
-    if (swap.fromSide) {
-      // a real side-deck swap: the card coming in leaves the Side Deck and the one going out takes its place
-      const code = deck.side.find((one) => nameKey(one) === swap.add)!;
-      const cutCode = deck.main.find((one) => nameKey(one) === swap.cut)!;
-      apply({ main: [...main, code], side: [...removeOne(deck.side, swap.add), cutCode] }, `Swapped ${nameOf(swap.cut)} for ${nameOf(swap.add)}`);
-    } else {
-      const code = deck.main.find((one) => nameKey(one) === swap.add) ?? swap.add;
-      apply({ main: [...main, code] }, `Swapped ${nameOf(swap.cut)} for ${nameOf(swap.add)}`);
-    }
   };
   const applyCuts = (cuts: number[]) => apply({ main: cuts.reduce(removeOne, deck.main) }, `Cut ${cuts.length} cards`);
 
@@ -297,111 +301,75 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
   const sorted = [...main].sort((a, b) => ORDER.indexOf(a.tag.role) - ORDER.indexOf(b.tag.role) || nameOf(a.code).localeCompare(nameOf(b.code)));
   const partnerCard = partnerFor !== null ? main.find((card) => card.code === partnerFor) : undefined;
 
+  // the card whose roles are open for changing (the rest show only the roles they have)
+  const [editingRoles, setEditingRoles] = useState<number | null>(null);
+  const [tab, setTab] = useState<"odds" | "cards" | "lines">(() => {
+    try {
+      return (localStorage.getItem("rka.optTab") as "odds" | "cards" | "lines") || "odds";
+    } catch {
+      return "odds";
+    }
+  });
+  const openTab = (next: typeof tab) => {
+    setTab(next);
+    try {
+      localStorage.setItem("rka.optTab", next);
+    } catch {
+      // the tab just isn't remembered
+    }
+  };
+  // the hand traps to check against: the ones you tag as hand traps, then the common staples
+  const trapChoices = [...new Set([...main.filter((card) => hasRole(card.tag, "handtrap") && !secondOnly(card.tag)).map((card) => card.code), ...CHOKE_TRAPS])];
+  const warnings = [
+    untagged > 0 && { text: `${untagged} card${untagged === 1 ? "" : "s"} not tagged`, action: { label: "Tag as Other", run: tagRest } },
+    normalCount > normalLimit(total) && { text: `${normalCount} Normal Summon cards (two in hand: ${pct(first.normal2)})` },
+    !count("breaker") && { text: "No board breakers" },
+    count("handtrap") > 0 && secondOdds.handtrap < 0.75 && { text: `A hand trap going 2nd: only ${pct(secondOdds.handtrap)}` },
+  ].filter(Boolean) as { text: string; action?: { label: string; run: () => void } }[];
+  const ROLE_CHIPS: { role: Role; label: string }[] = [
+    { role: "starter", label: "Starter" },
+    { role: "pair", label: "Needs a partner" },
+    { role: "extender", label: "Extender" },
+    { role: "piece", label: "In-Deck piece" },
+    { role: "handtrap", label: "Hand trap" },
+    { role: "breaker", label: "Breaker" },
+    { role: "brick", label: "Brick" },
+    { role: "other", label: "Other" },
+  ];
+
   return (
     <div className="optimiser">
-      <div className="segmented two">
-        <button className={`button small ${second ? "" : "on"}`} onClick={() => setSecond(false)}>
-          Going 1st · 5 cards
-        </button>
-        <button className={`button small ${second ? "on" : ""}`} onClick={() => setSecond(true)}>
-          Going 2nd · 6 cards
-        </button>
+      <div className="segmented three opt-tabs">
+        {(["odds", "cards", "lines"] as const).map((name) => (
+          <button key={name} className={`button small ${tab === name ? "on" : ""}`} onClick={() => openTab(name)}>
+            {name === "odds" ? "Odds" : name === "cards" ? "Cards" : "Lines"}
+          </button>
+        ))}
       </div>
 
-      {!main.length ? (
-        <p className="muted">Add cards to the Main Deck to get started.</p>
-      ) : (
+      {!main.length && <p className="muted">Add cards to the Main Deck to get started.</p>}
+
+      {main.length > 0 && tab === "odds" && (
         <>
+          <div className="segmented two">
+            <button className={`button small ${second ? "" : "on"}`} onClick={() => setSecond(false)}>
+              Going 1st
+            </button>
+            <button className={`button small ${second ? "on" : ""}`} onClick={() => setSecond(true)}>
+              Going 2nd
+            </button>
+          </div>
           <div className="opt-big">
             <b>{pct(odds.combo)}</b>
             <span>
               open a combo · <em className={`grade grade-${grade(odds.combo).toLowerCase()}`}>{grade(odds.combo)}</em>
               <br />
-              <small className="muted">Bricks {oneIn(1 - odds.combo)}</small>
+              <small className="muted" title="The engine played every card alone and with each other card">
+                Engine-checked {engineChecked ? pct(engineChecked.combo) : engineProgress?.total ? `${engineProgress.done}/${engineProgress.total}` : "…"} · proven{" "}
+                {pct(everyStartProven ? odds.combo : proven.combo)}
+              </small>
             </span>
           </div>
-          <ul className="opt-evidence">
-            <li>
-              <span>As tagged</span>
-              <b>{pct(odds.combo)}</b>
-            </li>
-            <li title="The engine played every card alone and with each other card, and counted the starts that kept a new card from the Deck">
-              <span>
-                Engine-checked starts
-                {engineProgress && engineProgress.total > 0 && (
-                  <small>
-                    {" "}
-                    · checking {engineProgress.done} of {engineProgress.total}
-                  </small>
-                )}
-                {engineProgress && !engineProgress.total && <small> · getting ready</small>}
-              </span>
-              <b>{engineChecked ? pct(engineChecked.combo) : "…"}</b>
-            </li>
-            {reached && (
-              <li title="Starts from which the route search reached a board with enough interruptions">
-                <span>Engine reached a full board ({fullAt}+ interruptions)</span>
-                <b>{pct(reached.combo)}</b>
-              </li>
-            )}
-            <li title="Starts you played to your full board with Test, then ticked Proven">
-              <span>Proven to a full board</span>
-              <b className={everyStartProven ? "" : "warn"}>{pct(everyStartProven ? odds.combo : proven.combo)}</b>
-            </li>
-          </ul>
-          {reached && (
-            <div className="opt-through">
-              <span className="muted">The opponent holds (up to 3, checked together):</span>
-              <div className="opt-chips">
-                {CHOKE_TRAPS.map((trap) => (
-                  <button key={trap} className={`button small ${holding.includes(trap) ? "on" : ""}`} onClick={() => toggleHeld(trap)}>
-                    {nameOf(trap)}
-                  </button>
-                ))}
-              </div>
-              {together !== null ? (
-                <span className="opt-through-row">
-                  Full board through {holding.map(nameOf).join(" + ")} together: <b>{pct(together)}</b>
-                </span>
-              ) : (
-                holding.length > 1 && <span className="muted">Not checked together yet.</span>
-              )}
-              <button className="button small" disabled={!!routing || !!choking} onClick={checkAgain}>
-                {choking ? "Checking hand traps…" : "Check hand traps again"}
-              </button>
-            </div>
-          )}
-          {through.length > 0 && reached && (
-            <div className="opt-through">
-              <span className="muted">Full board through one hand trap, used at its worst moment for you (a start that plays through it, or a second start for after it):</span>
-              <div>
-                {through.map(({ trap, odds: value }) => (
-                  <span key={trap} className="opt-through-row">
-                    {nameOf(trap)} <b>{pct(value)}</b>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {startCards.length > 0 && (
-            <div className="opt-find">
-              <span className="opt-fullat">
-                Full board: at least
-                <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.max(1, fullAt - 1), updated: Date.now() })} aria-label="Fewer">
-                  −
-                </button>
-                <b>{fullAt}</b>
-                <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.min(8, fullAt + 1), updated: Date.now() })} aria-label="More">
-                  +
-                </button>
-                interruptions
-              </span>
-              <span className="muted">
-                An interruption: an effect usable on the opponent's turn that negates or removes (Quick Effects, Set Traps), read from the card scripts.
-                {fullBoards ? ` Lines close to your ${fullBoards} working board${fullBoards > 1 ? "s" : ""} are preferred.` : ""}
-              </span>
-            </div>
-          )}
           {engineProgress && engineProgress.total > 0 && (
             <span className="opt-bar opt-progress">
               <i style={{ width: `${(engineProgress.done / engineProgress.total) * 100}%` }} />
@@ -409,11 +377,8 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
           )}
           <ul className="opt-odds">
             {rows.map(([label, value, note]) => (
-              <li key={label}>
-                <span>
-                  {label}
-                  {note && <small> · {note}</small>}
-                </span>
+              <li key={label} title={note || undefined}>
+                <span>{label}</span>
                 <span className="opt-bar">
                   <i style={{ width: `${value * 100}%` }} />
                 </span>
@@ -422,52 +387,35 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
             ))}
           </ul>
           <p className="opt-counts">
-            {total} cards: <b>{count("starter")}</b> starter · <b>{count("pair")}</b> with a partner · <b>{count("extender")}</b> extender · <b>{count("handtrap", "handtrap2")}</b> hand trap ·{" "}
-            <b>{count("breaker")}</b> breaker · <b>{count("piece")}</b> combo piece · <b>{count("brick")}</b> brick · <b>{count("other")}</b> other{untagged ? <> · <b className="warn">{untagged}</b> not tagged</> : null}
+            {total} cards · {count("starter", "pair")} start · {count("extender")} extend · {count("handtrap")} hand trap · {count("breaker")} breaker
+            {untagged ? <> · <b className="warn">{untagged} untagged</b></> : null}
           </p>
+          {warnings.length > 0 && (
+            <div className="opt-warnings">
+              {warnings.map((warning) => (
+                <span key={warning.text} className="opt-warning">
+                  {warning.text}
+                  {warning.action && (
+                    <button className="opt-link" onClick={warning.action.run}>
+                      {warning.action.label}
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+          {(deck.results ?? []).length > 0 && <Measured results={deck.results ?? []} deck />}
+          <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
+          <Clashes main={main} nameOf={nameOf} traits={traits} />
         </>
       )}
 
-      {main.length > 0 && (
-        <section className="opt-section">
-          <h3>Deck checks</h3>
-          {(deck.results ?? []).length > 0 && <Measured results={deck.results ?? []} deck />}
-          {!hasStart ? (
-            <p className="opt-note">Tag your starters first: pick "Starter" next to each card below that starts your combo by itself. Everything else is worked out from that.</p>
-          ) : (
-            <>
-              {untagged > 0 && (
-                <div className="opt-note">
-                  {untagged} card{untagged === 1 ? " is" : "s are"} not tagged. They count as never starting a combo.{" "}
-                  <button className="button small" onClick={tagRest}>
-                    Tag the rest as Other
-                  </button>
-                </div>
-              )}
-              {normalCount > normalLimit(total) && (
-                <p className="opt-note warn">
-                  {normalCount} cards need your Normal Summon ({normalCards.map((card) => `${card.count} ${nameOf(card.code)}`).join(", ")}). Keep it to {normalLimit(total)} in a {total}-card deck:
-                  you hold two of them in {pct(first.normal2)} of hands going first, and only one can be summoned.
-                </p>
-              )}
-              <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
-              <Clashes main={main} nameOf={nameOf} traits={traits} />
-              <TwoStarts routes={routes} nameOf={nameOf} />
-              <CutTest main={main} lines={Object.keys(routes).length} nameOf={nameOf} result={cutResult} onTest={onCutTest} />
-              {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
-              {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
-                <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
-              )}
-            </>
-          )}
-        </section>
-      )}
-
-      {main.length > 0 && (
-        <section className="opt-section">
-          <h3>What each card does</h3>
-          <div className="opt-tags">
-            {sorted.map((card) => (
+      {main.length > 0 && tab === "cards" && (
+        <div className="opt-tags">
+          {sorted.map((card) => {
+            const roles = rolesOf(card.tag);
+            const start = roles.includes("starter") || roles.includes("pair");
+            return (
               <div className={`opt-tag ${card.tag.role === "none" ? "untagged" : ""}`} key={card.code}>
                 <button className="opt-thumb" onClick={() => onShow(card.code)} aria-label={`Read ${nameOf(card.code)}`}>
                   <CardArt code={card.code} />
@@ -475,106 +423,130 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
                 <div className="opt-tag-text">
                   <button className="opt-name" onClick={() => onShow(card.code)}>
                     {nameOf(card.code)} <span className="muted">×{card.count}</span>
-                    {card.tag.guessed && <span className="opt-guess">guess</span>}
                     {card.tag.engine && <span className="opt-guess engine">engine</span>}
-                    {(traits.get(card.code) ?? []).map((trait) => (
-                      <span key={trait} className="opt-trait">
-                        {trait}
-                      </span>
-                    ))}
                   </button>
-                  <EngineLine
-                    found={evidence.get(card.code)}
-                    tag={card.tag}
-                    own={!!deck.tags?.[card.code]}
-                    nameOf={nameOf}
-                    withAny={withAny}
-                    takenBy={(takenBy.get(card.code) ?? []).map(nameOf)}
-                    onPiece={() => setRole(card.code, "piece")}
-                    onUseEngine={() => {
-                      const tags = { ...deck.tags };
-                      delete tags[card.code];
-                      onChange({ ...deck, tags, updated: Date.now() });
-                    }}
-                  />
-                  {card.tag.role === "pair" && (
+                  <div className="opt-role-chips">
+                    {ROLE_CHIPS.filter((chip) => editingRoles === card.code || roles.includes(chip.role)).map((chip) => (
+                      <button key={chip.role} className={`opt-chip ${roles.includes(chip.role) ? "on" : ""}`} onClick={() => toggleRole(card.code, chip.role)}>
+                        {chip.label}
+                      </button>
+                    ))}
+                    <button className="opt-chip" onClick={() => setEditingRoles(editingRoles === card.code ? null : card.code)} aria-label={editingRoles === card.code ? "Done" : `Change the roles of ${nameOf(card.code)}`}>
+                      {editingRoles === card.code ? "Done" : roles.length && card.tag.role !== "none" ? "✎" : "Set role"}
+                    </button>
+                    {roles.includes("handtrap") && (
+                      <button className={`opt-chip ${secondOnly(card.tag) ? "on" : ""}`} onClick={() => setTag(card.code, { ...card.tag, second: !secondOnly(card.tag) })} title="Only works going second, like the Mulcharmy cards">
+                        2nd only
+                      </button>
+                    )}
+                    {start && (
+                      <button className={`opt-chip ${card.tag.normal ? "on" : ""}`} onClick={() => setTag(card.code, { ...card.tag, normal: !card.tag.normal })} title="Its line uses the turn's Normal Summon">
+                        Normal Summon
+                      </button>
+                    )}
+                  </div>
+                  {roles.includes("pair") && (
                     <button className="opt-partners" onClick={() => setPartnerFor(card.code)}>
                       with {card.tag.with && withAny(card.tag.with.codes) && !card.tag.with.attributes && !card.tag.with.levels.length ? "any other card" : describePartners(card.tag.with, nameOf)} <u>Edit</u>
                     </button>
                   )}
-                  {(card.tag.role === "starter" || card.tag.role === "pair") && (
-                    <span className="opt-proof">
-                      <button className={`button small ${card.tag.normal ? "on" : "ghost"}`} onClick={() => setTag(card.code, { ...card.tag, normal: !card.tag.normal })} title="Its line uses the turn's Normal Summon">
-                        {card.tag.normal ? "✓ Normal Summon" : "Normal Summon?"}
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={() => {
-                          const hand = testHand(card, main);
-                          if (hand) onTest(hand.map((code) => held.get(code) ?? code));
-                        }}
-                        disabled={!testHand(card, main)}
-                      >
-                        Test
-                      </button>
-                      <button
-                        className={`button small ${card.tag.proven ? "on" : "ghost"}`}
-                        disabled={card.tag.provenByTest}
-                        onClick={() => setTag(card.code, { ...card.tag, proven: !card.tag.proven })}
-                      >
-                        {card.tag.provenByTest ? "✓ Proven by your test" : card.tag.proven ? "✓ Proven" : "Proven?"}
-                      </button>
-                    </span>
+                  {(traits.get(card.code) ?? []).length > 0 && (
+                    <div className="opt-traits">
+                      {(traits.get(card.code) ?? []).map((trait) => (
+                        <span key={trait} className="opt-trait">
+                          {trait}
+                        </span>
+                      ))}
+                    </div>
                   )}
-                  {(card.tag.role === "starter" || card.tag.role === "pair") && (
-                    <RouteLine
-                      route={routes[card.code]}
-                      fullAt={fullAt}
-                      full={isFull(routes[card.code])}
-                      checking={choking?.code === card.code ? "now" : choking?.waiting.includes(card.code) ? "waiting" : null}
-                      fresh={!!routeOf(card.code)}
-                      searching={routing?.code === card.code ? routing.tried : null}
-                      waiting={!!routing?.waiting.includes(card.code)}
-                      nameOf={nameOf}
-                      onWatch={() => routes[card.code] && onWatchLine(routes[card.code].record, card.code)}
-                    />
-                  )}
-                  {(card.tag.role === "starter" || card.tag.role === "pair") && <Measured results={(deck.results ?? []).filter((one) => one.start === card.code)} />}
                 </div>
-                <select value={card.tag.role} onChange={(event) => setRole(card.code, event.target.value as Role)} aria-label={`Role of ${nameOf(card.code)}`}>
-                  <option value="none">Not tagged</option>
-                  {ROLES.map((entry) => (
-                    <option key={entry.role} value={entry.role}>
-                      {entry.name}
-                    </option>
-                  ))}
-                </select>
               </div>
-            ))}
+            );
+          })}
+        </div>
+      )}
+
+      {main.length > 0 && tab === "lines" && (
+        <>
+          <div className="opt-find">
+            <span className="opt-fullat" title="An interruption: an effect usable on the opponent's turn that negates or removes, read from the card scripts">
+              Full board: at least
+              <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.max(1, fullAt - 1), updated: Date.now() })} aria-label="Fewer">
+                −
+              </button>
+              <b>{fullAt}</b>
+              <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.min(8, fullAt + 1), updated: Date.now() })} aria-label="More">
+                +
+              </button>
+              interruptions
+            </span>
           </div>
-          <details className="opt-help">
-            <summary>What the roles and numbers mean</summary>
-            <ul>
-              {ROLES.map((entry) => (
-                <li key={entry.role}>
-                  <b>{entry.name}:</b> {entry.help}
-                </li>
+          <div className="opt-through">
+            <span className="muted">The opponent holds (up to 3):</span>
+            <div className="opt-chips">
+              {trapChoices.map((trap) => (
+                <button key={trap} className={`button small ${holding.includes(trap) ? "on" : ""}`} onClick={() => toggleHeld(trap)}>
+                  {nameOf(trap)}
+                </button>
               ))}
-            </ul>
-            <p>
-              Normal Summon: a start whose line uses the turn's Normal Summon (the engine marks the ones whose line opens with one). Holding two, one is
-              dead, so it counts as a dead card. More than 5 in 40 cards (one per 8) is flagged. Lines: mark a test as working in Replays and it becomes
-              that start's line here, checked against each hand trap and Nibiru. Engine-checked: the duel engine (EDOPro's own card scripts) played every card in the Main Deck alone, then every pair of cards that start nothing alone,
-              trying the actions it allows a few steps deep. A start counts when the hand ends up keeping a new card from the Deck, so a search that has to put a card
-              back doesn't count. It finds partners by itself: what the engine lets a card do with each other card in the hand. It says whether a hand gets going,
-              not whether it reaches your full board; that's what Proven is for. Every possible opening hand is counted with its exact chance, no sampling. A combo opens with a Starter, or a Starter with a partner plus one of its partners. A hand trap used as the
-              partner doesn't count as a hand trap you still hold. A start is only as good as its tag: Test deals it with a partner (if it needs one) and
-              cards that can't help, hand traps held back; tick Proven once it reaches your full board (or mark the test "This worked" in the duel menu, and it ticks itself). Until every start is proven, the headline also shows the
-              proven-only number. Going first, "Hand trap, going 2nd" cards count as dead. Swaps are judged on going first and going second equally, and use the
-              tags of the card coming in.
-            </p>
-          </details>
-        </section>
+            </div>
+            {reached && together !== null && (
+              <span className="opt-through-row">
+                Full board through {holding.map(nameOf).join(" + ")}: <b>{pct(together)}</b>
+              </span>
+            )}
+            {through.length > 0 && reached && (
+              <div>
+                {through.map(({ trap, odds: value }) => (
+                  <span key={trap} className="opt-through-row">
+                    {nameOf(trap)} <b>{pct(value)}</b>
+                  </span>
+                ))}
+              </div>
+            )}
+            {reached && (
+              <button className="button small" disabled={!!routing || !!choking} onClick={checkAgain}>
+                {choking ? "Checking…" : "Check again"}
+              </button>
+            )}
+          </div>
+          {startCards.length === 0 && <p className="muted">Tag your starters in Cards first.</p>}
+          {startCards.map((card) => (
+            <div key={card.code} className="opt-line">
+              <div className="opt-line-head">
+                <b>{nameOf(card.code)}</b>
+                <button
+                  className="button small"
+                  onClick={() => {
+                    const hand = testHand(card, main);
+                    if (hand) onTest(hand.map((code) => held.get(code) ?? code));
+                  }}
+                  disabled={!testHand(card, main)}
+                >
+                  Test
+                </button>
+              </div>
+              {routes[card.code] ? (
+                <RouteLine
+                  route={routes[card.code]}
+                  fullAt={fullAt}
+                  full={isFull(routes[card.code])}
+                  checking={choking?.code === card.code ? "now" : choking?.waiting.includes(card.code) ? "waiting" : null}
+                  fresh={!!routeOf(card.code)}
+                  searching={null}
+                  waiting={false}
+                  nameOf={nameOf}
+                  onWatch={() => routes[card.code] && onWatchLine(routes[card.code].record, card.code)}
+                />
+              ) : (
+                <span className="muted opt-engine">No line yet: test it and mark the replay as working.</span>
+              )}
+              <Measured results={(deck.results ?? []).filter((one) => one.start === card.code)} />
+            </div>
+          ))}
+          <TwoStarts routes={routes} nameOf={nameOf} />
+          <CutTest main={main} lines={Object.keys(routes).length} nameOf={nameOf} result={cutResult} onTest={onCutTest} />
+        </>
       )}
 
       {partnerCard && (
@@ -582,7 +554,7 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
           card={partnerCard}
           main={main}
           nameOf={nameOf}
-          onSave={(partners) => setTag(partnerCard.code, { role: "pair", with: partners })}
+          onSave={(partners) => setTag(partnerCard.code, { ...partnerCard.tag, role: partnerCard.tag.role === "starter" ? "pair" : partnerCard.tag.role, with: partners })}
           onClose={() => setPartnerFor(null)}
         />
       )}
@@ -818,50 +790,24 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
     total === 40
       ? "40 cards: your best draws come up as often as they can."
       : `${total} cards: each card above 40 dilutes your best draws. Tap the cards you'd take out below to see what reaching 40 would cost and gain.`;
+  // against what YCS top cut decks of this size play
+  const sizes = Object.keys(TOP_CUT.nonEngineBySize).map(Number);
+  const near = sizes.reduce((best, size) => (Math.abs(size - total) < Math.abs(best - total) ? size : best), 40);
+  const theirs = TOP_CUT.nonEngineBySize[near];
+  const engine = total - nonEngine;
   return (
     <div className="opt-size">
-      <p className="opt-note">
-        <b>Deck size.</b> {verdict}
+      <p className="opt-counts" title={`YCS top cut, ${TOP_CUT.decks} decks from ten 2025 YCS top 32s: decks above 40 used the room for non-engine`}>
+        Non-engine <b>{nonEngine}</b> ({Math.round((nonEngine / total) * 100)}%) · engine <b>{engine}</b> ({startCount} start, {pieceCount} in-Deck) · top cut at {near}: {theirs.toFixed(0)} / {(near - theirs).toFixed(0)}
       </p>
-      {rows.length > 1 && (
-        <table className="opt-size-table">
-          <thead>
-            <tr>
-              <th>Cards</th>
-              <th>Combo 1st</th>
-              <th>+ hand trap</th>
-              <th>2 traps 2nd</th>
-              <th>Dead card</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={`${row.total}-${row.added ? "plus" : ""}`} className={row === now ? "now" : ""} title={row.added ? `+ ${names(row.added)}` : row.cut.length ? `without ${names(row.cut)}` : "your deck"}>
-                <td>
-                  {row.total}
-                  {row === now ? " (now)" : row.added ? " (+1)" : row === mine ? " (yours)" : ""}
-                </td>
-                <td>{(row.combo1 * 100).toFixed(1)}%</td>
-                <td>{(row.comboTrap1 * 100).toFixed(1)}%</td>
-                <td>{(row.traps2 * 100).toFixed(1)}%</td>
-                <td>{(row.dead * 100).toFixed(1)}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
       {total > 40 && (
-        <div className="opt-note">
-          <b>Compare your own 40:</b> tap the {total - 40} card{total - 40 === 1 ? "" : "s"} you'd take out{mine ? ` (without ${names(out)})` : ""}.
+        <details className="opt-compare">
+          <summary>Compare a 40-card version</summary>
           <div className="opt-chips">
             {main.map((card) => {
               const taken = out.filter((code) => code === card.code).length;
               return (
-                <button
-                  key={card.code}
-                  className={`button small ${taken ? "on" : ""}`}
-                  onClick={() => setOut(taken < card.count && out.length < total - 40 ? [...out, card.code] : out.filter((code) => code !== card.code))}
-                >
+                <button key={card.code} className={`button small ${taken ? "on" : ""}`} onClick={() => setOut(taken < card.count && out.length < total - 40 ? [...out, card.code] : out.filter((code) => code !== card.code))}>
                   {nameOf(card.code)}
                   {taken ? ` −${taken}` : ""}
                 </button>
@@ -869,40 +815,29 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
             })}
           </div>
           {mine && (
-            <p>
-              Your 40 against your {total}: opening a combo {delta(mine.combo1, now.combo1)}, combo + hand trap {delta(mine.comboTrap1, now.comboTrap1)}, 2 hand traps going 2nd {delta(mine.traps2, now.traps2)}, a dead card {delta(mine.dead, now.dead)}.{" "}
-              {judge(mine, "40")}
-            </p>
+            <table className="opt-size-table">
+              <thead>
+                <tr>
+                  <th />
+                  <th>Combo 1st</th>
+                  <th>+ trap</th>
+                  <th>2 traps 2nd</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[now, mine].map((row) => (
+                  <tr key={row.total} className={row === now ? "now" : ""}>
+                    <td>{row.total}</td>
+                    <td>{(row.combo1 * 100).toFixed(1)}%</td>
+                    <td>{(row.comboTrap1 * 100).toFixed(1)}%</td>
+                    <td>{(row.traps2 * 100).toFixed(1)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
-        </div>
+        </details>
       )}
-      {(() => {
-        // against what YCS top cut decks of this size play
-        const sizes = Object.keys(TOP_CUT.nonEngineBySize).map(Number);
-        const near = sizes.reduce((best, size) => (Math.abs(size - total) < Math.abs(best - total) ? size : best), 40);
-        const theirs = TOP_CUT.nonEngineBySize[near];
-        const engine = total - nonEngine;
-        const theirEngine = near - theirs;
-        return (
-          <p className="opt-note">
-            <b>YCS top cut</b> ({TOP_CUT.decks} decks from ten 2025 YCS top 32s): {Math.round((TOP_CUT.atForty / TOP_CUT.decks) * 100)}% play exactly 40, nearly all the rest 41–43, and the
-            ones above 40 use the extra room for non-engine (about {Math.round(Math.min(TOP_CUT.nonEngineBySize[41], TOP_CUT.nonEngineBySize[42], TOP_CUT.nonEngineBySize[43]))}–{Math.round(Math.max(TOP_CUT.nonEngineBySize[41], TOP_CUT.nonEngineBySize[42], TOP_CUT.nonEngineBySize[43]))} non-engine against {TOP_CUT.nonEngineBySize[40].toFixed(0)} at 40). At {near}, they average{" "}
-            {theirs.toFixed(0)} non-engine and {theirEngine.toFixed(0)} engine; yours is {nonEngine} and {engine} ({startCount} that start, {pieceCount} your starts pull from the Deck,{" "}
-            {engine - startCount - pieceCount} other).
-            {total > 40 && engine > theirEngine + 1.5
-              ? pieceCount >= engine - theirEngine
-                ? " Your extra engine is mostly pieces your starts pull from the Deck, where theirs went to non-engine."
-                : " Your cards above 40 went to engine, where theirs went to non-engine."
-              : nonEngine < theirs - 2
-                ? " You run fewer non-engine than they do at this size."
-                : " In line with them."}
-          </p>
-        );
-      })()}
-      <p className="opt-note">
-        Non-engine (hand traps and breakers): <b>{nonEngine}</b> of {total} ({Math.round((nonEngine / total) * 100)}%).
-        {nonEngine / total < 0.35 ? " Guides aim for about 40% so you see two going second; you're below that." : nonEngine / total > 0.5 ? " That's a lot: going first, it can crowd out your starts." : " In the range guides recommend (about 40%)."}
-      </p>
     </div>
   );
 }
@@ -927,17 +862,17 @@ function Clashes({ main, nameOf, traits }: { main: DeckCard[]; nameOf: (code: nu
     for (let b = a + 1; b < empty.length; b++) {
       const [x, y] = [empty[a], empty[b]];
       const both = 1 - none(x.count) - none(y.count) + none(x.count + y.count);
-      lines.push(`${nameOf(x.code)} and ${nameOf(y.code)} both need an empty field, so only one can use it: you open both in ${(both * 100).toFixed(1)}% of hands.`);
+      lines.push(`${nameOf(x.code)} + ${nameOf(y.code)}: both need an empty field · ${(both * 100).toFixed(1)}%`);
     }
   for (const card of main) {
     if (card.count < 2 || !has(card.code, "once per turn by name") || !["starter", "pair", "extender"].includes(card.tag.role)) continue;
     const two = atLeastTwo(card.count);
-    if (two >= 0.02) lines.push(`${nameOf(card.code)} ×${card.count} is once per turn: you open two in ${(two * 100).toFixed(1)}% of hands, and the second does nothing that turn unless something else uses it (a discard, a cost, a Seventh Tachyon put-back).`);
+    if (two >= 0.02) lines.push(`Two ${nameOf(card.code)} (once per turn) · ${(two * 100).toFixed(1)}%`);
   }
   if (!lines.length) return null;
   return (
     <div className="opt-note">
-      <b>Clashes in the same hand.</b>
+      <b title="Cards that hurt each other in the same opening hand, and how often you open them together">Clashes in hand</b>
       <ul className="opt-clashes">
         {lines.map((line) => (
           <li key={line}>{line}</li>
@@ -971,7 +906,7 @@ function TwoStarts({ routes, nameOf }: { routes: Record<string, SavedRoute>; nam
   starts.forEach((a, i) => starts.slice(i + 1).forEach((b) => pairs.push([a, b])));
   return (
     <div className="opt-note">
-      <b>Two starts in hand: which to lead with.</b> From each line's hand trap check, against an opponent who uses a hand trap at the first chance it gets.
+      <b title="From each line's hand trap check, against an opponent who uses a hand trap at the first chance. One who waits for the worst moment can hit either line, so then the order matters less.">Two starts: lead with</b>
       <ul className="opt-clashes">
         {pairs.map(([a, b]) => {
           const ab = traps.map((trap) => ({ trap, ...firstChance(a, b, trap) }));
@@ -992,7 +927,6 @@ function TwoStarts({ routes, nameOf }: { routes: Record<string, SavedRoute>; nam
                   (wins.length
                     ? ` Against ${wins.map((one) => nameOf(one.trap)).join(", ")}, the hand trap lands on ${nameOf(lead)} (${wins[0].at ?? "its first moment"}) and ${nameOf(other)}'s line still runs.`
                     : "")}{" "}
-              <span className="muted">An opponent who waits for the worst moment can still hit either line: then the order matters much less.</span>
             </li>
           );
         })}
@@ -1008,12 +942,11 @@ function CutTest({ main, lines, nameOf, result, onTest }: { main: DeckCard[]; li
   const [pick, setPick] = useState(0);
   return (
     <div className="opt-note">
-      <b>Cut test.</b>{" "}
+      <b title="Each worked line is replayed without one copy of the card">Cut test</b>{" "}
       {lines === 0 ? (
-        "Mark replays as working first: this replays your own lines without a card to see what it does for them."
+        "needs worked replays."
       ) : (
         <>
-          What a card does for your {lines} worked line{lines === 1 ? "" : "s"}: each is replayed without one copy of it.{" "}
           <select value={pick} onChange={(event) => setPick(Number(event.target.value))}>
             <option value={0}>Pick a card</option>
             {main.map((card) => (

@@ -196,7 +196,8 @@ export type ToWorker =
   | { type: "route"; id: number; main: number[]; extra: number[]; hand: number[]; targets: number[][]; prior: string[]; goal: number }
   // choke points for a line found: each hand trap at each moment, the worst ones searched again
   // `combo`: the hand traps the opponent holds together (Ash and Imperm), checked as a set after the single ones
-  | { type: "choke"; id: number; main: number[]; extra: number[]; hand: number[]; keys: string[]; goal: number; combo?: number[] }
+  // traps: the hand traps to check (the ones the deck tags as hand traps, then the common staples)
+  | { type: "choke"; id: number; main: number[]; extra: number[]; hand: number[]; keys: string[]; goal: number; combo?: number[]; traps?: number[] }
   // the interruptions a board holds (a working test's end): cards still in the hand it opened with don't count
   // used: the effects the line activated (code, and which of its effects when known), for what they leave in place
   // fifth: what you had right after your 5th summon, if the line made 5 (for Nibiru)

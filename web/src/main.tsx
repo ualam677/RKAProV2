@@ -8,6 +8,7 @@ import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, sto
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
 import type { Piece } from "./engine/interruptions";
 import { CHOKE_TRAPS } from "./engine/probe";
+import { hasRole, secondOnly } from "./optimiser";
 import { Tests } from "./Tests";
 import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
 import { readReplayLink, replayLink, toYdk } from "./decks";
@@ -568,7 +569,9 @@ function App() {
     const next = { id, deckId: target.id, code: first.code, queue: rest };
     chokingRef.current = next;
     setChoking(next);
-    post({ type: "choke", id, main: target.main, extra: target.extra, hand: first.hand, keys: route.keys, goal: target.fullAt ?? 3, combo: target.opponentTraps ?? [14558127, 10045474] });
+    // the hand traps to check: the ones this deck tags as hand traps (they're the ones you expect), then the common staples
+    const tagged = Object.entries(target.tags ?? {}).filter(([, tag]) => hasRole(tag, "handtrap") && !secondOnly(tag)).map(([code]) => Number(code));
+    post({ type: "choke", id, main: target.main, extra: target.extra, hand: first.hand, keys: route.keys, goal: target.fullAt ?? 3, combo: target.opponentTraps ?? [14558127, 10045474], traps: [...new Set([...tagged, ...CHOKE_TRAPS])] });
   };
   const allStarts = useRef<{ code: number; hand: number[] }[]>([]);
   const findLines = (target: SavedDeck, starts: { code: number; hand: number[] }[]) => {

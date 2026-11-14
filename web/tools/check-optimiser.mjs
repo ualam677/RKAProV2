@@ -4,6 +4,12 @@
 //  3. shuffled decks, dealt and judged one hand at a time
 // Usage: node --experimental-sqlite tools/check-optimiser.mjs <path to rkapro v1> <path to cards.cdb>
 import fs from "node:fs";
+// this deck's own starts (from RKAPro v1's engine-verified lines): test data, not something the app assumes
+const GALAXY = {
+  91714772: { role: "starter" }, 18294799: { role: "starter" }, 7477101: { role: "starter" }, 47051709: { role: "starter" }, 98555327: { role: "starter" },
+  46659709: { role: "pair", with: { codes: [], attributes: 16, levels: [] } },
+  89132148: { role: "pair", with: { codes: [863795, 19316241, 65367484], attributes: 0, levels: [] } },
+};
 import { DatabaseSync } from "node:sqlite";
 const [V1, CDB] = process.argv.slice(2);
 const opt = await import(new URL("../src/optimiser.ts", import.meta.url));
@@ -16,7 +22,7 @@ const pct = (x) => (x * 100).toFixed(2) + "%";
 // the deck as the web app sees it: codes, facts from the database, tags from the built-in guesses
 const cards = Object.entries(list).map(([name, count]) => {
   const row = db.prepare("select d.id code, d.type, d.attribute, d.level from datas d join texts t on t.id = d.id where t.name = ? and d.alias = 0").get(name);
-  return { name, code: row.code, count, facts: { type: row.type, attribute: row.attribute, level: row.level & 0xff }, tag: opt.guessTag(row.code) ?? { role: "other" } };
+  return { name, code: row.code, count, facts: { type: row.type, attribute: row.attribute, level: row.level & 0xff }, tag: GALAXY[row.code] ?? opt.guessTag(row.code) ?? { role: "other" } };
 });
 console.log("Tags:", cards.map((c) => `${c.name}=${c.tag.role}`).join(", "), "\n");
 

@@ -568,3 +568,15 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-size-table tr.now td { color: var(--accent-strong); font-weight: 700; }
 
 .opt-trait { display: inline-block; margin: 2px 4px 0 0; padding: 0 6px; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; color: var(--muted); font-weight: 400; }
+
+/* optimiser: tabs, multiple-choice roles, compact rows */
+.opt-tabs { margin-bottom: 8px; }
+.opt-role-chips, .opt-traits, .opt-warnings { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.opt-chip { padding: 2px 9px; border: 1px solid var(--line); border-radius: 12px; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.opt-chip.on { border-color: var(--accent-strong); background: rgba(47, 125, 246, 0.22); color: var(--text); }
+.opt-warning { padding: 2px 8px; border-radius: 10px; background: rgba(255, 179, 107, 0.12); color: #ffb36b; font-size: 12px; }
+.opt-warning .opt-link { margin-left: 6px; }
+.opt-line { display: grid; gap: 3px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.opt-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.opt-compare summary { cursor: pointer; color: var(--accent-strong); font-size: 13px; }
+.opt-tag { align-items: start; }

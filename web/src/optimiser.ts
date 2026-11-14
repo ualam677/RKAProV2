@@ -19,6 +19,13 @@ export const ROLES: { role: Role; name: string; help: string }[] = [
   { role: "brick", name: "Brick", help: "Dead in the opening hand." },
   { role: "other", name: "Other", help: "Anything else: combo pieces you search, staples, traps." },
 ];
+/** Every role a card has; older saves held one, and "handtrap2" was a hand trap for going second. */
+export const rolesOf = (tag: Tag): Role[] => (tag.roles?.length ? tag.roles : tag.role === "handtrap2" ? ["handtrap"] : [tag.role]);
+export const hasRole = (tag: Tag, role: Role) => rolesOf(tag).includes(role);
+export const secondOnly = (tag: Tag) => !!tag.second || tag.role === "handtrap2" || !!tag.roles?.includes("handtrap2");
+const NON_ENGINE: Role[] = ["handtrap", "handtrap2", "breaker"];
+/** A hand trap or board breaker (non-engine), whatever else it is. */
+export const isNonEngine = (tag: Tag) => rolesOf(tag).some((role) => NON_ENGINE.includes(role));
 export const roleName = (role: Role) => ROLES.find((entry) => entry.role === role)?.name ?? "Not tagged";
 
 // "Any LIGHT monster", "any Level 4 monster" and named cards; a card matches if any of them fits
@@ -28,7 +35,12 @@ export interface Partners {
   levels: number[];
 }
 export interface Tag {
+  // the first of `roles` (kept for older saves and simple checks)
   role: Role;
+  // everything the card does: a card can be a hand trap and a board breaker (Infinite Impermanence)
+  roles?: Role[];
+  // a hand trap that only works going second (the Mulcharmy cards: "if you control no cards")
+  second?: boolean;
   with?: Partners;
   guessed?: boolean;
   // the start needs the turn's Normal Summon: a second such card in the same hand is dead
@@ -92,11 +104,13 @@ const choose = (() => {
 interface Group {
   count: number;
   role: Role;
+  roles: Role[];
+  second: boolean;
   normal: boolean;
   partnerOf: number[]; // indexes of the partnered starters this group can be the partner for
 }
 function groupDeck(cards: DeckCard[]) {
-  const pairs = cards.filter((card) => card.tag.role === "pair" && card.count > 0);
+  const pairs = cards.filter((card) => hasRole(card.tag, "pair") && card.count > 0);
   const groups: Group[] = [];
   const pairGroup: number[] = [];
   const bySignature = new Map<string, number>();
@@ -106,10 +120,12 @@ function groupDeck(cards: DeckCard[]) {
     const pairIndex = pairs.indexOf(card);
     // a partnered starter keeps a group of its own, so the maths knows which card needs which partner
     const normal = !!card.tag.normal;
-    const signature = pairIndex >= 0 ? `pair:${pairIndex}` : `${card.tag.role}:${normal}:${partnerOf.join(",")}`;
+    const roles = rolesOf(card.tag);
+    const second = secondOnly(card.tag);
+    const signature = pairIndex >= 0 ? `pair:${pairIndex}` : `${roles.join("+")}:${second}:${normal}:${partnerOf.join(",")}`;
     let at = bySignature.get(signature);
     if (at === undefined) {
-      at = groups.push({ count: 0, role: card.tag.role, normal, partnerOf }) - 1;
+      at = groups.push({ count: 0, role: card.tag.role, roles, second, normal, partnerOf }) - 1;
       bySignature.set(signature, at);
     }
     groups[at].count += card.count;
@@ -132,15 +148,16 @@ interface HandFacts {
 function evaluate(counts: number[], deck: ReturnType<typeof groupDeck>, goingSecond: boolean): HandFacts {
   const { groups, pairGroup, partnerGroups } = deck;
   let starters = 0, handtraps = 0, extenders = 0, breakers = 0, bricks = 0, normals = 0;
-  const usable = (role: Role) => role === "handtrap" || (goingSecond && role === "handtrap2");
+  // a hand trap counts if it works this turn; a card with several roles counts for each
+  const usable = (group: Group) => group.roles.includes("handtrap") && (!group.second || goingSecond);
   groups.forEach((group, at) => {
     const held = counts[at];
     if (!held) return;
-    if (group.role === "starter") starters += held;
-    else if (usable(group.role)) handtraps += held;
-    else if (group.role === "extender") extenders += held;
-    else if (group.role === "breaker") breakers += held;
-    else if (group.role === "brick" || group.role === "piece") bricks += held;
+    if (group.roles.includes("starter")) starters += held;
+    if (usable(group)) handtraps += held;
+    if (group.roles.includes("extender")) extenders += held;
+    if (group.roles.includes("breaker")) breakers += held;
+    if (group.roles.includes("brick") || (group.roles.includes("piece") && group.roles.length === 1)) bricks += held;
     if (group.normal) normals += held;
   });
   // cheapest way to start: a lone starter costs nothing, a partner that is a hand trap costs that hand trap
@@ -154,7 +171,7 @@ function evaluate(counts: number[], deck: ReturnType<typeof groupDeck>, goingSec
         const held = counts[at] - (at === own ? 1 : 0); // the starter cannot be its own partner
         if (held <= 0) continue;
         partners += held;
-        if (!usable(groups[at].role)) free += held;
+        if (!usable(groups[at])) free += held;
       }
       if (partners > 0) spent = Math.min(spent, free > 0 ? 0 : 1);
     });
@@ -225,8 +242,8 @@ export function computeOdds(cards: DeckCard[], hand: number): Odds {
     }
     // hand traps held at all: a hand trap you keep instead of starting still counts here
     const held = counts.reduce((sum, held, at) => {
-      const role = deck.groups[at].role;
-      return sum + (role === "handtrap" || (goingSecond && role === "handtrap2") ? held : 0);
+      const group = deck.groups[at];
+      return sum + (group.roles.includes("handtrap") && (!group.second || goingSecond) ? held : 0);
     }, 0);
     if (held >= 1) odds.handtrap += p;
     if (held >= 2) odds.handtrap2 += p;
@@ -336,21 +353,13 @@ const LIGHT = 16;
 const GUESSES: Record<number, Tag> = {
   ...Object.fromEntries(HAND_TRAPS.map((code) => [code, { role: "handtrap" } as Tag])),
   // "If you control no cards": dead going first
-  ...Object.fromEntries(HAND_TRAPS_SECOND.map((code) => [code, { role: "handtrap2" } as Tag])),
+  ...Object.fromEntries(HAND_TRAPS_SECOND.map((code) => [code, { role: "handtrap", second: true } as Tag])),
   // board breakers
   14532163: { role: "breaker" }, 12580477: { role: "breaker" }, 54693926: { role: "breaker" }, 15693423: { role: "breaker" },
   18144506: { role: "breaker" }, 24299458: { role: "breaker" }, 102380: { role: "breaker" }, 55063751: { role: "breaker" },
   48130397: { role: "breaker" }, 8267140: { role: "breaker" },
   // staples
   24224830: { role: "other" }, 65681983: { role: "other" }, 25311006: { role: "other" }, 41420027: { role: "other" }, 23002292: { role: "other" },
-  // Galaxy-Eyes, from RKAPro v1's engine-verified lines (packs/galaxy-eyes/lines.json)
-  91714772: { role: "starter" }, // Galaxy Defense Robot Orbital 7
-  18294799: { role: "starter" }, // Schwarzschild Infinity Dragon
-  7477101: { role: "starter" }, // Seventh Tachyon
-  47051709: { role: "starter" }, // Photon Delta Wing
-  98555327: { role: "starter" }, // Galaxy Wizard
-  46659709: { role: "pair", with: { codes: [], attributes: LIGHT, levels: [] } }, // Galaxy Soldier: discards a LIGHT monster
-  89132148: { role: "pair", with: { codes: [863795, 19316241, 65367484], attributes: 0, levels: [] } }, // Photon Orbital + Summoner / War Drake / Thrasher
 };
 
 export function guessTag(code: number): Tag | null {
@@ -474,7 +483,7 @@ const rowOf = (cards: DeckCard[], total: number, cut: number[], extenders: boole
 };
 export function deckSizes(cards: DeckCard[]): { rows: SizeRow[]; nonEngine: number; total: number } {
   const total = cards.reduce((sum, card) => sum + card.count, 0);
-  const nonEngine = cards.filter((card) => ["handtrap", "handtrap2", "breaker"].includes(card.tag.role)).reduce((sum, card) => sum + card.count, 0);
+  const nonEngine = cards.filter((card) => isNonEngine(card.tag)).reduce((sum, card) => sum + card.count, 0);
   const rows: SizeRow[] = [rowOf(cards, total, [], false)];
   let now = cards.map((card) => ({ ...card }));
   const cut: number[] = [];

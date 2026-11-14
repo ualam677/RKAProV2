@@ -1473,7 +1473,7 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
 
 // Choke points for one line, between other requests like the probe and the route search
 let chokeJob = 0;
-async function runChoke(id: number, main: number[], extra: number[], hand: number[], keys: string[], goal: number, combo: number[] = []) {
+async function runChoke(id: number, main: number[], extra: number[], hand: number[], keys: string[], goal: number, combo: number[] = [], traps: number[] = CHOKE_TRAPS) {
   chokeJob = id;
   const canonical = (code: number) => {
     const known = knownCode(code);
@@ -1484,10 +1484,11 @@ async function runChoke(id: number, main: number[], extra: number[], hand: numbe
   const deck = main.map(canonical).filter((code) => cards.has(code));
   for (const code of handCodes) deck.splice(deck.indexOf(code), 1);
   const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
-  await prefetchScripts([...handCodes, ...deck, ...extraCodes, ...CHOKE_TRAPS]);
+  const trapCodes = [...new Set(traps.map(canonical))].filter((code) => cards.has(code));
+  await prefetchScripts([...handCodes, ...deck, ...extraCodes, ...trapCodes]);
   const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
   const alive = () => chokeJob === id;
-  const singles = await drive(chokePoints(env, handCodes, deck, extraCodes, keys, CHOKE_TRAPS, { goal, budget: 250, replans: 2, batch: true }), env, handCodes, deck, extraCodes, alive);
+  const singles = await drive(chokePoints(env, handCodes, deck, extraCodes, keys, trapCodes, { goal, budget: 250, replans: 2, batch: true }), env, handCodes, deck, extraCodes, alive);
   if (!singles) return;
   // then the hand traps the opponent holds together, if more than one
   if (combo.length < 2) return send({ type: "choke", id, done: singles });
@@ -1633,7 +1634,7 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       }
       send({ type: "interruptions", id: message.id, list, protection: protectionOf(used), nibiru });
     } else if (message.type === "choke") {
-      void runChoke(message.id, message.main, message.extra, message.hand, message.keys, message.goal, message.combo).catch((error) =>
+      void runChoke(message.id, message.main, message.extra, message.hand, message.keys, message.goal, message.combo, message.traps).catch((error) =>
         send({ type: "error", text: `Hand trap check stopped: ${error instanceof Error ? error.message : error}` }),
       );
     } else if (message.type === "text") {
