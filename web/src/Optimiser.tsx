@@ -443,6 +443,7 @@ export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, o
                 </p>
               )}
               <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
+              <Clashes main={main} nameOf={nameOf} traits={traits} />
               {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
               {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
                 <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
@@ -903,6 +904,46 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
         Non-engine (hand traps and breakers): <b>{nonEngine}</b> of {total} ({Math.round((nonEngine / total) * 100)}%).
         {nonEngine / total < 0.35 ? " Guides aim for about 40% so you see two going second; you're below that." : nonEngine / total > 0.5 ? " That's a lot: going first, it can crowd out your starts." : " In the range guides recommend (about 40%)."}
       </p>
+    </div>
+  );
+}
+
+// Cards that hurt each other in the same hand, for any deck: two that each need an empty field (only one gets it), and a
+// second copy of a once-per-turn card (dead that turn unless it's used another way). With how often you open each.
+function Clashes({ main, nameOf, traits }: { main: DeckCard[]; nameOf: (code: number) => string; traits: Map<number, string[]> }) {
+  const total = main.reduce((sum, card) => sum + card.count, 0);
+  // hypergeometric: the chance a 5-card hand holds exactly k of `copies` cards
+  const choose = (n: number, k: number) => {
+    let r = 1;
+    for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
+    return k < 0 || k > n ? 0 : r;
+  };
+  const exactly = (copies: number, k: number, hand = 5) => (choose(copies, k) * choose(total - copies, hand - k)) / choose(total, hand);
+  const none = (copies: number) => exactly(copies, 0);
+  const atLeastTwo = (copies: number) => 1 - exactly(copies, 0) - exactly(copies, 1);
+  const has = (code: number, trait: string) => (traits.get(code) ?? []).some((one) => one.startsWith(trait));
+  const empty = main.filter((card) => has(card.code, "needs an empty field"));
+  const lines: string[] = [];
+  for (let a = 0; a < empty.length; a++)
+    for (let b = a + 1; b < empty.length; b++) {
+      const [x, y] = [empty[a], empty[b]];
+      const both = 1 - none(x.count) - none(y.count) + none(x.count + y.count);
+      lines.push(`${nameOf(x.code)} and ${nameOf(y.code)} both need an empty field, so only one can use it: you open both in ${(both * 100).toFixed(1)}% of hands.`);
+    }
+  for (const card of main) {
+    if (card.count < 2 || !has(card.code, "once per turn by name") || !["starter", "pair", "extender"].includes(card.tag.role)) continue;
+    const two = atLeastTwo(card.count);
+    if (two >= 0.02) lines.push(`${nameOf(card.code)} ×${card.count} is once per turn: you open two in ${(two * 100).toFixed(1)}% of hands, and the second does nothing that turn unless something else uses it (a discard, a cost, a Seventh Tachyon put-back).`);
+  }
+  if (!lines.length) return null;
+  return (
+    <div className="opt-note">
+      <b>Clashes in the same hand.</b>
+      <ul className="opt-clashes">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
     </div>
   );
 }
