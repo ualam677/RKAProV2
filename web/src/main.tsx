@@ -9,7 +9,7 @@ import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, 
 import type { Piece } from "./engine/interruptions";
 import { Tests } from "./Tests";
 import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
-import { toYdk } from "./decks";
+import { readReplayLink, replayLink, toYdk } from "./decks";
 import { recordVideo } from "./video";
 import "./style.css";
 
@@ -613,6 +613,30 @@ function App() {
     const wait = window.setTimeout(() => viewTo(viewing.at + 1), Math.max(800, cueTime(shown?.events ?? []) + 350));
     return () => window.clearTimeout(wait);
   }, [viewing]);
+  // a link to this test's replay, shared or copied
+  const shareReplay = async (saved: SavedTest) => {
+    try {
+      const url = await replayLink(saved);
+      if (navigator.share) await navigator.share({ title: "RKAPro replay", url });
+      else {
+        await navigator.clipboard.writeText(url);
+        setSyncNote("Replay link copied");
+        setError("Replay link copied: anyone who opens it watches this test in their browser.");
+      }
+    } catch (problem) {
+      if (!(problem instanceof DOMException && problem.name === "AbortError")) setError(problem instanceof Error ? problem.message : String(problem));
+    }
+  };
+  // opened from a shared link: watch it as soon as the cards are loaded
+  useEffect(() => {
+    if (!ready || !location.hash.startsWith("#replay=")) return;
+    void readReplayLink(location.hash)
+      .then((shared) => {
+        history.replaceState(null, "", location.pathname);
+        if (shared) void openViewer({ ...shared, id: newId(), date: Date.now() });
+      })
+      .catch(() => setError("This replay link is damaged or incomplete."));
+  }, [ready]);
   const saveVideo = async (saved: SavedTest) => {
     setVideo({ id: saved.id, share: 0 });
     try {
@@ -1108,7 +1132,7 @@ function App() {
             <h2>Replays</h2>
           </div>
           {deck.tests?.length ? (
-            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />
+            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} onShare={shareReplay} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />
           ) : (
             <p className="muted">No saved tests yet. Every hand you test is saved here as you play.</p>
           )}

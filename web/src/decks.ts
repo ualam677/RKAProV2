@@ -230,3 +230,23 @@ export async function importDeck(text: string, fileName = ""): Promise<Imported>
 
 // Fusion, Synchro, Xyz and Link Monsters go to the Extra Deck
 export const EXTRA_TYPES = 0x40 | 0x2000 | 0x800000 | 0x4000000;
+
+// ---- shareable replays: a saved test in a link, compressed after "#replay=" (never sent to any server) ----
+const toBase64Url = (bytes: Uint8Array) => toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export async function replayLink(record: TestRecord): Promise<string> {
+  const { options, picks, steps, startHand } = record;
+  const text = JSON.stringify({ v: 1, options, picks, steps: steps.map((step) => [step.text, step.idle ? 1 : 0]), startHand });
+  const packed = await deflate(new TextEncoder().encode(text));
+  return `${location.origin}${location.pathname}#replay=${toBase64Url(packed)}`;
+}
+export async function readReplayLink(hash: string): Promise<TestRecord | null> {
+  const match = /#replay=([A-Za-z0-9_-]+)/.exec(hash);
+  if (!match) return null;
+  const data = JSON.parse(new TextDecoder().decode(await inflate(fromBase64(match[1])))) as {
+    options: TestRecord["options"];
+    picks: TestRecord["picks"];
+    steps: [string, number][];
+    startHand: number[];
+  };
+  return { options: data.options, picks: data.picks, steps: data.steps.map(([text, idle]) => ({ text, idle: !!idle })), startHand: data.startHand };
+}

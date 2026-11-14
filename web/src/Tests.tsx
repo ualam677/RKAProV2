@@ -9,6 +9,7 @@ interface Props {
   onWatch: (test: SavedTest, from?: number) => void;
   onDelete: (id: string) => void;
   onVideo: (test: SavedTest) => void;
+  onShare: (test: SavedTest) => void;
   // a video being made: which test, and how far (0-1)
   video: { id: string; share: number } | null;
   // a replay being prepared for watching
@@ -30,7 +31,7 @@ const grouped = (codes: number[], nameOf: (code: number) => string) => {
   return [...tally].map(([code, count]) => `${count > 1 ? `${count}× ` : ""}${nameOf(code)}`).join(" · ");
 };
 
-export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, video, loading }: Props) {
+export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, video, loading }: Props) {
   const [onlyWorked, setOnlyWorked] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const shown = onlyWorked ? tests.filter((test) => test.worked) : tests;
@@ -78,6 +79,9 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, video, loadin
                   </button>
                   <button className="button small" disabled={!!video} onClick={() => onVideo(test)}>
                     {video?.id === test.id ? `Video ${Math.round(video.share * 100)}%` : "Save as video"}
+                  </button>
+                  <button className="button small" onClick={() => onShare(test)}>
+                    Share link
                   </button>
                   <button className="button small ghost" onClick={() => onDelete(test.id)}>
                     Delete
