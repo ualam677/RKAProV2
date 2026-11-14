@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { parseYdk, shuffled } from "./deck";
 import { Duel, cueTime } from "./Duel";
 import { DeckEditor } from "./DeckEditor";
-import { CardArt } from "./CardArt";
+import { CardArt, setArtworkOriginals } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest } from "./decks";
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
 import type { Piece } from "./engine/interruptions";
@@ -75,6 +75,11 @@ function App() {
   const [view, setView] = useState<DuelView | null>(null);
   const [texts, setTexts] = useState(new Map<number, CardText>());
   const [cards, setCards] = useState(new Map<number, CardInfo>());
+  // card pictures: an alternate artwork the picture servers lack shows the original card's picture
+  setArtworkOriginals((code) => {
+    const card = cards.get(code);
+    return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
+  });
   const [banlist, setBanlist] = useState<{ name: string; limits: Record<number, number> }>({ name: "", limits: {} });
   const [error, setError] = useState("");
   const deck = decks.find((one) => one.id === deckId) ?? decks[0] ?? null;
@@ -257,6 +262,12 @@ function App() {
 
   // card names for the opening hand picker come from the worker once the cards are loaded
   const unique = useMemo(() => [...new Set(deck?.main ?? [])], [deck]);
+  // what every card of the chosen deck is (which artwork of which card), for pictures in the duel as well
+  useEffect(() => {
+    if (!ready || !deck) return;
+    const missing = [...new Set([...deck.main, ...deck.extra, ...deck.side])].filter((code) => !cards.has(code));
+    if (missing.length) void info(missing);
+  }, [ready, deck?.id]);
   useEffect(() => {
     if (!ready) return;
     // and for saved tests: what they opened with and the boards they ended on (Extra Deck monsters too)
@@ -277,14 +288,20 @@ function App() {
   };
 
   // a deck from any of the formats, Main and Extra split by card type when the format keeps them together (Omega)
+  // Every card is translated to one the database knows: YGO Omega's own artwork numbers become the real card, and
+  // anything that can't be matched is named in a notice instead of being kept as an unreadable number.
   const readDeck = async (text: string, fileName = "") => {
     const imported = await importDeck(text, fileName);
     const name = fileName.replace(/\.(ydk|txt)$/i, "") || "Imported deck";
-    if ("deck" in imported) return { ...imported.deck, name };
-    const found = await info([...imported.unsplit.mainAndExtra, ...imported.unsplit.side]);
+    const asked = "deck" in imported ? [...imported.deck.main, ...imported.deck.extra, ...imported.deck.side] : [...imported.unsplit.mainAndExtra, ...imported.unsplit.side];
+    const found = await info([...new Set(asked)]);
     const known = new Map(found.map((card) => [card.asked, card]));
+    const missing = [...new Set(asked.filter((code) => !known.has(code)))];
+    if (missing.length) setError(`${missing.length} card${missing.length > 1 ? "s" : ""} in this deck aren't in the card database and were left out: ${missing.join(", ")}`);
+    const real = (codes: number[]) => codes.flatMap((code) => (known.has(code) ? [known.get(code)!.code] : []));
+    if ("deck" in imported) return { name, main: real(imported.deck.main), extra: real(imported.deck.extra), side: real(imported.deck.side) };
     const isExtra = (code: number) => ((known.get(code)?.type ?? 0) & EXTRA_TYPES) !== 0;
-    return { name, main: imported.unsplit.mainAndExtra.filter((code) => !isExtra(code)), extra: imported.unsplit.mainAndExtra.filter(isExtra), side: imported.unsplit.side };
+    return { name, main: real(imported.unsplit.mainAndExtra.filter((code) => !isExtra(code))), extra: real(imported.unsplit.mainAndExtra.filter(isExtra)), side: real(imported.unsplit.side) };
   };
   const importText = async (text: string, fileName = "") => {
     try {
