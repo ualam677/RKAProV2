@@ -158,8 +158,10 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
    they cut hand traps and engine pieces) and the engine's own "Find a line" (it played lines like Number 90 into Photon
    Howling). A worked replay is now its start's line (`source: "replay"` in `routes`), checked against hand traps and
    Nibiru. The search code stays in probe.ts (the computer opponent plans with it).
-2. Measured success per start, with why it failed: from saved tests, how often each start reached a full board, and
-   for the misses, what stopped it (bricked hand, a hand trap, a step missing). Feeds the optimiser's odds.
+2. Done: measured success per start (`results` on the deck, counted when you move on from a test: full, hand trap,
+   short, brick) and a deck size check (`deckSizes` / `withoutCards`: the deck at each size down to 40, cutting
+   Bricks, Other, then Extenders; or your own cuts; judged with starts counting double). Next: suggestions rebuilt on
+   these (locked cards, hand trap targets going 1st and 2nd, trade-offs shown, measured results weighed in).
 3. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).
 Not wanted: a Side Deck planner, WindBot Ignite. Maybe later: drill mode, custom odds conditions, OCG / Master Duel ban
 lists.

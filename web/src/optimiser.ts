@@ -450,3 +450,55 @@ export function throughMany(cards: DeckCard[], hand: number, lives: (code: numbe
   walk(0, hand, 1);
   return odds;
 }
+
+// ---- deck size: is every card above 40 worth what it dilutes? ----
+// Guides agree on the shape: each card over 40 lowers the odds of your best draws, so it has to be at least as useful as
+// what it pushes out; about 40% non-engine (hand traps, breakers) lets you see 2 going second; few Normal Summon starters.
+// So the deck is compared with itself at each size down to 40, cutting what costs least: Bricks, then Other cards, then
+// Extenders (named, as they play through negates). Starters, hand traps, breakers and combo pieces are never cut here.
+export interface SizeRow {
+  total: number;
+  cut: number[]; // codes taken out to get here (or added, for a size above the deck's)
+  added?: number[];
+  combo1: number; // open a combo going 1st
+  comboTrap1: number; // ... with a hand trap kept as well
+  traps2: number; // two or more hand traps going 2nd (6 cards)
+  dead: number; // at least one dead card going 1st
+  extenders: boolean; // an Extender had to go
+}
+const CUT_ORDER: Role[] = ["brick", "other", "extender"];
+const rowOf = (cards: DeckCard[], total: number, cut: number[], extenders: boolean, added?: number[]): SizeRow => {
+  const first = computeOdds(cards, 5);
+  const second = computeOdds(cards, 6);
+  return { total, cut, added, combo1: first.combo, comboTrap1: first.comboHandtrap, traps2: second.handtrap2, dead: first.dead, extenders };
+};
+export function deckSizes(cards: DeckCard[]): { rows: SizeRow[]; nonEngine: number; total: number } {
+  const total = cards.reduce((sum, card) => sum + card.count, 0);
+  const nonEngine = cards.filter((card) => ["handtrap", "handtrap2", "breaker"].includes(card.tag.role)).reduce((sum, card) => sum + card.count, 0);
+  const rows: SizeRow[] = [rowOf(cards, total, [], false)];
+  let now = cards.map((card) => ({ ...card }));
+  const cut: number[] = [];
+  let extenders = false;
+  for (let size = total; size > 40; size--) {
+    // the cheapest role still there; within it, the card with the most copies
+    const pick = CUT_ORDER.flatMap((role) => now.filter((card) => card.tag.role === role && card.count > 0).sort((a, b) => b.count - a.count))[0];
+    if (!pick) break;
+    if (pick.tag.role === "extender") extenders = true;
+    pick.count--;
+    cut.push(pick.code);
+    now = now.filter((card) => card.count > 0);
+    rows.push(rowOf(now, size - 1, [...cut], extenders));
+  }
+  // at 40: what one more hand trap (your most-played one with copies to spare) would do
+  if (total === 40) {
+    const trap = cards.filter((card) => card.tag.role === "handtrap" && card.count < 3).sort((a, b) => b.count - a.count)[0];
+    if (trap) rows.push(rowOf(cards.map((card) => (card.code === trap.code ? { ...card, count: card.count + 1 } : card)), 41, [], false, [trap.code]));
+  }
+  return { rows, nonEngine, total };
+}
+
+/** The deck without the given copies (one code per copy taken out), as a row to compare. */
+export function withoutCards(cards: DeckCard[], out: number[]): SizeRow {
+  const left = cards.map((card) => ({ ...card, count: card.count - out.filter((code) => code === card.code).length })).filter((card) => card.count > 0);
+  return rowOf(left, left.reduce((sum, card) => sum + card.count, 0), out, out.some((code) => cards.find((card) => card.code === code)?.tag.role === "extender"));
+}

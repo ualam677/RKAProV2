@@ -8,7 +8,7 @@ import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type Save
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
 import {
-  GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
+  deckSizes, withoutCards, type SizeRow, GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
 
@@ -432,9 +432,10 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               {normalCount > normalLimit(total) && (
                 <p className="opt-note warn">
                   {normalCount} cards need your Normal Summon ({normalCards.map((card) => `${card.count} ${nameOf(card.code)}`).join(", ")}). Keep it to {normalLimit(total)} in a {total}-card deck:
-                  you hold two of them in {pct(first.normal2)} of hands going first, and only one can be summoned. Swaps never add another.
+                  you hold two of them in {pct(first.normal2)} of hands going first, and only one can be summoned.
                 </p>
               )}
+              <DeckSize main={main} nameOf={nameOf} />
               {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
               {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
                 <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
@@ -754,5 +755,108 @@ function Measured({ results, deck = false }: { results: TestResult[]; deck?: boo
       {deck ? "All your tests" : "Your tests"}: <b>{full} of {results.length}</b> reached a full board ({Math.round((full / results.length) * 100)}%)
       {list.length > 0 && ` · missed: ${list.map(([reason, count]) => `${reason}${count > 1 ? ` ×${count}` : ""}`).join(" · ")}`}
     </span>
+  );
+}
+
+// Is every card above 40 worth what it dilutes? The deck at each size down to 40, cutting what costs least, and a verdict
+function DeckSize({ main, nameOf }: { main: DeckCard[]; nameOf: (code: number) => string }) {
+  const { rows: auto, nonEngine, total } = useMemo(() => deckSizes(main), [main]);
+  // your own choice of what goes: tap the cards you'd take out to reach 40
+  const [out, setOut] = useState<number[]>([]);
+  const mine = out.length ? withoutCards(main, out) : null;
+  const rows = mine ? [...auto, mine] : auto;
+  const now = rows[0];
+  const forty = auto.find((row) => row.total === 40 && row !== now);
+  const plus = auto.find((row) => row.added);
+  // one number to judge a change by: starts count double (you need them every game), then a hand trap kept going
+  // first and two going second (half your games): positive means the change is better
+  const worth = (after: SizeRow) => (after.combo1 - now.combo1) * 2 + (after.comboTrap1 - now.comboTrap1) + (after.traps2 - now.traps2);
+  const judge = (after: SizeRow, size: string) =>
+    worth(after) > 0.02 ? `On balance the ${size} is better.` : worth(after) < -0.02 ? `On balance your ${total} is better: the extra cards are worth their dilution.` : "Close either way: which matters more to you decides it.";
+  const delta = (after: number, before: number) => `${after >= before ? "+" : ""}${((after - before) * 100).toFixed(1)}%`;
+  const names = (codes: number[]) => {
+    const tally = new Map<number, number>();
+    codes.forEach((code) => tally.set(code, (tally.get(code) ?? 0) + 1));
+    return [...tally].map(([code, n]) => `${n > 1 ? `${n}× ` : ""}${nameOf(code)}`).join(", ");
+  };
+  let verdict: string;
+  if (total === 40)
+    verdict = plus
+      ? `40 cards. A 41st card (another ${nameOf(plus.added![0])}) would change opening a combo by ${delta(plus.combo1, now.combo1)} and seeing 2 hand traps going 2nd by ${delta(plus.traps2, now.traps2)}: worth it only if that hand trap matters more to you than the starts.`
+      : "40 cards: the most consistent size for what's in it.";
+  else if (!forty)
+    verdict = `${total} cards, and nothing to cut without touching a starter, hand trap, breaker or combo piece: tag a card as Brick, Other or Extender if it could go. Each card above 40 is a deliberate trade.`;
+  else {
+    const gain = forty.combo1 - now.combo1;
+    const loss = now.traps2 - forty.traps2;
+    verdict =
+      gain < 0.005 && loss < 0.005
+        ? `Going to 40 (cutting ${names(forty.cut)}) changes almost nothing: ${total} is fine.`
+        : `Cutting ${names(forty.cut)} to reach 40: opening a combo ${delta(forty.combo1, now.combo1)}, combo + hand trap ${delta(forty.comboTrap1, now.comboTrap1)}, 2 hand traps going 2nd ${delta(forty.traps2, now.traps2)}.` +
+          ` ${judge(forty, "40")}` + (forty.extenders ? " It cuts Extenders, which play through negates: the odds don't show that, so weigh it yourself." : "");
+  }
+  return (
+    <div className="opt-size">
+      <p className="opt-note">
+        <b>Deck size.</b> {verdict}
+      </p>
+      {rows.length > 1 && (
+        <table className="opt-size-table">
+          <thead>
+            <tr>
+              <th>Cards</th>
+              <th>Combo 1st</th>
+              <th>+ hand trap</th>
+              <th>2 traps 2nd</th>
+              <th>Dead card</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.total}-${row.added ? "plus" : ""}`} className={row === now ? "now" : ""} title={row.added ? `+ ${names(row.added)}` : row.cut.length ? `without ${names(row.cut)}` : "your deck"}>
+                <td>
+                  {row.total}
+                  {row === now ? " (now)" : row.added ? " (+1)" : row === mine ? " (yours)" : ""}
+                </td>
+                <td>{(row.combo1 * 100).toFixed(1)}%</td>
+                <td>{(row.comboTrap1 * 100).toFixed(1)}%</td>
+                <td>{(row.traps2 * 100).toFixed(1)}%</td>
+                <td>{(row.dead * 100).toFixed(1)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {total > 40 && (
+        <div className="opt-note">
+          <b>Compare your own 40:</b> tap the {total - 40} card{total - 40 === 1 ? "" : "s"} you'd take out{mine ? ` (without ${names(out)})` : ""}.
+          <div className="opt-chips">
+            {main.map((card) => {
+              const taken = out.filter((code) => code === card.code).length;
+              return (
+                <button
+                  key={card.code}
+                  className={`button small ${taken ? "on" : ""}`}
+                  onClick={() => setOut(taken < card.count && out.length < total - 40 ? [...out, card.code] : out.filter((code) => code !== card.code))}
+                >
+                  {nameOf(card.code)}
+                  {taken ? ` −${taken}` : ""}
+                </button>
+              );
+            })}
+          </div>
+          {mine && (
+            <p>
+              Your 40 against your {total}: opening a combo {delta(mine.combo1, now.combo1)}, combo + hand trap {delta(mine.comboTrap1, now.comboTrap1)}, 2 hand traps going 2nd {delta(mine.traps2, now.traps2)}, a dead card {delta(mine.dead, now.dead)}.{" "}
+              {judge(mine, "40")}
+            </p>
+          )}
+        </div>
+      )}
+      <p className="opt-note">
+        Non-engine (hand traps and breakers): <b>{nonEngine}</b> of {total} ({Math.round((nonEngine / total) * 100)}%).
+        {nonEngine / total < 0.35 ? " Guides aim for about 40% so you see two going second; you're below that." : nonEngine / total > 0.5 ? " That's a lot: going first, it can crowd out your starts." : " In the range guides recommend (about 40%)."}
+      </p>
+    </div>
   );
 }

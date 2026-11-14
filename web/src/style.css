@@ -559,3 +559,10 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .ff-blink { display: inline-block; font-size: 18px; color: var(--accent-strong); animation: ff-blink 0.7s steps(2, start) infinite; }
 @keyframes ff-blink { to { visibility: hidden; } }
 .version { position: fixed; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 5; font-size: 11px; color: var(--muted); opacity: 0.55; pointer-events: none; }
+
+/* deck size table */
+.opt-size-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.opt-size-table th, .opt-size-table td { padding: 3px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+.opt-size-table th:first-child, .opt-size-table td:first-child { text-align: left; }
+.opt-size-table th { color: var(--muted); font-weight: 600; }
+.opt-size-table tr.now td { color: var(--accent-strong); font-weight: 700; }
