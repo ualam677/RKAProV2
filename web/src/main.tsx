@@ -146,6 +146,8 @@ function App() {
   const [record, setRecord] = useState<TestRecord | null>(null);
   const lastRecord = useRef<TestRecord | null>(null);
   const [worked, setWorked] = useState(false);
+  // what marking the test as working did: became a start's line, the start kept a better one, or no start in the hand
+  const [workedNote, setWorkedNote] = useState<{ testId: string; count: number; kind: "line" | "kept" | "nostart"; start?: number; best?: number } | null>(null);
   // watching a saved test: its choices are made one by one; any tap of yours takes over from there
   const [replay, setReplay] = useState<{ picks: (number[] | null)[]; at: number } | null>(null);
   const replayRef = useRef(replay);
@@ -302,9 +304,11 @@ function App() {
             if (one.id !== pending.deckId || one.results?.some((result) => result.id === id)) return one;
             const goal = one.fullAt ?? 3;
             const count = message.list.length;
-            const kind: TestResult["kind"] = count >= goal ? "full" : pending.start === undefined ? "brick" : pending.trap ? "handtrap" : "short";
-            const why =
-              kind === "full" ? `Full board: ${count} interruption${count === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : kind === "handtrap" ? `${pending.trap}: ended on ${count} of ${goal}` : `Fell short: ${count} of ${goal} interruptions`;
+            const marked = one.tests?.some((test) => test.id === id && test.worked);
+            const kind: TestResult["kind"] = marked || count >= goal ? "full" : pending.start === undefined ? "brick" : pending.trap ? "handtrap" : "short";
+            const why = marked
+              ? "Marked as working"
+              : kind === "full" ? `Full board: ${count} interruption${count === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : kind === "handtrap" ? `${pending.trap}: ended on ${count} of ${goal}` : `Fell short: ${count} of ${goal} interruptions`;
             const result: TestResult = { id, date: pending.date, start: pending.start, hand: pending.hand, interruptions: count, kind, why, held: pending.held };
             return { ...one, results: [result, ...(one.results ?? [])].slice(0, 300) };
           }),
@@ -312,27 +316,38 @@ function App() {
       } else if (message.type === "interruptions") {
         // a working test's board, counted: kept with the test
         setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list, protection: message.protection, nibiru: message.nibiru, counted: COUNTING } : test)) } : one)));
-        // a worked replay is its start's line in Optimise: checked against each hand trap and Nibiru
+        // a test marked as working: counted as a full board in your record, and its start's line (checked against hand traps)
         window.setTimeout(() => {
           const owner = decksRef.current.find((one) => one.tests?.some((test) => test.id === message.id));
           const test = owner?.tests?.find((one) => one.id === message.id);
           if (!owner || !test?.worked) return;
-          const start = startOf(owner, test.startHand, test.testOf) ?? test.startHand[0];
-          // marked as working: its result is a full board, whatever it was counted as
-          if (owner.results?.some((one) => one.id === test.id && one.kind !== "full"))
-            owner.results = owner.results.map((one) => (one.id === test.id ? { ...one, kind: "full", why: "Marked as working" } : one));
-          if (start === undefined) return;
-          const before = owner.routes?.[start];
+          const results = (owner.results ?? []).map((one) => (one.id === test.id ? { ...one, kind: "full" as const, why: "Marked as working" } : one));
+          const start = startOf(owner, test.startHand, test.testOf);
+          const before = start === undefined ? undefined : owner.routes?.[start];
+          const count = message.list.length;
+          // no starter in this hand: it counts as working, but it isn't any start's line
+          if (start === undefined) {
+            setDecks((all) => all.map((one) => (one.id === owner.id ? { ...one, results } : one)));
+            setWorkedNote({ testId: test.id, count, kind: "nostart" });
+            return;
+          }
           // the start keeps its best worked line
-          if (before?.source === "replay" && before.testId !== test.id && (before.interruptions?.length ?? 0) > message.list.length) return;
+          if (before?.source === "replay" && before.testId !== test.id && (before.interruptions?.length ?? 0) > count) {
+            setDecks((all) => all.map((one) => (one.id === owner.id ? { ...one, results } : one)));
+            setWorkedNote({ testId: test.id, count, kind: "kept", start, best: before.interruptions?.length ?? 0 });
+            return;
+          }
           const keys = test.steps.flatMap((step) => (!step.code ? [] : step.idle ? [`${step.text.split(/[ :]/)[0]}:${step.code}`] : [`pick:${step.hint ?? 0}:${step.code}`]));
           const line = {
-            keys, board: test.board ?? [], interruptions: message.list, protection: message.protection, nibiru: message.nibiru, coverage: 1, full: message.list.length >= (owner.fullAt ?? 3),
+            keys, board: test.board ?? [], interruptions: message.list, protection: message.protection, nibiru: message.nibiru, coverage: 1, full: count >= (owner.fullAt ?? 3),
             aimed: true, tried: 0, date: Date.now(), signature: deckSignature(owner), record: { options: test.options, picks: test.picks, steps: test.steps, startHand: test.startHand }, source: "replay" as const, testId: test.id,
           };
-          const updated = { ...owner, routes: { ...owner.routes, [start]: line } };
+          const updated = { ...owner, results, routes: { ...owner.routes, [start]: line } };
           setDecks((all) => all.map((one) => (one.id === owner.id ? updated : one)));
+          setWorkedNote({ testId: test.id, count, kind: "line", start });
+          // its hand trap check: now, or after the one running
           if (!chokingRef.current) checkChokes(updated, [{ code: start, hand: test.startHand }]);
+          else if (!chokingRef.current.queue.some((one) => one.code === start)) chokingRef.current.queue.push({ code: start, hand: test.startHand });
         }, 50);
       } else if (message.type === "choke") {
         const job = chokingRef.current;
@@ -647,6 +662,11 @@ function App() {
         ]
       : undefined;
     setWorked(current.worked);
+    if (!current.worked) {
+      setWorkedNote(null);
+      const owner = decksRef.current.find((one) => one.id === current.deckId);
+      if (owner) changeDeck({ ...owner, routes: Object.fromEntries(Object.entries(owner.routes ?? {}).filter(([, route]) => route.testId !== current.id)) });
+    }
     keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
     if (current.pieces) void countBoard({ ...record, id: current.id, date: current.date }).then((counted) => counted?.send());
   };
@@ -1083,6 +1103,13 @@ function App() {
           skip={skip}
           worked={worked}
           onWorked={record && !replay ? markWorked : undefined}
+          workedText={(() => {
+            const note = workedNote && workedNote.testId === test.current?.id ? workedNote : null;
+            if (!note) return "Saved, counting…";
+            const name = note.start ? (cards.get(note.start)?.name ?? texts.get(note.start)?.name ?? "This start") : "";
+            const n = `${note.count} interruption${note.count === 1 ? "" : "s"}`;
+            return note.kind === "line" ? `${name}'s line · ${n}` : note.kind === "kept" ? `Saved · ${name} keeps its ${note.best}-interruption line` : `Saved · ${n} · no starter in this hand`;
+          })()}
           replaying={replay ? { at: replay.at, of: replay.picks.length, stop: () => (setReplay(null), newTest(test.current?.testOf, replay.at)) } : null}
           states={(decks.find((one) => one.id === test.current?.deckId) ?? deck)?.saves ?? []}
           onSaveState={saveState}

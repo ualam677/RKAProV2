@@ -18,6 +18,8 @@ interface Props {
   // "This worked": keeps the test and the board it ended on; undefined while nothing has been played yet
   worked: boolean;
   onWorked?: () => void;
+  // what saving it did, in words ("Galaxy Wizard's line · 3 interruptions")
+  workedText?: string;
   // a saved test playing back: where it is, and stopping it to play on yourself
   replaying: { at: number; of: number; stop: () => void } | null;
   // save states: keep this moment, or go back to one kept earlier
@@ -335,7 +337,7 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   );
 }
 
-export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying, states, onSaveState, onLoadState, onRewind, viewer, viewerMenu }: Props) {
+export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, workedText, replaying, states, onSaveState, onLoadState, onRewind, viewer, viewerMenu }: Props) {
   const [stateList, setStateList] = useState(false);
   // Xyz Materials drawn under their monster, like EDOPro (an option, remembered)
   const [showMaterials, setShowMaterials] = useState(() => {
@@ -890,7 +892,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
       )}
       {onWorked && (
         <button className={`button ${worked ? "on" : ""}`} onClick={onWorked}>
-          {worked ? "✓ Worked (tap to undo)" : "✓ This worked"}
+          {worked ? `✓ ${workedText ?? "Saved"} (tap to undo)` : "Save as a working line"}
         </button>
       )}
       <button className="button" onClick={restart}>
