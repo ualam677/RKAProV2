@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CardArt } from "./CardArt";
+import { isMuted, onMuted, play, setMuted, type Sound } from "./sound";
 import { LOCATION, POSITION, TYPE, sumReady, sumSoFar, type CardRef, type CardText, type CardView, type Choice, type DuelEvent, type DuelView, type PlayerView } from "./engine/protocol";
 
 interface Props {
@@ -161,6 +162,7 @@ function CardTile({ card, glow, pulse, picked, focused, className, style, onTap,
     picked ? "picked" : "",
     focused ? "focused" : "",
     faceDown(card) && !hidden ? "set" : "",
+    card.negated ? "negated" : "",
     className ?? "",
   ];
   return (
@@ -169,6 +171,16 @@ function CardTile({ card, glow, pulse, picked, focused, className, style, onTap,
       {!hidden && !pictured && <span className="tile-name">{card.name}</span>}
       {card.materials > 0 && <span className="tile-badge">{card.materials}</span>}
       {caption && <span className="tile-caption">{caption}</span>}
+      {card.negated && (
+        // marked for as long as it stays negated: a red chain ring and a tag
+        <span className="negated-mark" aria-label="Negated">
+          <svg viewBox="0 0 44 44" fill="none" aria-hidden="true">
+            <circle cx="22" cy="22" r="17" stroke="currentColor" strokeWidth="2.5" />
+            <path d="M8 36 36 8" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeDasharray="5 4" />
+          </svg>
+          <b>NEGATED</b>
+        </span>
+      )}
     </button>
   );
 }
@@ -185,7 +197,24 @@ function PileFace({ card }: { card?: CardView }) {
   );
 }
 
-function LifeBar({ name, lp, extra, mine, active, children, onExtra }: { name: string; lp: number; extra?: string; mine?: boolean; active: boolean; children?: ReactNode; onExtra?: () => void }) {
+/** Sound on or off, remembered. */
+export function MuteButton({ className = "icon-button" }: { className?: string }) {
+  const [muted, set] = useState(isMuted());
+  useEffect(() => {
+    const off = onMuted(set);
+    return () => void off();
+  }, []);
+  return (
+    <button className={`${className} mute`} aria-label={muted ? "Sound off: turn on" : "Sound on: mute"} aria-pressed={muted} onClick={(event) => (event.stopPropagation(), setMuted(!muted))}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M11 5 6 9H3v6h3l5 4z" />
+        {muted ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />}
+      </svg>
+    </button>
+  );
+}
+
+function LifeBar({ name, lp, extra, mine, active, children, after, onExtra }: { name: string; lp: number; extra?: string; mine?: boolean; active: boolean; children?: ReactNode; after?: ReactNode; onExtra?: () => void }) {
   const fill = Math.max(0, Math.min(1, lp / START_LP));
   return (
     <div className={`lifebar ${mine ? "mine" : "theirs"} ${active ? "active" : ""}`}>
@@ -200,6 +229,7 @@ function LifeBar({ name, lp, extra, mine, active, children, onExtra }: { name: s
           <div className="lifebar-fill" style={{ width: `${fill * 100}%` }} />
         </div>
       </div>
+      {after}
     </div>
   );
 }
@@ -261,6 +291,12 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   const notes = events.filter((event) => event.kind === "coin" || event.kind === "dice" || event.kind === "message");
   // a new phase, yours or the opponent's, as EDOPro shows it
   const phaseCue = events.filter((event) => event.kind === "phase").pop();
+  // the moment's one sound: the most important thing that happened
+  useEffect(() => {
+    const order: [DuelEvent["kind"], Sound][] = [["negated", "negate"], ["summon", "summon"], ["attack", "attack"], ["activate", "activate"], ["phase", "phase"], ["resolve", "resolve"], ["draw", "draw"], ["added", "draw"]];
+    const found = order.find(([kind]) => events.some((event) => event.kind === kind));
+    if (found) play(found[1]);
+  }, []);
   // the last view of a play keeps its events, so the cue hides itself once it has been seen
   const [shown, setShown] = useState(true);
   useEffect(() => {
@@ -847,6 +883,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   );
   const menu = viewer ? (
     <>
+      {wide && <MuteButton className="button" />}
       {viewerMenu}
       {materialsToggle}
       <button className="button ghost" onClick={leave}>
@@ -855,6 +892,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     </>
   ) : (
     <>
+      {wide && <MuteButton className="button" />}
       {materialsToggle}
       <button
         className="button"
@@ -941,6 +979,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
       lp={them.lp}
       extra={`Hand ${them.hand.length}`}
       active={!myTurn}
+      after={!wide ? <MuteButton /> : undefined}
       // in a replay every card is shown: the opponent's hand opens like a pile
       onExtra={viewer && them.hand.some((card) => card.code) ? () => setSheet({ kind: "pile", controller: 1, pile: "hand" }) : undefined}
     >

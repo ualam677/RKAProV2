@@ -585,3 +585,84 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-try-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px; font-size: 13px; }
 .opt-try-row.changed span:first-child { color: var(--accent-strong); font-weight: 600; }
 .opt-try-row .button { min-width: 32px; padding: 0; }
+
+
+/* ==== Ink & Signal, Yu-Gi-Oh! edition (redesign): Master Duel's dark mat and gold trim, Duel Links' plates ==== */
+:root {
+  --ink: #04060b;
+  --gold: #e6c36a;
+  --gold-soft: rgba(230, 195, 106, 0.45);
+  --blue-glow: rgba(61, 139, 255, 0.55);
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --frame-monster: #c8783a; --frame-spell: #1e9e8a; --frame-trap: #b5427e; --frame-xyz: #2b2b33;
+  --frame-fusion: #8a5bc0; --frame-synchro: #d8dbe2; --frame-link: #2f6bd0;
+}
+.duel { background: var(--ink); }
+
+/* life point plates */
+.duel .lifebar { border-radius: 12px; padding: 3px 4px 3px 10px; }
+.duel .lifebar.theirs { border-color: #5a2a32; background: #140a0e; box-shadow: inset 0 0 14px rgba(255, 90, 100, 0.12); }
+.duel .lifebar.mine { border-color: #2c4a80; background: #0a1324; box-shadow: inset 0 0 14px rgba(61, 139, 255, 0.18); }
+.duel .lifebar-name { letter-spacing: 0.06em; text-transform: uppercase; font-size: 12px; }
+.duel .lifebar.theirs .lifebar-name { color: #d9a3aa; }
+.duel .lifebar.mine .lifebar-name { color: #a9c6f5; }
+.duel .lifebar-lp { font-family: var(--display); font-weight: 700; font-size: 22px; line-height: 1; }
+.duel .lifebar.theirs .lifebar-lp { color: #ffb3ba; text-shadow: 0 0 10px rgba(255, 107, 120, 0.6); }
+.duel .lifebar.mine .lifebar-lp { color: #cfe2ff; text-shadow: 0 0 10px rgba(61, 139, 255, 0.7); }
+.duel .lifebar.theirs .lifebar-fill { background: #ff6b78; box-shadow: 0 0 8px #ff6b78; }
+.duel .lifebar.mine .lifebar-fill { background: #3d8bff; box-shadow: 0 0 8px #3d8bff; }
+.duel .lifebar.active { box-shadow: inset 0 0 14px rgba(230, 195, 106, 0.18), 0 0 12px rgba(230, 195, 106, 0.25); }
+.icon-button.mute { flex: 0 0 38px; height: 38px; border-radius: 10px; color: #b9c6de; background: #0b1120; display: flex; align-items: center; justify-content: center; }
+
+/* the field mat: a soft blue glow under the zones */
+.field-area { position: relative; }
+.field-area::before { content: ""; position: absolute; inset: 4px 0; border-radius: 18px; pointer-events: none; background: radial-gradient(ellipse at 50% 55%, rgba(40, 90, 180, 0.28), rgba(10, 20, 45, 0.12) 55%, transparent 75%); border: 1px solid rgba(110, 160, 255, 0.12); }
+.field { position: relative; }
+.zone { border-color: rgba(110, 160, 255, 0.16); background: rgba(12, 22, 46, 0.35); }
+.zone.emz { border-color: rgba(230, 195, 106, 0.4); border-style: dashed; }
+.pile { background: #0b1120; border-color: #2a3550; }
+
+/* card-type frames around the picture */
+.tile.pictured { padding: 2px; }
+.tile.pictured.monster { background: var(--frame-monster); }
+.tile.pictured.spell { background: var(--frame-spell); }
+.tile.pictured.trap { background: var(--frame-trap); }
+.tile.pictured.xyz { background: var(--frame-xyz); box-shadow: inset 0 0 0 1px var(--gold-soft); }
+.tile.pictured.fusion { background: var(--frame-fusion); }
+.tile.pictured.synchro { background: var(--frame-synchro); }
+.tile.pictured.link { background: var(--frame-link); }
+.tile.pictured .art { position: static; width: 100%; height: 100%; border-radius: 2px; }
+
+/* what you can use glows blue and breathes */
+.tile.glow { box-shadow: 0 0 0 1.5px #9cd0ff, 0 0 10px 2px var(--blue-glow); animation: can-use 1.6s ease-in-out infinite; }
+@keyframes can-use { 50% { box-shadow: 0 0 0 1.5px #b9ddff, 0 0 16px 4px rgba(90, 170, 255, 0.7); } }
+.tile.picked { box-shadow: 0 0 0 3px var(--gold), 0 0 14px var(--gold-soft); }
+
+/* negated, for as long as it lasts */
+.tile.negated .art, .tile.negated .tile-name { filter: grayscale(1) brightness(0.55); }
+.tile.negated { box-shadow: 0 0 8px rgba(255, 60, 80, 0.55); }
+.negated-mark { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; color: #ff4d5e; pointer-events: none; }
+.negated-mark svg { width: 70%; height: auto; filter: drop-shadow(0 0 3px rgba(255, 60, 80, 0.8)); }
+.negated-mark b { position: absolute; top: 3px; left: 50%; transform: translateX(-50%); font-size: 7px; letter-spacing: 0.08em; color: #fff; background: #d9303f; border-radius: 3px; padding: 1px 3px; box-shadow: 0 0 6px rgba(255, 60, 80, 0.8); }
+.zone .tile.sideways .negated-mark { transform: rotate(-90deg); }
+
+/* the round phase button and the current phase in gold */
+.phase-button { width: 60px; height: 60px; border: 2px solid var(--gold); color: #f6e3a8; background: radial-gradient(circle at 35% 30%, #1e2b4a, #070b16); box-shadow: 0 0 14px rgba(230, 195, 106, 0.45), inset 0 0 10px rgba(230, 195, 106, 0.2); }
+.phase-button.ready { border-color: var(--gold); color: #fff3c9; box-shadow: 0 0 18px rgba(230, 195, 106, 0.7), inset 0 0 12px rgba(230, 195, 106, 0.3); }
+.phase-short { font-family: var(--display); font-size: 20px; }
+.phase-turn { color: #b8a776; letter-spacing: 0.06em; }
+
+/* prompts in a gold-trimmed bar */
+.prompt-bar { border-color: var(--gold); background: linear-gradient(#0e1830, #0a1222); box-shadow: 0 0 12px rgba(230, 195, 106, 0.25); }
+.prompt-title { color: #f6e3a8; font-weight: 600; }
+
+/* cards in hand carry their frames too */
+.hand-card.pictured { box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6); }
+.hand-card.glow { box-shadow: 0 0 0 1.5px #9cd0ff, 0 0 12px 3px var(--blue-glow), 0 6px 14px rgba(0, 0, 0, 0.6); }
+
+/* the phase you're in, in gold (the opponent's turn in red as before) */
+.duel .phase-track span { font-family: var(--display); font-size: 12px; border-color: rgba(110, 160, 255, 0.18); background: rgba(5, 10, 22, 0.85); }
+.duel .phase-track.mine span.on { border-color: var(--gold); background: var(--gold); color: #1a1206; box-shadow: 0 0 10px rgba(230, 195, 106, 0.6); }
+
+/* the duel never scrolls itself: cards fanned past the bottom edge are clipped, the top bar stays in view */
+.duel { overflow: clip; }

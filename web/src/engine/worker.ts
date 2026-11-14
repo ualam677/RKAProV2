@@ -320,7 +320,8 @@ async function prefetchScripts(codes: number[]): Promise<number[]> {
 const PHASES: Record<number, string> = { 1: "Draw", 2: "Standby", 4: "Main 1", 8: "Battle", 16: "Battle", 32: "Damage", 64: "Damage", 128: "Battle", 256: "Main 2", 512: "End" };
 // What the core is asked about each card. Never TYPE: ocgcore-wasm's reader does not handle that field and does not
 // skip it, so everything after it comes back shifted. The card's type is read from the database instead.
-const QUERY = (OcgQueryFlags.CODE | OcgQueryFlags.POSITION | OcgQueryFlags.LEVEL | OcgQueryFlags.RANK | OcgQueryFlags.ATTACK | OcgQueryFlags.DEFENSE | OcgQueryFlags.LINK | OcgQueryFlags.OVERLAY_CARD | OcgQueryFlags.COUNTERS) as OcgQueryFlags;
+// STATUS: bit 0x1 (STATUS_DISABLED) is a card whose effects are negated right now
+const QUERY = (OcgQueryFlags.CODE | OcgQueryFlags.POSITION | OcgQueryFlags.LEVEL | OcgQueryFlags.RANK | OcgQueryFlags.ATTACK | OcgQueryFlags.DEFENSE | OcgQueryFlags.LINK | OcgQueryFlags.OVERLAY_CARD | OcgQueryFlags.COUNTERS | OcgQueryFlags.STATUS) as OcgQueryFlags;
 
 let duel: OcgDuelHandle | null = null;
 let lp = [8000, 8000];
@@ -806,6 +807,8 @@ function cardsIn(controller: 0 | 1, location: OcgLocation, hidden = false): (Car
       position,
       materials: 0,
       overlay: info.overlayCards ?? [],
+      // negated for as long as it lasts (a face-up card on the field), not only the moment it happens
+      negated: !!code && (location === OcgLocation.MZONE || location === OcgLocation.SZONE) && (position & (OcgPosition.FACEUP_ATTACK | OcgPosition.FACEUP_DEFENSE)) !== 0 && ((info.status ?? 0) & 0x1) !== 0,
       counters: Object.entries(info.counters ?? {})
         .filter(([, count]) => count > 0)
         .map(([kind, count]) => ({ name: counterNames.get(Number(kind)) ?? "Counter", count })),

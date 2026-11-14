@@ -20,6 +20,8 @@ export interface CardView extends CardRef {
   materials: number;
   // attached Xyz materials, by passcode
   overlay: number[];
+  // its effects are negated right now (face-up on the field)
+  negated?: boolean;
   counters: { name: string; count: number }[];
 }
 
