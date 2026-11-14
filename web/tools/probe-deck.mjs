@@ -146,3 +146,18 @@ if (process.env.CHOKE) {
     console.log(`  ${names.get(one.trap)}: clean ${one.clean}; ${one.windows.length} moments; ` + one.windows.map((w) => `${w.at} -> ${w.interruptions}`).join("; "));
   }
 }
+
+if (process.env.COMBO) {
+  const { routeSearch, chokeCombo } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const find = (n) => [...names].find(([c, name]) => name === n && (main.includes(c) || cards.has(c)))[0];
+  const hand = process.env.COMBO.split(",").map(find);
+  const traps = (process.env.TRAPS ?? "Ash Blossom & Joyous Spring,Infinite Impermanence").split(",").map((n) => [...names].find(([, name]) => name === n)[0]);
+  const g = routeSearch(env, hand, rest(hand), extra, { targets: [], budget: 2500 });
+  let n; while (!(n = g.next()).done);
+  console.log(`LINE ${n.value.interruptions.length} interruptions`);
+  const t = performance.now();
+  const c = chokeCombo(env, hand, rest(hand), extra, n.value.keys, traps);
+  let m; while (!(m = c.next()).done);
+  const r = m.value;
+  console.log(`COMBO ${traps.map((c) => names.get(c)).join(" + ")} in ${((performance.now() - t) / 1000).toFixed(1)} s: ${r.steps.map((s) => `${names.get(s.trap)} on ${s.at}`).join(", then ")} -> ${r.interruptions} interruptions; board ${r.board.map((c) => names.get(c)).join(", ")}${r.unused.length ? `; never usable: ${r.unused.map((c) => names.get(c)).join(", ")}` : ""}`);
+}

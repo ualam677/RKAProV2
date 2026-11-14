@@ -1,6 +1,6 @@
 // Messages between the page and the duel worker. The worker turns everything
 // the duel core says into these plain shapes, so the page knows nothing about the core.
-import type { CardEvidence, Choke, Route } from "./probe";
+import type { CardEvidence, Choke, ChokeCombo, Route } from "./probe";
 import type { Interruption, Piece } from "./interruptions";
 
 export interface CardRef {
@@ -192,7 +192,8 @@ export type ToWorker =
   // route search from `hand` (the rest of `main` is the Deck) toward `targets`, your full boards
   | { type: "route"; id: number; main: number[]; extra: number[]; hand: number[]; targets: number[][]; prior: string[]; goal: number }
   // choke points for a line found: each hand trap at each moment, the worst ones searched again
-  | { type: "choke"; id: number; main: number[]; extra: number[]; hand: number[]; keys: string[]; goal: number }
+  // `combo`: the hand traps the opponent holds together (Ash and Imperm), checked as a set after the single ones
+  | { type: "choke"; id: number; main: number[]; extra: number[]; hand: number[]; keys: string[]; goal: number; combo?: number[] }
   // the interruptions a board holds (a working test's end): cards still in the hand it opened with don't count
   | { type: "interruptions"; id: string; pieces: Piece[]; startHand: number[] }
   // card names (from a deck list) to the cards they are
@@ -212,7 +213,7 @@ export type FromWorker =
   | { type: "probe"; id: number; done: number; total: number; evidence?: CardEvidence[] }
   // progress, then the line found, as a test the duel screen replays
   | { type: "route"; id: number; tried: number; done?: { route: Route; record: TestRecord } }
-  | { type: "choke"; id: number; done?: Choke[] }
+  | { type: "choke"; id: number; done?: Choke[]; combo?: ChokeCombo }
   | { type: "interruptions"; id: string; list: Interruption[] }
   | { type: "names"; id: string; cards: (CardInfo | null)[] }
   | { type: "error"; text: string };

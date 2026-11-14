@@ -411,3 +411,42 @@ export function throughOdds(cards: DeckCard[], hand: number, verdict: (code: num
   walk(0, hand, 1);
   return odds;
 }
+
+/**
+ * The chance a hand still makes a full board against `traps` hand traps, each used at its worst moment for you.
+ * `lives(code)`: 0 for a start that doesn't reach a full board; otherwise 1, plus how many of the hand traps its line
+ * plays through. Each hand trap takes one life, so a hand gets through when its different starts have more lives in
+ * total than the opponent has hand traps. Every hand counted exactly.
+ */
+export function throughMany(cards: DeckCard[], hand: number, lives: (code: number) => number, traps: number): number {
+  const list = cards.filter((card) => card.count > 0);
+  const total = list.reduce((sum, card) => sum + card.count, 0);
+  if (total < hand) return 0;
+  const all = choose(total, hand);
+  const held = new Array(list.length).fill(0);
+  let odds = 0;
+  const starts = (index: number): boolean => {
+    const card = list[index];
+    if (card.tag.role === "starter") return true;
+    if (card.tag.role !== "pair") return false;
+    return list.some((other, at) => held[at] > (at === index ? 1 : 0) && matchesPartner(card.tag.with, other));
+  };
+  const walk = (at: number, left: number, ways: number) => {
+    if (left === 0) {
+      let sum = 0;
+      held.forEach((count, index) => {
+        if (count && starts(index)) sum += lives(list[index].code);
+      });
+      if (sum > traps) odds += ways / all;
+      return;
+    }
+    if (at === list.length) return;
+    for (let take = Math.min(left, list[at].count); take >= 0; take--) {
+      held[at] = take;
+      walk(at + 1, left - take, ways * choose(list[at].count, take));
+    }
+    held[at] = 0;
+  };
+  walk(0, hand, 1);
+  return odds;
+}

@@ -270,7 +270,8 @@ function App() {
         const job = chokingRef.current;
         if (!job || job.id !== message.id || !message.done) return;
         const chokes = message.done;
-        setDecks((all) => all.map((one) => (one.id === job.deckId && one.routes?.[job.code] ? { ...one, routes: { ...one.routes, [job.code]: { ...one.routes[job.code], chokes } } } : one)));
+        const combo = message.combo;
+        setDecks((all) => all.map((one) => (one.id === job.deckId && one.routes?.[job.code] ? { ...one, routes: { ...one.routes, [job.code]: { ...one.routes[job.code], chokes, combo } } } : one)));
         const target = decksRef.current.find((one) => one.id === job.deckId);
         if (target) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? target, job.queue), 50);
         else setChoking(null);
@@ -485,7 +486,7 @@ function App() {
     const next = { id, deckId: target.id, code: first.code, queue: rest };
     chokingRef.current = next;
     setChoking(next);
-    post({ type: "choke", id, main: target.main, extra: target.extra, hand: first.hand, keys: route.keys, goal: target.fullAt ?? 3 });
+    post({ type: "choke", id, main: target.main, extra: target.extra, hand: first.hand, keys: route.keys, goal: target.fullAt ?? 3, combo: target.opponentTraps ?? [14558127, 10045474] });
   };
   const allStarts = useRef<{ code: number; hand: number[] }[]>([]);
   const findLines = (target: SavedDeck, starts: { code: number; hand: number[] }[]) => {
@@ -838,6 +839,7 @@ function App() {
         routing={routing && routing.deckId === deck.id ? { code: routing.code, tried: routing.tried, waiting: routing.queue.map((one) => one.code) } : null}
         choking={choking && choking.deckId === deck.id ? { code: choking.code, waiting: choking.queue.map((one) => one.code) } : null}
         onFindLines={(starts) => findLines(deck, starts)}
+        onCheckChokes={(starts) => checkChokes(deck, starts)}
         onWatchLine={(line, code) => openViewer({ ...line, id: newId(), date: Date.now(), testOf: code })}
         onCheck={() => checkDeck(deck)}
       />

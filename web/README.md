@@ -95,6 +95,13 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   with the hand trap in the duel (the best way through). Listed per line, worst first; "Full board through" each hand
   trap counts every hand exactly: a start that plays through it, or two different full-board starts. Galaxy list:
   52.9% through Ash going first (each line alone is stopped by Ash on its starter), 65.4% going second.
+- Several hand traps together (`chokeCombo` in probe.ts): the opponent holds a chosen set (default Ash Blossom +
+  Infinite Impermanence, up to 3) and uses them one after another, each at its worst moment; after each, the search
+  finds your best way through before the next is placed; every order is tried and the most damaging kept. Each line
+  shows that order ("Ash on Infinity Dragon, then Imperm on Delta Wing → 0"). Odds: each full-board start has 1
+  life, plus 1 if it plays through each held hand trap alone, plus all of them if it plays through the set together;
+  a hand gets through when its different starts have more lives than the opponent has hand traps. Galaxy list with
+  every line stopped by one well-timed hand trap: 52.9% / 14.7% / 1.4% through 1 / 2 / 3 going first.
 - Working tests count their own board's interruptions (field with Xyz Materials, hand, GY, read from the scripts).
 - Sync (start screen): "Back up everything" / "Restore a backup" (decks with tags, tests, lines and save states, tag
   defaults, settings; restoring merges, the newer copy of each deck wins). Desktop Chrome/Edge: link a deck folder (e.g.
@@ -135,14 +142,12 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   hand size and chosen cards are remembered on the device.
 
 ## Next, in order (agreed with the owner)
-1. Choke points with a chosen number of hand traps (the opponent holds 2 or 3: Ash and Imperm is the usual fear).
-   Start from `chokePoints` in probe.ts: with one hand trap fixed at its worst moment, search the second the same way.
-2. Faster searches: a pool of engine workers (`navigator.hardwareConcurrency`, at most 3 extra) for the probe, route
+1. Faster searches: a pool of engine workers (`navigator.hardwareConcurrency`, at most 3 extra) for the probe, route
    search and choke points. Each worker loads its own card database (about 100 MB), so keep the pool small on phones,
    start it only for a search and close it after.
-3. Measured success per start, with why it failed: from saved tests, how often each start reached a full board, and
+2. Measured success per start, with why it failed: from saved tests, how often each start reached a full board, and
    for the misses, what stopped it (bricked hand, a hand trap, a step missing). Feeds the optimiser's odds.
-4. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).
+3. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).
 Not wanted: a Side Deck planner, WindBot Ignite. Maybe later: drill mode, custom odds conditions, OCG / Master Duel ban
 lists.
 

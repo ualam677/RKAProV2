@@ -23,7 +23,7 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import { CHOKE_TRAPS, autoAnswer, chokePoints, probeDeck, routeSearch } from "./probe";
+import { CHOKE_TRAPS, autoAnswer, chokeCombo, chokePoints, probeDeck, routeSearch } from "./probe";
 import { isHandTrap } from "./handtraps";
 import { interruptionsOf, readEffects, readSetConstants, type QuickEffect } from "./interruptions";
 import { isFirstTurnHandTrap } from "./handtraps";
@@ -1296,7 +1296,7 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
 
 // Choke points for one line, between other requests like the probe and the route search
 let chokeJob = 0;
-async function runChoke(id: number, main: number[], extra: number[], hand: number[], keys: string[], goal: number) {
+async function runChoke(id: number, main: number[], extra: number[], hand: number[], keys: string[], goal: number, combo: number[] = []) {
   chokeJob = id;
   const canonical = (code: number) => {
     const known = knownCode(code);
@@ -1310,10 +1310,20 @@ async function runChoke(id: number, main: number[], extra: number[], hand: numbe
   await prefetchScripts([...handCodes, ...deck, ...extraCodes, ...CHOKE_TRAPS]);
   const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
   const steps = chokePoints(env, handCodes, deck, extraCodes, keys, CHOKE_TRAPS, { goal, budget: 250, replans: 2 });
+  let singles: ReturnType<typeof steps.next>;
   for (;;) {
     if (chokeJob !== id) return;
-    const next = steps.next();
-    if (next.done) return send({ type: "choke", id, done: next.value });
+    singles = steps.next();
+    if (singles.done) break;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  // then the hand traps the opponent holds together, if more than one
+  if (combo.length < 2) return send({ type: "choke", id, done: singles.value });
+  const together = chokeCombo(env, handCodes, deck, extraCodes, keys, combo.map(canonical), { goal, budget: 250 });
+  for (;;) {
+    if (chokeJob !== id) return;
+    const next = together.next();
+    if (next.done) return send({ type: "choke", id, done: singles.value, combo: next.value });
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
@@ -1406,7 +1416,7 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       const list = interruptionsOf(built, effectsOf, (code) => cards.get(code)?.setcodes ?? [], isFirstTurnHandTrap, Math.max(0, 5 - spells));
       send({ type: "interruptions", id: message.id, list });
     } else if (message.type === "choke") {
-      void runChoke(message.id, message.main, message.extra, message.hand, message.keys, message.goal).catch((error) =>
+      void runChoke(message.id, message.main, message.extra, message.hand, message.keys, message.goal, message.combo).catch((error) =>
         send({ type: "error", text: `Hand trap check stopped: ${error instanceof Error ? error.message : error}` }),
       );
     } else if (message.type === "text") {

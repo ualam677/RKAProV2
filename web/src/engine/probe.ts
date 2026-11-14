@@ -86,13 +86,15 @@ export interface Against {
   at: string;
 }
 
-export function play(env: ProbeEnv, hand: number[], deck: number[], extra: number[], plan: number[], against?: Against): Stop {
+export function play(env: ProbeEnv, hand: number[], deck: number[], extra: number[], plan: number[], against?: Against | Against[]): Stop {
+  // the opponent may hold several hand traps, each used at its own moment
+  const uses = !against ? [] : Array.isArray(against) ? against : [against];
   const { core } = env;
   const duel: OcgDuelHandle | null = core.createDuel({
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
     seed: [1n, 2n, 3n, 4n],
     team1: { drawCountPerTurn: 1, startingDrawCount: hand.length, startingLP: 8000 },
-    team2: { drawCountPerTurn: 1, startingDrawCount: against ? 1 : 0, startingLP: 8000 },
+    team2: { drawCountPerTurn: 1, startingDrawCount: uses.length, startingLP: 8000 },
     cardReader: (code) => env.card(code),
     scriptReader: (name) => env.script(name),
     errorHandler: () => {},
@@ -105,11 +107,11 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
     // the last card added is on top: the hand goes in last
     for (const code of [...deck, ...[...hand].reverse()]) add(code, OcgLocation.DECK);
     for (const code of extra) add(code, OcgLocation.EXTRA);
-    if (against) core.duelNewCard(duel, { team: 1, duelist: 0, code: against.trap, controller: 1, location: OcgLocation.DECK, sequence: 0, position: OcgPosition.FACEDOWN_DEFENSE });
+    for (const use of uses) core.duelNewCard(duel, { team: 1, duelist: 0, code: use.trap, controller: 1, location: OcgLocation.DECK, sequence: 0, position: OcgPosition.FACEDOWN_DEFENSE });
     core.startDuel(duel);
     let lastSummon = 0;
     let lastActed = 0;
-    let trapUsed = false;
+    const used = uses.map(() => false);
 
     const extra0 = extra.length;
     const extraCodes = new Set(extra);
@@ -203,12 +205,18 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
             break;
           default:
             if (!isPrompt(message.type)) break;
-            if (against && "player" in message && message.player === 1) {
-              response = opponentAnswer(message, against, () => {
+            if (uses.length && "player" in message && message.player === 1) {
+              response = opponentAnswer(message, (offered) => {
                 const label = chain.length ? env.name(chain[chain.length - 1]) : lastSummon ? `the summon of ${env.name(lastSummon)}` : lastActed ? `after ${env.name(lastActed)}` : "the start of the turn";
-                if (trapUsed || label !== against.at) return false;
-                trapUsed = true;
-                return true;
+                // the first hand trap not used yet whose moment this is
+                for (let index = 0; index < uses.length; index++) {
+                  const at = offered.findIndex((code) => code === uses[index].trap);
+                  if (!used[index] && uses[index].at === label && at >= 0) {
+                    used[index] = true;
+                    return at;
+                  }
+                }
+                return -1;
               }, chain[chain.length - 2] ?? lastSummon);
               if (!response) return failed();
               break;
@@ -317,11 +325,11 @@ const heldBack = (card: { code: number; location: number }) => card.location ===
 
 // The hand trap holder's side of a practice duel: the hand trap at the chosen moment (`now()` says if this is it),
 // its target the card just activated or summoned, yes to everything else
-function opponentAnswer(message: OcgMessage, against: Against, now: () => boolean, target: number): OcgResponse | null {
+function opponentAnswer(message: OcgMessage, pick: (offered: number[]) => number, target: number): OcgResponse | null {
   switch (message.type) {
     case OcgMessageType.SELECT_CHAIN: {
-      const at = message.selects.findIndex((card) => card.code === against.trap);
-      if (at >= 0 && now()) return { type: OcgResponseType.SELECT_CHAIN, index: at };
+      const at = pick(message.selects.map((card) => card.code));
+      if (at >= 0) return { type: OcgResponseType.SELECT_CHAIN, index: at };
       return { type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null };
     }
     case OcgMessageType.SELECT_CARD: {
@@ -614,7 +622,7 @@ export interface RouteOptions {
   // your working boards: a board close to one of them is preferred
   targets: number[][];
   // the opponent holds a hand trap and uses it at a set moment: the search looks for the best way through
-  against?: Against;
+  against?: Against | Against[];
   // "verb:code" of actions in your working lines, preferred when choosing what to try
   prior?: Set<string>;
   budget?: number;
@@ -739,13 +747,13 @@ interface FollowResult {
   board: number[];
 }
 
-function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], trap: number, useAt: number): FollowResult {
+function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], trap: number, useAt: number, fixed: Against[] = []): FollowResult {
   const { core } = env;
   const duel = core.createDuel({
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
     seed: [1n, 2n, 3n, 4n],
     team1: { drawCountPerTurn: 1, startingDrawCount: hand.length, startingLP: 8000 },
-    team2: { drawCountPerTurn: 1, startingDrawCount: 1, startingLP: 8000 },
+    team2: { drawCountPerTurn: 1, startingDrawCount: 1 + fixed.length, startingLP: 8000 },
     cardReader: (code) => env.card(code),
     scriptReader: (name) => env.script(name),
     errorHandler: () => {},
@@ -758,6 +766,8 @@ function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
     for (const code of [...deck, ...[...hand].reverse()]) add(code, OcgLocation.DECK, 0);
     for (const code of extra) add(code, OcgLocation.EXTRA, 0);
     add(trap, OcgLocation.DECK, 1);
+    for (const use of fixed) add(use.trap, OcgLocation.DECK, 1);
+    const fixedUsed = fixed.map(() => false);
     core.startDuel(duel);
 
     const windows: string[] = [];
@@ -824,12 +834,18 @@ function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
           default: {
             if (!isPrompt(message.type)) break;
             if ("player" in message && message.player === 1) {
-              if (message.type === OcgMessageType.SELECT_CHAIN) {
+              // what it answers: an effect, a summon, or an open moment between your actions
+              const moment = chain.length ? env.name(chain[chain.length - 1]) : lastSummon ? `the summon of ${env.name(lastSummon)}` : lastActed ? `after ${env.name(lastActed)}` : "the start of the turn";
+              // a hand trap already placed at this moment goes first
+              const placed = message.type === OcgMessageType.SELECT_CHAIN ? fixed.findIndex((use, index) => !fixedUsed[index] && use.at === moment && message.selects.some((card) => card.code === use.trap)) : -1;
+              if (placed >= 0 && message.type === OcgMessageType.SELECT_CHAIN) {
+                fixedUsed[placed] = true;
+                response = { type: OcgResponseType.SELECT_CHAIN, index: message.selects.findIndex((card) => card.code === fixed[placed].trap) };
+              } else if (message.type === OcgMessageType.SELECT_CHAIN) {
                 const at = message.selects.findIndex((card) => card.code === trap);
                 if (at < 0) response = { type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null };
                 else {
-                  // what it answers: an effect, a summon, or an open moment between your actions
-                  const label = chain.length ? env.name(chain[chain.length - 1]) : lastSummon ? `the summon of ${env.name(lastSummon)}` : lastActed ? `after ${env.name(lastActed)}` : "the start of the turn";
+                  const label = moment;
                   windows.push(label);
                   const now = windows.length - 1 === useAt;
                   if (now) used = label;
@@ -917,4 +933,71 @@ export function* chokePoints(
     out.push({ trap, clean: clean.interruptions, windows: [...byMoment.values()] });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Several hand traps at once (Ash and Imperm, say). The opponent uses them one after another, each at its worst
+// moment for you; after each one the search looks for your best way through before the next is placed. Every order
+// is tried (Ash first or Imperm first) and the one that hurts most is kept.
+
+export interface ComboStep {
+  trap: number;
+  at: string;
+}
+export interface ChokeCombo {
+  traps: number[];
+  // the order and moments that hurt most, and what you end on then
+  steps: ComboStep[];
+  interruptions: number;
+  board: number[];
+  // a hand trap of the set that never had a moment against this line
+  unused: number[];
+}
+
+const orders = (list: number[]): number[][] =>
+  list.length <= 1 ? [list] : list.flatMap((first, index) => orders([...list.slice(0, index), ...list.slice(index + 1)]).map((rest) => [first, ...rest]));
+
+/** Pauses (yields) after every duel tried. */
+export function* chokeCombo(
+  env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], traps: number[], options: { goal?: number; budget?: number } = {},
+): Generator<undefined, ChokeCombo> {
+  let best: ChokeCombo | null = null;
+  for (const order of orders(traps)) {
+    const fixed: Against[] = [];
+    const unused: number[] = [];
+    let line = keys;
+    let interruptions = -1;
+    let board: number[] = [];
+    for (const trap of order) {
+      // every moment this hand trap has against the line as it now stands (the others already placed)
+      const clean = playAgainst(env, hand, deck, extra, line, trap, -1, fixed);
+      yield;
+      if (!clean.windows.length) {
+        unused.push(trap);
+        if (interruptions < 0) [interruptions, board] = [clean.interruptions, clean.board];
+        continue;
+      }
+      let worst: { at: string; result: FollowResult } | null = null;
+      for (let at = 0; at < Math.min(clean.windows.length, 20); at++) {
+        const result = playAgainst(env, hand, deck, extra, line, trap, at, fixed);
+        yield;
+        if (!worst || result.interruptions < worst.result.interruptions) worst = { at: result.used ?? clean.windows[at], result };
+      }
+      fixed.push({ trap, at: worst!.at });
+      // your best way through everything placed so far
+      const search = routeSearch(env, hand, deck, extra, { targets: [], prior: new Set(line), goal: options.goal ?? 3, budget: options.budget ?? 250, against: [...fixed] });
+      let step = search.next();
+      while (!step.done) {
+        yield;
+        step = search.next();
+      }
+      const through = step.value;
+      if (through.interruptions.length > worst!.result.interruptions) {
+        [interruptions, board, line] = [through.interruptions.length, through.board, through.keys];
+      } else [interruptions, board] = [worst!.result.interruptions, worst!.result.board];
+    }
+    const result: ChokeCombo = { traps, steps: [...fixed], interruptions: Math.max(0, interruptions), board, unused };
+    if (!best || result.interruptions < best.interruptions) best = result;
+  }
+  return best ?? { traps, steps: [], interruptions: 0, board: [], unused: traps };
 }

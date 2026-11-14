@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { CardArt } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
-import type { CardEvidence, Choke } from "./engine/probe";
+import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
 import {
-  GOALS, ROLES, allProven, normalLimit, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
+  GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
 
@@ -24,6 +24,7 @@ interface Props {
   routing: { code: number; tried: number; waiting: number[] } | null;
   choking: { code: number; waiting: number[] } | null;
   onFindLines: (starts: { code: number; hand: number[] }[]) => void;
+  onCheckChokes: (starts: { code: number; hand: number[] }[]) => void;
   onWatchLine: (line: TestRecord, code: number) => void;
 }
 
@@ -32,7 +33,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onWatchLine }: Props) {
+export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -135,9 +136,35 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   // through one hand trap, used at its best moment: a start still counts if its line keeps a full board
   const trapCodes = useMemo(() => [...new Set(Object.values(routes).flatMap((route) => (route.chokes ?? []).map((choke) => choke.trap)))], [deck.routes]);
   useEffect(() => {
-    const missing = trapCodes.filter((code) => !infoOf(code));
+    const missing = [...new Set([...trapCodes, ...CHOKE_TRAPS])].filter((code) => !infoOf(code));
     if (missing.length) requestInfo(missing);
   }, [trapCodes]);
+  // the hand traps the opponent holds together, and how the hand fares against all of them
+  const holding = deck.opponentTraps ?? [14558127, 10045474];
+  const sameSet = (combo?: ChokeCombo) => !!combo && combo.traps.length === holding.length && holding.every((code) => combo.traps.includes(code));
+  const worstOf = (route: SavedRoute | undefined, trap: number) => {
+    const choke = route?.chokes?.find((one) => one.trap === trap);
+    if (!choke) return null;
+    return choke.windows.length ? Math.min(...choke.windows.map((window) => window.interruptions)) : (route?.interruptions?.length ?? 0);
+  };
+  // a full-board start: 1 life, plus 1 if it plays through each held hand trap alone, plus all of them if it plays
+  // through them together
+  const livesOf = (code: number) => {
+    const route = routeOf(code);
+    if (!isFull(route)) return 0;
+    if (sameSet(route?.combo) && route!.combo!.interruptions >= fullAt) return 1 + holding.length;
+    const each = holding.map((trap) => worstOf(route, trap));
+    return each.every((worst) => worst !== null && worst >= fullAt) ? 2 : 1;
+  };
+  const together = useMemo(() => {
+    if (holding.length < 2 || !startCardsAll.some((card) => sameSet(routeOf(card.code)?.combo))) return null;
+    return throughMany(main, second ? 6 : 5, livesOf, holding.length);
+  }, [main, second, deck.routes, fullAt, deck.opponentTraps]);
+  const toggleHeld = (trap: number) => {
+    const next = holding.includes(trap) ? holding.filter((code) => code !== trap) : [...holding, trap].slice(-3);
+    if (next.length) onChange({ ...deck, opponentTraps: next, updated: Date.now() });
+  };
+  const checkAgain = () => onCheckChokes(startCards.flatMap((card) => { const hand = handFor(card); return hand && routes[card.code]?.keys ? [{ code: card.code, hand }] : []; }));
   const through = useMemo(
     () =>
       trapCodes.map((trap) => {
@@ -317,6 +344,28 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
               <b className={everyStartProven ? "" : "warn"}>{pct(everyStartProven ? odds.combo : proven.combo)}</b>
             </li>
           </ul>
+          {reached && (
+            <div className="opt-through">
+              <span className="muted">The opponent holds (up to 3, checked together):</span>
+              <div className="opt-chips">
+                {CHOKE_TRAPS.map((trap) => (
+                  <button key={trap} className={`button small ${holding.includes(trap) ? "on" : ""}`} onClick={() => toggleHeld(trap)}>
+                    {nameOf(trap)}
+                  </button>
+                ))}
+              </div>
+              {together !== null ? (
+                <span className="opt-through-row">
+                  Full board through {holding.map(nameOf).join(" + ")} together: <b>{pct(together)}</b>
+                </span>
+              ) : (
+                holding.length > 1 && <span className="muted">Not checked together yet.</span>
+              )}
+              <button className="button small" disabled={!!routing || !!choking} onClick={checkAgain}>
+                {choking ? "Checking hand traps…" : "Check hand traps again"}
+              </button>
+            </div>
+          )}
           {through.length > 0 && reached && (
             <div className="opt-through">
               <span className="muted">Full board through one hand trap, used at its worst moment for you (a start that plays through it, or a second start for after it):</span>
@@ -606,6 +655,15 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
       </button>
       {checking === "now" && <span className="opt-chokes"> · Checking hand traps against this line…</span>}
       {checking === "waiting" && <span className="opt-chokes"> · Hand traps next</span>}
+      {!checking && route.combo && (
+        <span className="opt-chokes">
+          {" "}
+          · {route.combo.traps.map(nameOf).join(" + ")} together:{" "}
+          {route.combo.steps.length
+            ? `${route.combo.steps.map((step) => `${nameOf(step.trap)} on ${step.at}`).join(", then ")} → ${route.combo.interruptions >= fullAt ? `still ${route.combo.interruptions}` : route.combo.interruptions === 0 ? "0: stops the line" : route.combo.interruptions}${route.combo.unused.length ? ` (${route.combo.unused.map(nameOf).join(", ")} not needed)` : ""}`
+            : "never usable against this line"}
+        </span>
+      )}
       {!checking && route.chokes && route.chokes.length > 0 && <Chokes chokes={route.chokes} fullAt={fullAt} nameOf={nameOf} />}
     </span>
   );

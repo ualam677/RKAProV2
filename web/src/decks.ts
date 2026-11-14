@@ -5,7 +5,7 @@ import type { Tag } from "./optimiser";
 import type { CardEvidence } from "./engine/probe";
 import type { TestRecord } from "./engine/protocol";
 import type { Interruption, Piece } from "./engine/interruptions";
-import type { Choke } from "./engine/probe";
+import type { Choke, ChokeCombo } from "./engine/probe";
 
 // A hand test kept with its deck: enough to replay it exactly, and what it ended on if you said it worked
 export interface SavedTest extends TestRecord {
@@ -41,6 +41,8 @@ export interface SavedDeck extends Deck {
   routes?: Record<string, SavedRoute>;
   // a full board: at least this many interruptions (default 3)
   fullAt?: number;
+  // the hand traps the opponent holds together when lines are checked (default Ash Blossom and Infinite Impermanence)
+  opponentTraps?: number[];
   // save states from the duel menu: the duel's start and every choice up to that moment
   saves?: SavedState[];
   // the file it is kept as in a linked deck folder, and when the two were last the same
@@ -62,6 +64,8 @@ export interface SavedRoute {
   keys?: string[];
   // each hand trap used at each moment it can be against this line, and what the line ends on then
   chokes?: Choke[];
+  // those hand traps together: the order and moments that hurt most
+  combo?: ChokeCombo;
   coverage: number;
   full: boolean;
   // whether you had marked any full boards when it searched (without them it aims for the most resources)
