@@ -37,6 +37,8 @@ export interface TestResult {
   // full: reached a full board; handtrap: a hand trap stopped it; short: fell short on its own; brick: no start in hand
   kind: "full" | "handtrap" | "short" | "brick";
   why: string;
+  // the hand traps the opponent held (none: an empty list); older results don't say
+  held?: number[];
 }
 // working tests are kept; of the rest, the newest 5
 const KEEP_OTHERS = 5;

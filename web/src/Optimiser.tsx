@@ -29,6 +29,8 @@ interface Props {
   onFindLines: (starts: { code: number; hand: number[] }[]) => void;
   traits: Map<number, string[]>;
   requestTraits: (codes: number[]) => void;
+  // "lines": only the starts, their lines and records (the Test screen shows this part)
+  only?: "lines";
   cutResult: { cut: number; lines?: { start: number; before: number; after: number; board: number[] }[] } | null;
   onCutTest: (code: number) => void;
   onCheckChokes: (starts: { code: number; hand: number[] }[]) => void;
@@ -40,7 +42,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
+export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -306,7 +308,8 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
   const [editingRoles, setEditingRoles] = useState<number | null>(null);
   const [tab, setTab] = useState<"odds" | "cards" | "lines">(() => {
     try {
-      return (localStorage.getItem("rka.optTab") as "odds" | "cards" | "lines") || "odds";
+      const saved = localStorage.getItem("rka.optTab");
+      return saved === "cards" ? "cards" : "odds";
     } catch {
       return "odds";
     }
@@ -340,17 +343,19 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
 
   return (
     <div className="optimiser">
-      <div className="segmented three opt-tabs">
-        {(["odds", "cards", "lines"] as const).map((name) => (
-          <button key={name} className={`button small ${tab === name ? "on" : ""}`} onClick={() => openTab(name)}>
-            {name === "odds" ? "Odds" : name === "cards" ? "Cards" : "Lines"}
-          </button>
-        ))}
-      </div>
+      {!only && (
+        <div className="segmented two opt-tabs">
+          {(["odds", "cards"] as const).map((name) => (
+            <button key={name} className={`button small ${tab === name ? "on" : ""}`} onClick={() => openTab(name)}>
+              {name === "odds" ? "Odds" : "Cards"}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!main.length && <p className="muted">Add cards to the Main Deck to get started.</p>}
 
-      {main.length > 0 && tab === "odds" && (
+      {main.length > 0 && !only && tab === "odds" && (
         <>
           <div className="segmented two">
             <button className={`button small ${second ? "" : "on"}`} onClick={() => setSecond(false)}>
@@ -405,13 +410,13 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
               ))}
             </div>
           )}
-          {(deck.results ?? []).length > 0 && <Measured results={deck.results ?? []} deck />}
+          {(deck.results ?? []).length > 0 && <Measured results={deck.results ?? []} deck nameOf={nameOf} />}
           <DeckSize main={main} side={side} room={room} nameOf={nameOf} takenBy={takenBy} />
           <Clashes main={main} nameOf={nameOf} traits={traits} />
         </>
       )}
 
-      {main.length > 0 && tab === "cards" && (
+      {main.length > 0 && !only && tab === "cards" && (
         <div className="opt-tags">
           {sorted.map((card) => {
             const roles = rolesOf(card.tag);
@@ -467,7 +472,7 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
         </div>
       )}
 
-      {main.length > 0 && tab === "lines" && (
+      {main.length > 0 && only === "lines" && (
         <>
           <div className="opt-find">
             <span className="opt-fullat" title="An interruption: an effect usable on the opponent's turn that negates or removes, read from the card scripts">
@@ -484,8 +489,7 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
           </div>
           <div className="opt-through">
             <span className="muted">
-              Test gives a dud opponent (Marshmallon) holding{" "}
-              <b>{holding.length ? holding.map(nameOf).join(" + ") : "no hand traps"}</b>. Pick up to 3, or none.
+              The opponent is a dud deck (Marshmallon) holding <b>{holding.length ? holding.map(nameOf).join(" + ") : "no hand traps"}</b>. Pick up to 3, or none.
             </span>
             <div className="opt-chips">
               {trapChoices.map((trap) => (
@@ -545,7 +549,7 @@ export function Optimiser({ cutResult, onCutTest, traits, requestTraits, deck, c
               ) : (
                 <span className="muted opt-engine">No line yet: test it and mark the replay as working.</span>
               )}
-              <Measured results={(deck.results ?? []).filter((one) => one.start === card.code)} />
+              <Measured results={(deck.results ?? []).filter((one) => one.start === card.code)} nameOf={nameOf} />
             </div>
           ))}
           <TwoStarts routes={routes} nameOf={nameOf} />
@@ -738,21 +742,29 @@ function PartnerSheet({ card, main, nameOf, onSave, onClose }: { card: DeckCard;
 }
 
 
-// How your tests went: how many reached a full board, and what stopped the rest, most common first
-function Measured({ results, deck = false }: { results: TestResult[]; deck?: boolean }) {
-  if (!results.length) return deck ? null : <span className="opt-engine measured">Your tests: none yet. Test it and move on (New hand or Exit) and the result is kept here.</span>;
-  const full = results.filter((one) => one.kind === "full").length;
+// How your tests went, split by the hand traps the opponent held: "no hand traps 3/4 · D.D. Crow 1/3", then what stopped the misses
+function Measured({ results, deck = false, nameOf }: { results: TestResult[]; deck?: boolean; nameOf?: (code: number) => string }) {
+  if (!results.length) return deck ? null : <span className="opt-engine measured muted">No tests yet.</span>;
+  const groups = new Map<string, TestResult[]>();
+  for (const one of results) {
+    const key = one.held === undefined ? "?" : one.held.length ? one.held.map((code) => nameOf?.(code) ?? `#${code}`).join(" + ") : "no hand traps";
+    groups.set(key, [...(groups.get(key) ?? []), one]);
+  }
   const misses = new Map<string, number>();
   for (const one of results) {
     if (one.kind === "full") continue;
-    const reason = one.kind === "handtrap" ? one.why.split(":")[0] : one.kind === "brick" ? "no start in the hand" : "fell short on its own";
+    const reason = one.kind === "handtrap" ? one.why.split(":")[0] : one.kind === "brick" ? "no start in hand" : "fell short";
     misses.set(reason, (misses.get(reason) ?? 0) + 1);
   }
-  const list = [...misses].sort((a, b) => b[1] - a[1]);
   return (
     <span className={`opt-engine measured ${deck ? "deck" : ""}`}>
-      {deck ? "All your tests" : "Your tests"}: <b>{full} of {results.length}</b> reached a full board ({Math.round((full / results.length) * 100)}%)
-      {list.length > 0 && ` · missed: ${list.map(([reason, count]) => `${reason}${count > 1 ? ` ×${count}` : ""}`).join(" · ")}`}
+      {[...groups].map(([key, list]) => `${key === "?" ? "earlier tests" : key} ${list.filter((one) => one.kind === "full").length}/${list.length}`).join(" · ")}
+      {misses.size > 0 && (
+        <small className="muted">
+          {" "}
+          · missed: {[...misses].sort((a, b) => b[1] - a[1]).map(([reason, count]) => `${reason}${count > 1 ? ` ×${count}` : ""}`).join(" · ")}
+        </small>
+      )}
     </span>
   );
 }

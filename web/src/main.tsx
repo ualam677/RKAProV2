@@ -9,6 +9,7 @@ import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, 
 import type { Piece } from "./engine/interruptions";
 import { CHOKE_TRAPS } from "./engine/probe";
 import { hasRole, secondOnly } from "./optimiser";
+import { Optimiser } from "./Optimiser";
 import { Tests } from "./Tests";
 import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
 import { readReplayLink, replayLink, toYdk } from "./decks";
@@ -304,7 +305,7 @@ function App() {
             const kind: TestResult["kind"] = count >= goal ? "full" : pending.start === undefined ? "brick" : pending.trap ? "handtrap" : "short";
             const why =
               kind === "full" ? `Full board: ${count} interruption${count === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : kind === "handtrap" ? `${pending.trap}: ended on ${count} of ${goal}` : `Fell short: ${count} of ${goal} interruptions`;
-            const result: TestResult = { id, date: pending.date, start: pending.start, hand: pending.hand, interruptions: count, kind, why };
+            const result: TestResult = { id, date: pending.date, start: pending.start, hand: pending.hand, interruptions: count, kind, why, held: pending.held };
             return { ...one, results: [result, ...(one.results ?? [])].slice(0, 300) };
           }),
         );
@@ -362,23 +363,16 @@ function App() {
   useEffect(() => {
     if (ready && screen === "test" && CHOKE_TRAPS.some((code) => !cards.has(code))) void info(CHOKE_TRAPS);
   }, [ready, screen]);
-  // the opponent's deck for a new duel, shuffled
+  // the opponent for a test: a dud deck, 40 cards of Marshmallon (does nothing on its own) with the hand traps you picked on
+  // top (in its opening hand, and the only ones it uses); none picked, no hand traps at all
   const opponentDeck = () => {
-    const source = opponent === "none" ? null : opponent === "copy" ? deck : decks.find((one) => one.id === opponent) ?? deck;
-    if (!source?.main.length) return {};
-    const main = shuffled(source.main);
-    // the chosen hand traps on top, so they are in the opening hand: taken from the deck, or put in for random cards;
-    // they're the only ones it uses on your turn (anything else it draws stays in its hand)
-    const wanted = opponentHandTraps && fixedTraps && deck ? (deck.opponentTraps ?? [14558127, 10045474]).slice(0, goSecond ? 4 : 5) : [];
-    if (wanted.length) {
-      for (const code of [...wanted].reverse()) {
-        const at = main.indexOf(code);
-        if (at >= 0) main.splice(at, 1);
-        else main.pop();
-        main.unshift(code);
-      }
-    }
-    return { opponent: { main, extra: source.extra }, opponentHandTraps, opponentTraps: wanted, goSecond };
+    const traps = (deck?.opponentTraps ?? [14558127, 10045474]).slice(0, 3);
+    return {
+      opponent: { main: [...traps, ...Array.from({ length: 40 - traps.length }, () => 31305911)], extra: [] as number[] },
+      opponentHandTraps: traps.length > 0,
+      opponentTraps: traps,
+      goSecond: false,
+    };
   };
 
   // errors clear themselves so they never sit over the field for long
@@ -602,7 +596,7 @@ function App() {
     keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
   }, [record]);
   // a test you played (made choices of your own in), counted once you move on from it
-  const outcomes = useRef(new Map<string, { deckId: string; date: number; start?: number; hand: number[]; trap?: string }>());
+  const outcomes = useRef(new Map<string, { deckId: string; date: number; start?: number; hand: number[]; trap?: string; held: number[] }>());
   const finishTest = () => {
     const current = test.current;
     const played = lastRecord.current;
@@ -610,7 +604,7 @@ function App() {
     const owner = decksRef.current.find((one) => one.id === current.deckId);
     if (!owner || owner.results?.some((one) => one.id === current.id) || outcomes.current.has(current.id)) return;
     const saved: SavedTest = { ...played, id: current.id, date: current.date, testOf: current.testOf };
-    outcomes.current.set(current.id, { deckId: owner.id, date: current.date, start: startOf(owner, played.startHand, current.testOf), hand: played.startHand });
+    outcomes.current.set(current.id, { deckId: owner.id, date: current.date, start: startOf(owner, played.startHand, current.testOf), hand: played.startHand, held: played.options.opponentTraps ?? [] });
     void (async () => {
       const { views } = await replayViews(saved);
       // your first turn, to its last moment
@@ -932,14 +926,6 @@ function App() {
     return () => window.clearTimeout(wait);
   }, [view, replay]);
 
-  // a test from Optimise: a dud opponent, 40 cards of Marshmallon (does nothing on its own) with the hand traps picked in
-  // Lines on top (in its opening hand, and the only ones it uses); none picked, none at all
-  const dudOpponent = (traps: number[]) => ({
-    opponent: { main: [...traps, ...Array.from({ length: 40 - traps.length }, () => 31305911)], extra: [] as number[] },
-    opponentHandTraps: traps.length > 0,
-    opponentTraps: traps,
-    goSecond: false,
-  });
   const start = useCallback((test?: { chosen: number[] }) => {
     if (!deck) return;
     setReplay(null);
@@ -957,7 +943,7 @@ function App() {
     timer.current = 0;
     queue.current = [];
     lastRecord.current = null;
-    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...(test ? dudOpponent(deck.opponentTraps ?? [14558127, 10045474]) : opponentDeck()), seed: Math.floor(Math.random() * 2 ** 31) });
+    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...opponentDeck(), seed: Math.floor(Math.random() * 2 ** 31) });
   }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond, decks]);
 
   const requestText = useCallback(
@@ -1364,86 +1350,33 @@ function App() {
           </section>
 
           <section className="box">
-            <h2>Opponent</h2>
-            <select className="select" value={opponent} onChange={(event) => setOpponent(event.target.value)}>
-              <option value="copy">A copy of this deck</option>
-              {decks
-                .filter((one) => one.id !== deck.id)
-                .map((one) => (
-                  <option key={one.id} value={one.id}>
-                    {one.name}
-                  </option>
-                ))}
-              <option value="none">None: my turn only</option>
-            </select>
-            {opponent !== "none" && (
-              <div className="segmented two">
-                <button className={`button ${!goSecond ? "on" : ""}`} onClick={() => setGoSecond(false)}>
-                  I go first
-                </button>
-                <button className={`button ${goSecond ? "on" : ""}`} onClick={() => setGoSecond(true)}>
-                  I go second
-                </button>
-              </div>
-            )}
-            <p className="muted">
-              End your turn and the computer plays theirs: it activates everything it can, summons, then attacks. You are asked whenever you can respond, so you can see where
-              your interruptions go. Import any deck (a meta deck, board breakers) to play against it.
-            </p>
+            <h2>Starts</h2>
+            <Optimiser
+              only="lines"
+              deck={deck}
+              cards={cards}
+              nameKey={(code) => {
+                const card = cards.get(code);
+                return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
+              }}
+              room={() => 0}
+              onChange={changeDeck}
+              onShow={() => {}}
+              requestInfo={(codes) => void info(codes)}
+              traits={traits}
+              requestTraits={(codes) => post({ type: "traits", codes })}
+              cutResult={cutResult && cutResult.deckId === deck.id ? cutResult : null}
+              onCutTest={(code) => cutTest(deck, code)}
+              onTest={(picked) => start(picked ? { chosen: picked } : undefined)}
+              engineProgress={probe && probe.deckId === deck.id ? probe : null}
+              routing={null}
+              choking={choking && choking.deckId === deck.id ? { code: choking.code, waiting: choking.queue.map((one) => one.code) } : null}
+              onFindLines={() => {}}
+              onCheckChokes={(starts) => checkChokes(deck, starts)}
+              onWatchLine={(line, code) => openViewer({ ...line, id: newId(), date: Date.now(), testOf: code })}
+              onCheck={() => checkDeck(deck)}
+            />
           </section>
-
-          {opponent !== "none" && (
-            <section className="box">
-              <h2>Opponent's hand traps</h2>
-              <div className="segmented two">
-                <button className={`button ${!opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(false)}>
-                  Off on my turn
-                </button>
-                <button className={`button ${opponentHandTraps ? "on" : ""}`} onClick={() => setOpponentHandTraps(true)}>
-                  On my turn
-                </button>
-              </div>
-              {opponentHandTraps && (
-                <>
-                  <div className="segmented two">
-                    <button className={`button ${fixedTraps ? "on" : ""}`} onClick={() => setFixedTraps(true)}>
-                      Opens with these
-                    </button>
-                    <button className={`button ${!fixedTraps ? "on" : ""}`} onClick={() => setFixedTraps(false)}>
-                      Whatever it draws
-                    </button>
-                  </div>
-                  {fixedTraps && (
-                    <div className="opt-chips">
-                      {CHOKE_TRAPS.map((trap) => {
-                        const held = (deck.opponentTraps ?? [14558127, 10045474]).includes(trap);
-                        return (
-                          <button
-                            key={trap}
-                            className={`button small ${held ? "on" : ""}`}
-                            onClick={() => {
-                              const now = deck.opponentTraps ?? [14558127, 10045474];
-                              const next = held ? now.filter((code) => code !== trap) : [...now, trap].slice(-3);
-                              changeDeck({ ...deck, opponentTraps: next, updated: Date.now() });
-                            }}
-                          >
-                            {cards.get(trap)?.name ?? `#${trap}`}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              )}
-              <p className="muted">
-                {!opponentHandTraps
-                  ? "The computer keeps its hand traps for its own turn: a clean combo test."
-                  : fixedTraps
-                    ? "It opens with these (up to 3) and chains them against your combo at the first chance it gets. Optimise checks the same set at every moment."
-                    : "It chains whatever hand traps it happens to draw against your combo, at the first chance it gets."}
-              </p>
-            </section>
-          )}
 
           <section className="box">
             <div className="box-head">
