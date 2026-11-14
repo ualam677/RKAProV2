@@ -148,6 +148,8 @@ export interface StartOptions {
   opponent?: { main: number[]; extra: number[] };
   // it chains its hand traps against you on your turn
   opponentHandTraps?: boolean;
+  // the only hand traps it may use on your turn (the ones you picked); others it draws stay in its hand
+  opponentTraps?: number[];
   // the opponent takes the first turn: yours passes at once, it opens with 4 and draws to 5
   goSecond?: boolean;
 }

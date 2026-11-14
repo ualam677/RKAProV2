@@ -334,6 +334,8 @@ let ignoreHandTraps = false;
 // the computer opponent: whether there is one, whether it fights your turn, and what it has done this turn
 let opponentOn = false;
 let opponentHandTraps = false;
+// on your turn, only these hand traps (empty: any it holds)
+let opponentTraps: number[] = [];
 let goSecond = false;
 const aiUsed = new Set<string>();
 let aiBattled = false;
@@ -911,7 +913,7 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
       // on your turn: its hand traps, if allowed; on its own turn: every effect once
       const usable = message.selects
         .map((card, index) => ({ card, index }))
-        .filter(({ card }) => (turnPlayer === 1 ? !aiUsed.has(`c:${card.code}:${String(card.description)}`) : opponentHandTraps && card.location === OcgLocation.HAND));
+        .filter(({ card }) => (turnPlayer === 1 ? !aiUsed.has(`c:${card.code}:${String(card.description)}`) : opponentHandTraps && card.location === OcgLocation.HAND && (!opponentTraps.length || opponentTraps.includes(knownCode(card.code)))));
       const pick = usable[0];
       if (!pick) return { type: OcgResponseType.SELECT_CHAIN, index: null };
       aiUsed.add(`c:${pick.card.code}:${String(pick.card.description)}`);
@@ -1178,6 +1180,7 @@ async function start(options: StartOptions) {
   solvingCode = 0;
   opponentOn = !!options.opponent?.main.length;
   opponentHandTraps = !!options.opponentHandTraps;
+  opponentTraps = (options.opponentTraps ?? []).map(knownCode);
   goSecond = opponentOn && !!options.goSecond;
   aiUsed.clear();
   aiBattled = false;

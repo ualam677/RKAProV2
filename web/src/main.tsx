@@ -367,9 +367,10 @@ function App() {
     const source = opponent === "none" ? null : opponent === "copy" ? deck : decks.find((one) => one.id === opponent) ?? deck;
     if (!source?.main.length) return {};
     const main = shuffled(source.main);
-    // the chosen hand traps on top, so they are in the opening hand: taken from the deck, or put in for random cards
-    if (opponentHandTraps && fixedTraps && deck) {
-      const wanted = (deck.opponentTraps ?? [14558127, 10045474]).slice(0, goSecond ? 4 : 5);
+    // the chosen hand traps on top, so they are in the opening hand: taken from the deck, or put in for random cards;
+    // they're the only ones it uses on your turn (anything else it draws stays in its hand)
+    const wanted = opponentHandTraps && fixedTraps && deck ? (deck.opponentTraps ?? [14558127, 10045474]).slice(0, goSecond ? 4 : 5) : [];
+    if (wanted.length) {
       for (const code of [...wanted].reverse()) {
         const at = main.indexOf(code);
         if (at >= 0) main.splice(at, 1);
@@ -377,7 +378,7 @@ function App() {
         main.unshift(code);
       }
     }
-    return { opponent: { main, extra: source.extra }, opponentHandTraps, goSecond };
+    return { opponent: { main, extra: source.extra }, opponentHandTraps, opponentTraps: wanted, goSecond };
   };
 
   // errors clear themselves so they never sit over the field for long
