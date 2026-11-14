@@ -924,6 +924,7 @@ function App() {
         </p>
       )}
 
+      {screen === "menu" && <span className="version">{__APP_VERSION__}</span>}
       {screen === "menu" && (
         <nav className="main-menu">
           <button className="deck-card" onClick={() => setScreen("decks")}>

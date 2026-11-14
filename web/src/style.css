@@ -533,3 +533,4 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .zone-materials { position: absolute; left: 2px; bottom: 16px; z-index: 2; padding: 0 3px; border-radius: 4px; background: rgba(60, 46, 6, 0.92); color: #ffd36b; font-size: 9px; font-weight: 800; line-height: 1.4; }
 .ff-blink { display: inline-block; font-size: 18px; color: var(--accent-strong); animation: ff-blink 0.7s steps(2, start) infinite; }
 @keyframes ff-blink { to { visibility: hidden; } }
+.version { position: fixed; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 5; font-size: 11px; color: var(--muted); opacity: 0.55; pointer-events: none; }

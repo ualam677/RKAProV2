@@ -30,8 +30,14 @@ function localData(): Plugin {
   };
 }
 
+// The version shown on the menu: one more for every deploy (GitHub's run number) and the commit it was built from
+const run = process.env.GITHUB_RUN_NUMBER;
+const commit = (process.env.GITHUB_SHA ?? "").slice(0, 7);
+const version = run ? `v0.${run}${commit ? ` · ${commit}` : ""}` : "dev";
+
 export default defineConfig({
   base: "./",
+  define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [react(), localData()],
   worker: { format: "es" },
   build: { target: "es2022" },

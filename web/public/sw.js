@@ -1,9 +1,11 @@
 // RKAPro's service worker: the app works offline once it has been opened online.
-// - The app itself (this site): served from the cache, refreshed in the background, so a new version shows next visit.
+// - The start page: from the network whenever there is one (an old saved copy would ask for code files a newer deploy
+//   has replaced, and show a blank page); the saved copy only offline.
+// - The app's code files: kept once downloaded (each version has its own file names).
 // - The card database, strings and ban list (BabelCDB, Distribution, LFLists on GitHub): the same.
 // - Card scripts (CardScripts): kept once downloaded; a card's script only changes with an engine update.
 // Card pictures are not kept: their servers don't allow pages to keep them cheaply, and offline they show as names.
-const VERSION = "rka-1";
+const VERSION = "rka-2";
 const APP = `${VERSION}-app`;
 const DATA = `${VERSION}-data`;
 
@@ -33,6 +35,17 @@ async function fresh(cacheName, request) {
     .catch(() => cached);
   return cached ?? update;
 }
+// the network, and the saved copy only when there is no network
+async function online(cacheName, request) {
+  const cache = await caches.open(cacheName);
+  try {
+    const response = await fetch(request);
+    if (response.ok) cache.put(request, response.clone());
+    return response;
+  } catch {
+    return (await cache.match(request)) ?? Response.error();
+  }
+}
 // the cached copy; the network only the first time
 async function kept(cacheName, request) {
   const cache = await caches.open(cacheName);
@@ -50,7 +63,9 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin === self.location.origin) {
     // the app's pages: the start page whatever the address after it (#replay= links included)
-    event.respondWith(request.mode === "navigate" ? fresh(APP, new Request("./")) : fresh(APP, request));
+    if (request.mode === "navigate") event.respondWith(online(APP, new Request("./")));
+    else if (url.pathname.includes("/assets/")) event.respondWith(kept(APP, request));
+    else event.respondWith(online(APP, request));
     return;
   }
   if (url.hostname === "raw.githubusercontent.com" || url.hostname === "api.github.com") {

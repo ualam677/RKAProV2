@@ -3,15 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#05080f" />
     <title>RKAPro</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon-192.png" />
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <meta name="theme-color" content="#03060c" />
   </head>
-  <body>
+  <body style="background: #03060c">
     <div id="root"></div>
+    <script>
+      // If the app's code can't load (an old copy of this page asking for files a newer deploy replaced), forget the
+      // saved copies and load the page fresh, once.
+      window.addEventListener(
+        "error",
+        function (event) {
+          var target = event.target;
+          if (!target || (target.tagName !== "SCRIPT" && target.tagName !== "LINK")) return;
+          if (sessionStorage.getItem("rka.recovered")) return;
+          sessionStorage.setItem("rka.recovered", "1");
+          var done = function () { location.reload(); };
+          var clear = window.caches ? caches.keys().then(function (keys) { return Promise.all(keys.map(function (key) { return caches.delete(key); })); }) : Promise.resolve();
+          var unregister = navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(function (all) { return Promise.all(all.map(function (one) { return one.unregister(); })); }) : Promise.resolve();
+          Promise.all([clear, unregister]).then(done, done);
+        },
+        true,
+      );
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
