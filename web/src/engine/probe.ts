@@ -22,7 +22,7 @@ import {
   type OcgResponse,
 } from "ocgcore-wasm";
 import { isFirstTurnHandTrap, isHandTrap } from "./handtraps.ts";
-import { interruptionsOf, type Interruption, type Piece, type QuickEffect } from "./interruptions.ts";
+import { interruptionsOf, nibiruStopper, type NibiruCheck, type Protection, type Interruption, type Piece, type QuickEffect } from "./interruptions.ts";
 
 export interface ProbeEnv {
   core: OcgCoreSync;
@@ -67,6 +67,9 @@ export interface Stop {
   ui: (number[] | null)[];
   // everything that can matter on the opponent's turn: field (with Xyz Materials), hand, GY
   pieces: Piece[];
+  // monsters you have summoned, and what you had right after the 5th (when Nibiru can first be used)
+  summons?: number;
+  fifth?: Piece[];
   failed?: boolean;
 }
 
@@ -164,12 +167,14 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
       );
     const pieces = (): Piece[] => {
       const out: Piece[] = [];
-      for (const location of [OcgLocation.MZONE, OcgLocation.SZONE, OcgLocation.HAND, OcgLocation.GRAVE])
+      for (const location of [OcgLocation.MZONE, OcgLocation.SZONE, OcgLocation.HAND, OcgLocation.GRAVE, OcgLocation.EXTRA])
         for (const card of core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location }))
           if (card?.code) out.push({ code: card.code, location, materials: card.overlayCards?.length ?? 0 });
       return out;
     };
-    const stop = (options: Option[]): Stop => ({ options: options.map((option) => option.label), codes: options.map((option) => option.code ?? 0), hint, measure: measure(), key: stateKey(), board: board(), ui: [...ui], pieces: pieces() });
+    let summons = 0;
+    let fifth: Piece[] | undefined;
+    const stop = (options: Option[]): Stop => ({ options: options.map((option) => option.label), codes: options.map((option) => option.code ?? 0), hint, measure: measure(), key: stateKey(), board: board(), ui: [...ui], pieces: pieces(), summons, fifth });
     const failed = (): Stop => ({ options: [], codes: [], hint: 0, measure: measure(), key: "failed:" + path.join(";"), board: [], ui: [], pieces: [], failed: true });
 
     for (let guard = 0; guard < 3000; guard++) {
@@ -191,6 +196,12 @@ export function play(env: ProbeEnv, hand: number[], deck: number[], extra: numbe
           case OcgMessageType.SUMMONING:
           case OcgMessageType.SPSUMMONING:
             lastSummon = message.code;
+            if (message.controller === 0) summons++;
+            break;
+          case OcgMessageType.SUMMONED:
+          case OcgMessageType.SPSUMMONED:
+            // the summon that makes 5 has happened: this is what you have when Nibiru can first be used
+            if (summons >= 5 && !fifth) fifth = pieces();
             break;
           case OcgMessageType.MOVE:
             if (message.from.location === OcgLocation.DECK && message.from.controller === 0 && message.to.location !== OcgLocation.DECK && started && message.card) {
@@ -611,6 +622,9 @@ export interface Route {
   keys: string[];
   // filled in after the search: each hand trap at each moment it can be used against this line
   chokes?: Choke[];
+  nibiru?: NibiruCheck;
+  // what the line leaves in place for their turn (filled in by the worker, which reads the card texts)
+  protection?: Protection[];
   deck: number;
   extra: number;
   tried: number;
@@ -706,7 +720,7 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
       return false;
     });
     const spells = stop.pieces.filter((piece) => piece.location === OcgLocation.SZONE).length;
-    return interruptionsOf(built, env.effects, env.setcodes, isFirstTurnHandTrap, Math.max(0, 5 - spells));
+    return interruptionsOf(built, env.effects, env.setcodes, isFirstTurnHandTrap, Math.max(0, 5 - spells), env.card);
   };
   type Node = { plan: number[]; stop: Stop; steps: string[]; keys: string[]; liked: number; value: number; route: Route };
   const judge = (stop: Stop, steps: string[], liked: number, tried: number, keys: string[] = []): { value: number; route: Route } => {
@@ -718,10 +732,14 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
     }
     const interruptions = count(stop);
     const negates = interruptions.filter((one) => one.kind === "negate").length;
-    const route: Route = { board: stop.board, interruptions, coverage, target, full: interruptions.length >= goal, steps, ui: stop.ui, keys, deck: stop.measure.deck, extra: stop.measure.extra, tried };
+    // at the 5th summon: only the field and the hand (a Trap Set this turn can't be used yet)
+    const ready = stop.fifth ? count({ ...stop, pieces: stop.fifth.filter((piece) => piece.location !== OcgLocation.SZONE) }) : [];
+    const stopper = nibiruStopper(ready);
+    const nibiru: NibiruCheck = { summons: stop.summons ?? 0, proof: (stop.summons ?? 0) < 5 || !!stopper, by: stopper?.code };
+    const route: Route = { board: stop.board, interruptions, coverage, target, full: interruptions.length >= goal, steps, ui: stop.ui, keys, deck: stop.measure.deck, extra: stop.measure.extra, tried, nibiru };
     // what the board can stop on their turn first (negates above removal); then closeness to your working boards;
     // then what the line has gathered to keep going; then how much it looks like your own lines
-    const value = interruptions.length * 50 + negates * 10 + coverage * 20 + stop.measure.deck * 4 + stop.measure.extra * 3 + stop.board.length * 2 + liked * 1.5;
+    const value = interruptions.length * 50 + negates * 10 + (nibiru.summons >= 5 && nibiru.proof ? 15 : 0) + coverage * 20 + stop.measure.deck * 4 + stop.measure.extra * 3 + stop.board.length * 2 + liked * 1.5;
     return { value, route };
   };
   let tried = 0;
@@ -740,6 +758,9 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
   const first = replay([]);
   const root: Node = { plan: [], stop: first, steps: [], keys: [], liked: 0, ...judge(first, [], 0, tried) };
   let best = root;
+  // a full board that Nibiru could break: kept, while a little more is spent looking for one it can't
+  let fullFound: Node | null = null;
+  let limit = budget;
   // a beam of the most promising positions; when it dies out with budget left and no full board, it starts again
   // wider (a choice that looks no better at first, like which card Orbital 7 adds, can be the one the line needs)
   for (let round = 0, keep = width; round < 3 && tried < budget; round++, keep *= 4) {
@@ -780,7 +801,12 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
           const keys = [...node.keys, key];
           const next: Node = { plan: [...node.plan, index], stop: child, steps, keys, liked, ...judge(child, steps, liked, tried, keys) };
           if (next.value > best.value) best = next;
-          if (next.route.full) return { ...next.route, tried };
+          if (next.route.full && next.route.nibiru?.proof) return { ...next.route, tried };
+          if (next.route.full && !fullFound) {
+            fullFound = next;
+            limit = Math.min(budget, tried + 600);
+          }
+          if (fullFound && tried >= limit) return { ...fullFound.route, tried };
           // a position with nothing left to do is a finished line: a candidate for the best, but no room in the beam
           if (child.options.length) children.push(next);
         }
@@ -794,7 +820,7 @@ export function* routeSearch(env: ProbeEnv, hand: number[], deck: number[], extr
     }
     options.trace?.(-1, []);
   }
-  return { ...best.route, tried };
+  return { ...(fullFound && !best.route.full ? fullFound : best).route, tried };
 }
 
 // ---------------------------------------------------------------------------
@@ -855,7 +881,7 @@ export function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra
     let hint = 0;
     const finish = (): FollowResult => {
       const pieces: Piece[] = [];
-      for (const location of [OcgLocation.MZONE, OcgLocation.SZONE, OcgLocation.HAND, OcgLocation.GRAVE])
+      for (const location of [OcgLocation.MZONE, OcgLocation.SZONE, OcgLocation.HAND, OcgLocation.GRAVE, OcgLocation.EXTRA])
         for (const card of core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location }))
           if (card?.code) pieces.push({ code: card.code, location, materials: card.overlayCards?.length ?? 0 });
       const left = [...hand];
@@ -867,7 +893,7 @@ export function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra
         return false;
       });
       const spells = pieces.filter((piece) => piece.location === OcgLocation.SZONE).length;
-      const found = env.effects && env.setcodes ? interruptionsOf(built, env.effects, env.setcodes, isFirstTurnHandTrap, Math.max(0, 5 - spells)) : [];
+      const found = env.effects && env.setcodes ? interruptionsOf(built, env.effects, env.setcodes, isFirstTurnHandTrap, Math.max(0, 5 - spells), env.card) : [];
       const board = pieces.filter((piece) => piece.location === OcgLocation.MZONE || piece.location === OcgLocation.SZONE).map((piece) => piece.code);
       return { windows, used, interruptions: found.length, board };
     };

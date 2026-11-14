@@ -26,7 +26,7 @@ import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { CHOKE_TRAPS, autoAnswer, chokeCombo, chokePoints, isFollow, isNeed, play, playAgainst, probeDeck, routeSearch } from "./probe";
 import type { FromHelper, ToHelper } from "./helper";
 import { isHandTrap } from "./handtraps";
-import { interruptionsOf, readEffects, readSetConstants, type QuickEffect } from "./interruptions";
+import { interruptionsOf, nibiruStopper, readEffects, readSetConstants, type NibiruCheck, type Protection, type QuickEffect } from "./interruptions";
 import { isFirstTurnHandTrap } from "./handtraps";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
 
@@ -1368,6 +1368,33 @@ async function drive<R>(steps: Generator<unknown, R, unknown>, env: Env, hand: n
   }
 }
 
+// What a line leaves in place for the opponent's turn: an effect it used whose operation protects your cards until
+// then (Galaxy-Eyes Cipher X Dragon: they cannot target your LIGHT monsters), in the card's own words.
+function protectionOf(used: { code: number; effect?: string }[]): Protection[] {
+  const out: Protection[] = [];
+  for (const { code, effect } of used) {
+    if (out.some((one) => one.code === code)) continue;
+    const protects = effectsOf(code).filter((one) => one.protects && (effect === undefined || one.description === undefined || one.description === effect));
+    if (!protects.length) continue;
+    // the sentence of the card text that says it: "your opponent cannot target LIGHT monsters you control ..."
+    const sentences = (texts.get(code) ?? "").split(/(?<=\.)\s+|\n|●/);
+    const said = sentences.find((one) => /cannot (be )?target|cannot be destroyed|unaffected|cannot be (Tributed|banished|negated|returned)|cannot activate|cannot be targeted/i.test(one)) ?? "";
+    out.push({ code, text: (said.includes(";") ? said.slice(said.lastIndexOf(";") + 1) : said).trim().replace(/\.$/, "") });
+  }
+  return out;
+}
+// which effect a step's key names: "Activate#<description>:<code>" (code<<20 | n, or the older code*16 + n)
+const usedOf = (keys: string[]) =>
+  keys.flatMap((key) => {
+    const match = /^Activate(?:#(\d+))?:(\d+)$/.exec(key);
+    if (!match) return [];
+    const code = Number(match[2]);
+    if (!match[1]) return [{ code }];
+    const description = BigInt(match[1]);
+    const effect = description >> 20n === BigInt(code) ? description & 0xfffffn : description - BigInt(code) * 16n;
+    return [{ code, effect: String(effect) }];
+  });
+
 // Route search, between other requests like the probe. The line found comes back as a test the duel screen replays:
 // the same deck order, seed and settings the search played with, and its choices as the screen takes them.
 let routeJob = 0;
@@ -1403,7 +1430,7 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
   if (!route) return;
   const options: StartOptions = { main: [...handCodes, ...[...deck].reverse()], extra: extraCodes, hand: handCodes.length, chosen: [], ignoreHandTraps: true, seed: 1 };
   const record: TestRecord = { options, picks: route.ui, steps: route.steps.map((text) => ({ text, idle: !text.startsWith("pick ") && !text.startsWith("finish") })), startHand: handCodes };
-  send({ type: "route", id, tried: route.tried, done: { route, record } });
+  send({ type: "route", id, tried: route.tried, done: { route: { ...route, protection: protectionOf(usedOf(route.keys)) }, record } });
 }
 
 // Choke points for one line, between other requests like the probe and the route search
@@ -1515,8 +1542,26 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
         return false;
       });
       const spells = pieces.filter((piece) => piece.location === OcgLocation.SZONE).length;
-      const list = interruptionsOf(built, effectsOf, (code) => cards.get(code)?.setcodes ?? [], isFirstTurnHandTrap, Math.max(0, 5 - spells));
-      send({ type: "interruptions", id: message.id, list });
+      const list = interruptionsOf(built, effectsOf, (code) => cards.get(code)?.setcodes ?? [], isFirstTurnHandTrap, Math.max(0, 5 - spells), (code) => cards.get(code) ?? null);
+      const used = (message.used ?? []).map((one) => ({ ...one, code: canonical(one.code) }));
+      await prefetchScripts(used.map((one) => one.code));
+      // Nibiru: what was ready right after your 5th summon (the field and the hand; a Trap Set this turn can't be used)
+      let nibiru: NibiruCheck | undefined;
+      if (message.summons !== undefined) {
+        const fifth = (message.fifth ?? []).map((piece) => ({ ...piece, code: canonical(piece.code) })).filter((piece) => piece.location !== OcgLocation.SZONE);
+        await prefetchScripts(fifth.map((piece) => piece.code));
+        const held = message.startHand.map(canonical);
+        const ready = fifth.filter((piece) => {
+          if (piece.location !== OcgLocation.HAND) return true;
+          const at = held.indexOf(piece.code);
+          if (at < 0) return true;
+          held.splice(at, 1);
+          return false;
+        });
+        const stopper = message.summons >= 5 ? nibiruStopper(interruptionsOf(ready, effectsOf, (code) => cards.get(code)?.setcodes ?? [], isFirstTurnHandTrap, 0)) : undefined;
+        nibiru = { summons: message.summons, proof: message.summons < 5 || !!stopper, by: stopper?.code };
+      }
+      send({ type: "interruptions", id: message.id, list, protection: protectionOf(used), nibiru });
     } else if (message.type === "choke") {
       void runChoke(message.id, message.main, message.extra, message.hand, message.keys, message.goal, message.combo).catch((error) =>
         send({ type: "error", text: `Hand trap check stopped: ${error instanceof Error ? error.message : error}` }),

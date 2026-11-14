@@ -30,6 +30,8 @@ window.addEventListener("beforeinstallprompt", (event) => {
 
 // hand test settings, remembered on this device only
 const SAVED = "rka.handtest";
+// the rules boards are counted by (negate types, rank-ups, once per turn by name, protection): older counts are redone
+const COUNTING = 2;
 interface Saved {
   deckId: string;
   hand: number;
@@ -239,7 +241,7 @@ function App() {
             // a second round keeps the earlier line if it was better
             const before = one.routes?.[job.code];
             if (before && before.signature === deckSignature(one) && (before.interruptions?.length ?? 0) >= route.interruptions.length && before.date > job.started) return one;
-            const saved = { keys: route.keys, board: route.board, interruptions: route.interruptions, coverage: route.coverage, full: route.full, aimed, tried: route.tried, date: Date.now(), signature: deckSignature(one), record: line };
+            const saved = { keys: route.keys, board: route.board, interruptions: route.interruptions, protection: route.protection, nibiru: route.nibiru, coverage: route.coverage, full: route.full, aimed, tried: route.tried, date: Date.now(), signature: deckSignature(one), record: line };
             return { ...one, routes: { ...one.routes, [job.code]: saved } };
           }),
         );
@@ -265,7 +267,7 @@ function App() {
         videoWaiting.current.delete(message.id);
       } else if (message.type === "interruptions") {
         // a working test's board, counted: kept with the test
-        setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list } : test)) } : one)));
+        setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list, protection: message.protection, nibiru: message.nibiru, counted: COUNTING } : test)) } : one)));
       } else if (message.type === "choke") {
         const job = chokingRef.current;
         if (!job || job.id !== message.id || !message.done) return;
@@ -533,11 +535,12 @@ function App() {
           ...mine.spells.flatMap((card) => (card?.code ? [{ code: card.code, location: 8, materials: 0 }] : [])),
           ...mine.hand.flatMap((card) => (card.code ? [{ code: card.code, location: 2, materials: 0 }] : [])),
           ...mine.grave.flatMap((card) => (card.code ? [{ code: card.code, location: 16, materials: 0 }] : [])),
+          ...mine.extra.flatMap((card) => (card.code ? [{ code: card.code, location: 64, materials: 0 }] : [])),
         ]
       : undefined;
     setWorked(current.worked);
     keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
-    if (current.pieces) post({ type: "interruptions", id: current.id, pieces: current.pieces, startHand: record.startHand });
+    if (current.pieces) void countBoard({ ...record, id: current.id, date: current.date }).then((counted) => counted?.send());
   };
   // save states: where the duel on screen is now, kept with the deck; loading one rebuilds it choice by choice
   const saveState = () => {
@@ -577,45 +580,61 @@ function App() {
       ...mine.spells.flatMap((card) => (card?.code ? [{ code: card.code, location: 8, materials: 0 }] : [])),
       ...mine.hand.flatMap((card) => (card.code ? [{ code: card.code, location: 2, materials: 0 }] : [])),
       ...mine.grave.flatMap((card) => (card.code ? [{ code: card.code, location: 16, materials: 0 }] : [])),
+      // for rank-ups on their turn (Eternal Galaxy into Number 90)
+      ...mine.extra.flatMap((card) => (card.code ? [{ code: card.code, location: 64, materials: 0 }] : [])),
     ];
   };
+  // a saved test counted: replayed out of sight for its end board and for the moment of your 5th summon (Nibiru)
+  const countBoard = async (saved: SavedTest, views?: DuelView[]) => {
+    const all = views ?? (await replayViews(saved)).views;
+    const last = all.at(-1);
+    if (!last) return null;
+    let summons = 0;
+    let fifth: ReturnType<typeof piecesOf> | undefined;
+    for (const one of all) {
+      summons += one.events.filter((event) => event.kind === "summon" && event.controller === 0).length;
+      if (summons >= 5 && !fifth) fifth = piecesOf(one);
+    }
+    const pieces = piecesOf(last);
+    const board = [...last.players[0].monsters, ...last.players[0].spells].flatMap((card) => (card?.code ? [card.code] : []));
+    // sent once the test is kept, so the answer finds it
+    const send = () => post({ type: "interruptions", id: saved.id, pieces, startHand: saved.startHand, used: usedIn(saved.steps), summons, fifth });
+    return { last, pieces, board, send };
+  };
+  // the effects a test activated, for what they leave in place on the opponent's turn
+  const usedIn = (steps: { text: string; idle: boolean; code?: number }[]) => steps.flatMap((step) => (step.idle && step.code && /^Activate/.test(step.text) ? [{ code: step.code }] : []));
   // mark a saved test as working (or not) after the fact: its end is the board it worked to
-  const markTestWorked = async (saved: SavedTest, finalView?: DuelView) => {
+  const markTestWorked = async (saved: SavedTest, views?: DuelView[]) => {
     const target = decks.find((one) => one.tests?.some((test) => test.id === saved.id)) ?? deck;
     if (!target) return;
     if (saved.worked) {
       changeDeck({ ...target, tests: (target.tests ?? []).map((test) => (test.id === saved.id ? { ...test, worked: false, board: undefined, pieces: undefined, interruptions: undefined } : test)) });
       return;
     }
-    const last = finalView ?? (await replayViews(saved)).views.at(-1);
-    if (!last) return;
-    const pieces = piecesOf(last);
-    const board = [...last.players[0].monsters, ...last.players[0].spells].flatMap((card) => (card?.code ? [card.code] : []));
+    const counted = await countBoard(saved, views);
+    if (!counted) return;
+    const { pieces, board } = counted;
     const latest = decksRef.current.find((one) => one.id === target.id) ?? target;
     const known = latest.tests?.some((test) => test.id === saved.id);
     const marked = { ...saved, worked: true, board, pieces };
     changeDeck({ ...latest, tests: known ? (latest.tests ?? []).map((test) => (test.id === saved.id ? marked : test)) : keepTest(latest.tests, marked) });
-    post({ type: "interruptions", id: saved.id, pieces, startHand: saved.startHand });
+    window.setTimeout(counted.send, 0);
   };
   const [loadingReplay, setLoadingReplay] = useState(false);
   // worked tests saved before boards were counted: replayed out of sight, one at a time, and counted
   const counting = useRef(new Set<string>());
   useEffect(() => {
     if (screen !== "replays" || !deck || !ready) return;
-    const waiting = (deck.tests ?? []).filter((one) => one.worked && !one.interruptions && !counting.current.has(one.id));
+    const waiting = (deck.tests ?? []).filter((one) => one.worked && (!one.interruptions || one.counted !== COUNTING) && !counting.current.has(one.id));
     if (!waiting.length) return;
     void (async () => {
       for (const saved of waiting) {
         counting.current.add(saved.id);
-        let pieces = saved.pieces;
-        if (!pieces?.length) {
-          const last = (await replayViews(saved)).views.at(-1);
-          if (!last) continue;
-          pieces = piecesOf(last);
-          const board = [...last.players[0].monsters, ...last.players[0].spells].flatMap((card) => (card?.code ? [card.code] : []));
-          setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === saved.id) ? { ...one, tests: one.tests.map((test) => (test.id === saved.id ? { ...test, pieces, board: test.board?.length ? test.board : board } : test)) } : one)));
-        }
-        post({ type: "interruptions", id: saved.id, pieces, startHand: saved.startHand });
+        const counted = await countBoard(saved);
+        if (!counted) continue;
+        const { pieces, board } = counted;
+        setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === saved.id) ? { ...one, tests: one.tests.map((test) => (test.id === saved.id ? { ...test, pieces, board: test.board?.length ? test.board : board } : test)) } : one)));
+        counted.send();
       }
     })();
   }, [screen, deck, ready]);
@@ -845,7 +864,7 @@ function App() {
         <button
           className={`button ${isWorked ? "on" : ""}`}
           onClick={async () => {
-            await markTestWorked({ ...viewing.test, ...(saved ?? {}) }, viewing.views[viewing.frames[viewing.frames.length - 1].index]);
+            await markTestWorked({ ...viewing.test, ...(saved ?? {}) }, viewing.views.slice(0, viewing.frames[viewing.frames.length - 1].index + 1));
             setViewing((now) => now && { ...now, test: { ...now.test, worked: !isWorked } });
           }}
         >

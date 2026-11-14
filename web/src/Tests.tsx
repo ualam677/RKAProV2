@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SavedTest } from "./decks";
 import { CardArt } from "./CardArt";
+import { describeInterruption, describeNibiru, describeProtection, shortWhat } from "./interruptText";
 
 interface Props {
   tests: SavedTest[];
@@ -78,7 +79,7 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, onWo
                       <span key={index} className={`test-card ${uses.length ? "interrupts" : ""}`} title={nameOf(code)}>
                         <i>{nameOf(code)}</i>
                         <CardArt code={code} />
-                        {uses.length > 0 && <small>{[...new Set(uses.map((one) => one.kind))].join(" + ")}</small>}
+                        {uses.length > 0 && <small>{[...new Set(uses.map((one) => (one.via ? "→ " : "") + shortWhat(one)))].join(" + ")}</small>}
                       </span>
                     );
                   })}
@@ -86,16 +87,24 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, onWo
                     // ones not on the field: a Trap still in the hand to Set, a hand trap, an effect in the GY
                     .filter((one) => one.from === "hand" || one.from === "gy" || !test.board!.some((code) => code === one.code || nameOf(code) === nameOf(one.code)))
                     .map((one, index) => (
-                      <span key={`off${index}`} className="test-card interrupts off" title={`${nameOf(one.code)} (${one.from === "hand" ? "from the hand" : one.from === "gy" ? "in the GY" : "Set it"})`}>
+                      <span key={`off${index}`} className="test-card interrupts off" title={describeInterruption(one, nameOf)}>
                         <i>{nameOf(one.code)}</i>
                         <CardArt code={one.code} />
-                        <small>{one.from === "hand" ? "hand" : one.from === "gy" ? "GY" : "Set"}</small>
+                        <small>
+                          {(one.via ? "→ " : "") + shortWhat(one)}
+                          <br />
+                          {one.from === "hand" ? "HAND" : one.from === "gy" ? "GY" : "SET"}
+                        </small>
                       </span>
                     ))}
                 </span>
               )}
               {test.worked && test.interruptions && test.interruptions.length > 0 && (
-                <span className="test-board">{test.interruptions.map((one) => `${nameOf(one.code)} (${one.kind}${one.from === "set" ? ", Set" : one.from === "hand" ? ", from the hand" : one.from === "gy" ? ", in the GY" : ""})`).join(" · ")}</span>
+                <span className="test-board">{test.interruptions.map((one) => describeInterruption(one, nameOf)).join(" · ")}</span>
+              )}
+              {test.worked && test.nibiru && <span className={`test-board ${test.nibiru.proof ? "protect" : "warn"}`}>{describeNibiru(test.nibiru, nameOf)}</span>}
+              {test.worked && test.protection && test.protection.length > 0 && (
+                <span className="test-board protect">Protection on their turn: {test.protection.map((one) => describeProtection(one, nameOf)).join(" · ")}</span>
               )}
             </button>
             {expanded && (

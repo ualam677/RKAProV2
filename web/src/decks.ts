@@ -4,7 +4,7 @@ import { parseYdk, type Deck } from "./deck";
 import type { Tag } from "./optimiser";
 import type { CardEvidence } from "./engine/probe";
 import type { TestRecord } from "./engine/protocol";
-import type { Interruption, Piece } from "./engine/interruptions";
+import type { Interruption, NibiruCheck, Piece, Protection } from "./engine/interruptions";
 import type { Choke, ChokeCombo } from "./engine/probe";
 
 // A hand test kept with its deck: enough to replay it exactly, and what it ended on if you said it worked
@@ -19,6 +19,11 @@ export interface SavedTest extends TestRecord {
   // what you had when you said it worked (field with Xyz Materials, hand, GY), and the interruptions it holds
   pieces?: Piece[];
   interruptions?: Interruption[];
+  // what the line left in place for their turn (Cipher X: they cannot target your LIGHT monsters)
+  protection?: Protection[];
+  nibiru?: NibiruCheck;
+  // the counting rules it was counted with: older counts are done again
+  counted?: number;
 }
 // working tests are kept; of the rest, the newest 5
 const KEEP_OTHERS = 5;
@@ -60,6 +65,8 @@ export interface SavedState {
 export interface SavedRoute {
   board: number[];
   interruptions?: Interruption[];
+  protection?: Protection[];
+  nibiru?: NibiruCheck;
   // the line as steps another search can follow ("Activate:<code>", "pick:<hint>:<code>")
   keys?: string[];
   // each hand trap used at each moment it can be against this line, and what the line ends on then

@@ -148,6 +148,12 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
    (10, 40, 160 kept) when it dies out early, and each step's key names which effect was used
    (`Activate#<effect>:<code>`), so a line with Galaxy Wizard (Level or search) is followed correctly. Still to do: the
    engine probe (singles and pairs) on the helpers too; Lua bytecode was tried and saves too little (24 to 20 ms).
+   Boards are now read for negate type (monster, Spell, Spell/Trap, board, omni: `scopeOf` in interruptions.ts),
+   rank-ups on their turn (Eternal Galaxy into an Extra Deck monster with a negate, `rankUp`), once per turn by name,
+   protection left in place (Cipher X: `protects`, worded from the card text) and Nibiru (`NibiruCheck`: a monster or
+   omni-negate on the field or usable from the hand right after your 5th summon). The search prefers Nibiru-proof full
+   boards (up to 600 more tries). Worked replays are counted by replaying them (`countBoard` in main.tsx); `COUNTING`
+   redoes older counts when the rules change.
 2. Measured success per start, with why it failed: from saved tests, how often each start reached a full board, and
    for the misses, what stopped it (bricked hand, a hand trap, a step missing). Feeds the optimiser's odds.
 3. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).

@@ -1,6 +1,7 @@
 // The Deck Optimiser panel inside the deck editor: tag what each Main Deck card is for, read the exact odds for both
 // turns, and apply the swaps it finds with one tap (and undo them just as fast).
 import { useEffect, useMemo, useState } from "react";
+import { describeInterruption, describeNibiru, describeProtection } from "./interruptText";
 import { CardArt } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
@@ -641,13 +642,14 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
   if (!route) return null;
   const board = route.board.length ? route.board.map(nameOf).join(", ") : "nothing on the field";
   const stops = route.interruptions ?? [];
-  const where = { field: "", hand: " from the hand", set: " Set", gy: " in the GY" };
   return (
     <span className={`opt-engine route ${full ? "full" : ""}`}>
       Engine line ({route.tried} tried): ends on {board}. {full ? "✓ " : ""}
       {stops.length
-        ? `${stops.length} interruption${stops.length > 1 ? "s" : ""}: ${stops.map((one) => `${nameOf(one.code)} (${one.kind}${where[one.from]})`).join(", ")}`
+        ? `${stops.length} interruption${stops.length > 1 ? "s" : ""}: ${stops.map((one) => describeInterruption(one, nameOf)).join(", ")}`
         : "No interruptions"}
+      {route.protection && route.protection.length > 0 && ` · Protection on their turn: ${route.protection.map((one) => describeProtection(one, nameOf)).join(" · ")}`}
+      {route.nibiru && ` · ${describeNibiru(route.nibiru, nameOf)}`}
       {route.aimed && route.coverage > 0 && ` · ${Math.round(route.coverage * 100)}% of your closest working board`}
       {!fresh && " · deck changed since"}{" "}
       <button className="opt-link" onClick={onWatch}>
