@@ -444,6 +444,7 @@ export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, o
               )}
               <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
               <Clashes main={main} nameOf={nameOf} traits={traits} />
+              <TwoStarts routes={routes} nameOf={nameOf} />
               {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
               {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
                 <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
@@ -943,6 +944,60 @@ function Clashes({ main, nameOf, traits }: { main: DeckCard[]; nameOf: (code: nu
         {lines.map((line) => (
           <li key={line}>{line}</li>
         ))}
+      </ul>
+    </div>
+  );
+}
+
+// Holding two starts: which line to lead with, from each line's own hand trap check. Against an opponent who uses a hand
+// trap at the first chance (common, and how the computer opponent plays): lead with A and it lands on A's first moment
+// if A has one, and you still play B in full; if A has none, it lands on B's first moment and you keep A's board.
+// Leading with the line you'd rather lose shows up here as the better order. Against an opponent who waits for the
+// worst moment, the order matters much less: that's said too.
+function TwoStarts({ routes, nameOf }: { routes: Record<string, SavedRoute>; nameOf: (code: number) => string }) {
+  const starts = Object.keys(routes)
+    .map(Number)
+    .filter((code) => routes[code].chokes?.length);
+  if (starts.length < 2) return null;
+  const clean = (code: number) => routes[code].interruptions?.length ?? 0;
+  // A first, then B, against one hand trap used at its first chance
+  const firstChance = (a: number, b: number, trap: number) => {
+    const onA = routes[a].chokes!.find((one) => one.trap === trap);
+    const onB = routes[b].chokes!.find((one) => one.trap === trap);
+    if (onA?.windows.length) return { left: Math.max(onA.windows[0].interruptions, clean(b)), hit: a, at: onA.windows[0].at };
+    if (onB?.windows.length) return { left: Math.max(clean(a), onB.windows[0].interruptions), hit: b, at: onB.windows[0].at };
+    return { left: Math.max(clean(a), clean(b)), hit: null, at: null };
+  };
+  const traps = [...new Set(starts.flatMap((code) => routes[code].chokes!.map((one) => one.trap)))];
+  const pairs: [number, number][] = [];
+  starts.forEach((a, i) => starts.slice(i + 1).forEach((b) => pairs.push([a, b])));
+  return (
+    <div className="opt-note">
+      <b>Two starts in hand: which to lead with.</b> From each line's hand trap check, against an opponent who uses a hand trap at the first chance it gets.
+      <ul className="opt-clashes">
+        {pairs.map(([a, b]) => {
+          const ab = traps.map((trap) => ({ trap, ...firstChance(a, b, trap) }));
+          const ba = traps.map((trap) => ({ trap, ...firstChance(b, a, trap) }));
+          const sum = (list: { left: number }[]) => list.reduce((total, one) => total + one.left, 0) / list.length;
+          const [sa, sb] = [sum(ab), sum(ba)];
+          const lead = sa >= sb ? a : b;
+          const other = lead === a ? b : a;
+          const mine = lead === a ? ab : ba;
+          const theirs = lead === a ? ba : ab;
+          const wins = mine.filter((one, at) => one.left > theirs[at].left);
+          return (
+            <li key={`${a}-${b}`}>
+              {nameOf(a)} + {nameOf(b)}:{" "}
+              {Math.abs(sa - sb) < 0.05
+                ? "either order holds up the same."
+                : `lead with ${nameOf(lead)}, then ${nameOf(other)}: ${Math.max(sa, sb).toFixed(1)} interruptions left on average, against ${Math.min(sa, sb).toFixed(1)} the other way.` +
+                  (wins.length
+                    ? ` Against ${wins.map((one) => nameOf(one.trap)).join(", ")}, the hand trap lands on ${nameOf(lead)} (${wins[0].at ?? "its first moment"}) and ${nameOf(other)}'s line still runs.`
+                    : "")}{" "}
+              <span className="muted">An opponent who waits for the worst moment can still hit either line: then the order matters much less.</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
