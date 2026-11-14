@@ -2,6 +2,7 @@
 // choice in it and play on from there yourself.
 import { useState } from "react";
 import type { SavedTest } from "./decks";
+import { CardArt } from "./CardArt";
 
 interface Props {
   tests: SavedTest[];
@@ -63,13 +64,38 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, onWo
               <span className="muted">
                 {test.worked && <b className="test-badge">✓ Worked</b>} {when(test.date)} · {actions} action{actions === 1 ? "" : "s"}
               </span>
-              {test.worked && test.board && test.board.length > 0 && <span className="test-board">Ended on {grouped(test.board, nameOf)}</span>}
-              {test.worked && test.interruptions && (
-                <span className={`test-board ${test.interruptions.length ? "" : "warn"}`}>
-                  {test.interruptions.length
-                    ? `${test.interruptions.length} interruption${test.interruptions.length > 1 ? "s" : ""}: ${test.interruptions.map((one) => `${nameOf(one.code)} (${one.kind}${one.from === "set" ? ", Set" : one.from === "hand" ? ", from the hand" : one.from === "gy" ? ", in the GY" : ""})`).join(", ")}`
-                    : "No interruptions on this board"}
+              {test.worked && (
+                <span className={`test-count ${test.interruptions && !test.interruptions.length ? "warn" : ""}`}>
+                  {!test.interruptions ? "Counting interruptions…" : test.interruptions.length ? `${test.interruptions.length} interruption${test.interruptions.length > 1 ? "s" : ""}` : "No interruptions"}
                 </span>
+              )}
+              {test.worked && test.board && test.board.length > 0 && (
+                // the end board in small cards; the ones that interrupt are lit, with what they do
+                <span className="test-cards">
+                  {test.board.map((code, index) => {
+                    const uses = (test.interruptions ?? []).filter((one) => (one.code === code || nameOf(one.code) === nameOf(code)) && one.from !== "hand" && one.from !== "gy");
+                    return (
+                      <span key={index} className={`test-card ${uses.length ? "interrupts" : ""}`} title={nameOf(code)}>
+                        <i>{nameOf(code)}</i>
+                        <CardArt code={code} />
+                        {uses.length > 0 && <small>{[...new Set(uses.map((one) => one.kind))].join(" + ")}</small>}
+                      </span>
+                    );
+                  })}
+                  {(test.interruptions ?? [])
+                    // ones not on the field: a Trap still in the hand to Set, a hand trap, an effect in the GY
+                    .filter((one) => one.from === "hand" || one.from === "gy" || !test.board!.some((code) => code === one.code || nameOf(code) === nameOf(one.code)))
+                    .map((one, index) => (
+                      <span key={`off${index}`} className="test-card interrupts off" title={`${nameOf(one.code)} (${one.from === "hand" ? "from the hand" : one.from === "gy" ? "in the GY" : "Set it"})`}>
+                        <i>{nameOf(one.code)}</i>
+                        <CardArt code={one.code} />
+                        <small>{one.from === "hand" ? "hand" : one.from === "gy" ? "GY" : "Set"}</small>
+                      </span>
+                    ))}
+                </span>
+              )}
+              {test.worked && test.interruptions && test.interruptions.length > 0 && (
+                <span className="test-board">{test.interruptions.map((one) => `${nameOf(one.code)} (${one.kind}${one.from === "set" ? ", Set" : one.from === "hand" ? ", from the hand" : one.from === "gy" ? ", in the GY" : ""})`).join(" · ")}</span>
               )}
             </button>
             {expanded && (

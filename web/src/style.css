@@ -484,6 +484,14 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-chokes ul { margin: 4px 0; padding-left: 16px; display: grid; gap: 3px; color: var(--muted); }
 .opt-chokes b { color: var(--text); }
 .test-board.warn { color: #ffb36b; }
+.test-count { font-size: 14px; font-weight: 700; color: var(--accent-strong); }
+.test-count.warn { color: #ffb36b; }
+.test-cards { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+.test-card { position: relative; width: 40px; aspect-ratio: 59 / 86; border-radius: 3px; background: #1a2338; overflow: hidden; opacity: 0.55; }
+.test-card.interrupts { opacity: 1; box-shadow: 0 0 0 2px var(--accent-strong), 0 0 8px var(--accent); }
+.test-card.off { box-shadow: 0 0 0 2px #7aa7e0; }
+.test-card i { position: absolute; inset: 0; padding: 2px; font-style: normal; font-size: 7px; line-height: 1.1; color: var(--muted); overflow: hidden; }
+.test-card small { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; padding: 1px 0; background: rgba(4, 10, 24, 0.85); color: #fff; font-size: 8px; text-align: center; text-transform: uppercase; }
 .sync summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
 .sync summary::-webkit-details-marker { display: none; }
 .sync summary::before { content: "›"; color: var(--accent-strong); font-size: 18px; transition: transform var(--fast); }

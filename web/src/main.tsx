@@ -598,6 +598,27 @@ function App() {
     post({ type: "interruptions", id: saved.id, pieces, startHand: saved.startHand });
   };
   const [loadingReplay, setLoadingReplay] = useState(false);
+  // worked tests saved before boards were counted: replayed out of sight, one at a time, and counted
+  const counting = useRef(new Set<string>());
+  useEffect(() => {
+    if (screen !== "replays" || !deck || !ready) return;
+    const waiting = (deck.tests ?? []).filter((one) => one.worked && !one.interruptions && !counting.current.has(one.id));
+    if (!waiting.length) return;
+    void (async () => {
+      for (const saved of waiting) {
+        counting.current.add(saved.id);
+        let pieces = saved.pieces;
+        if (!pieces?.length) {
+          const last = (await replayViews(saved)).views.at(-1);
+          if (!last) continue;
+          pieces = piecesOf(last);
+          const board = [...last.players[0].monsters, ...last.players[0].spells].flatMap((card) => (card?.code ? [card.code] : []));
+          setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === saved.id) ? { ...one, tests: one.tests.map((test) => (test.id === saved.id ? { ...test, pieces, board: test.board?.length ? test.board : board } : test)) } : one)));
+        }
+        post({ type: "interruptions", id: saved.id, pieces, startHand: saved.startHand });
+      }
+    })();
+  }, [screen, deck, ready]);
   const describeEvents = (events: DuelView["events"]) => {
     const parts = events.flatMap((event) => {
       if (event.kind === "summon") return [`Summoned ${event.name}`];
