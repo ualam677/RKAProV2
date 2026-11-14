@@ -750,7 +750,8 @@ function cardsIn(controller: 0 | 1, location: OcgLocation, hidden = false): (Car
   return core.duelQueryLocation(duel!, { flags: QUERY, controller, location }).map((info, sequence) => {
     if (!info) return null;
     const position = info.position ?? OcgPosition.FACEDOWN_DEFENSE;
-    const secret = hidden || (controller === 1 && (position & (OcgPosition.FACEDOWN_ATTACK | OcgPosition.FACEDOWN_DEFENSE)) !== 0 && location !== OcgLocation.GRAVE);
+    const facedown = controller === 1 && (position & (OcgPosition.FACEDOWN_ATTACK | OcgPosition.FACEDOWN_DEFENSE)) !== 0 && location !== OcgLocation.GRAVE;
+    const secret = !revealAll && (hidden || facedown);
     const code = secret ? 0 : (info.code ?? 0);
     const type = cards.get(code)?.type ?? 0;
     // Level, Rank and Link rating as they are now, after effects that change them
@@ -920,6 +921,8 @@ let promptHint = 0;
 let quiet = false;
 // collecting every moment of a replay (for a video) instead of sending it to the screen
 let collect: DuelView[] | null = null;
+// a replay being watched shows every card, both hands and Extra Decks included
+let revealAll = false;
 
 // "Normal Summon Galaxy Wizard", "Select a card to add to your hand: Galaxy Defense Robot Orbital 7"
 function describePick(shown: Prompt, picks: number[] | null): string {
@@ -1045,10 +1048,12 @@ function advance() {
           events.push({ kind: "dice", code: 0, name: "", controller: 0, location: 0, sequence: 0, text: `Die: ${message.results.join(", ")}` });
           break;
         case OcgMessageType.ATTACK:
+          // the attacker, read from the field (the message only says where it is)
+          const attacker = cardsIn(message.card.controller as 0 | 1, message.card.location as OcgLocation)[message.card.sequence]?.code ?? 0;
           events.push({
             kind: "attack",
-            code: 0,
-            name: "",
+            code: attacker,
+            name: nameOf(attacker),
             controller: message.card.controller,
             location: message.card.location,
             sequence: message.card.sequence,
@@ -1311,14 +1316,20 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
     } else if (message.type === "answer") {
       choose(message.picks);
     } else if (message.type === "views") {
-      const { picks, type: _type, id, ...options } = message;
+      const { picks, type: _type, id, reveal, ...options } = message;
       collect = [];
+      revealAll = !!reveal;
       try {
         await start(options);
-        for (const pick of picks) if (!choose(pick)) break;
-        send({ type: "views", id, views: collect });
+        const marks = [collect.length];
+        for (const pick of picks) {
+          if (!choose(pick)) break;
+          marks.push(collect.length);
+        }
+        send({ type: "views", id, views: collect, marks });
       } finally {
         collect = null;
+        revealAll = false;
       }
     } else if (message.type === "jump") {
       const { picks, type: _type, ...options } = message;

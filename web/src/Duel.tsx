@@ -11,6 +11,8 @@ interface Props {
   leave: () => void;
   // jump past the animations still waiting to play
   skip: () => void;
+  // watching a replay: these controls instead of the duel's own, nothing to answer
+  viewer?: ReactNode;
   // "This worked": keeps the test and the board it ended on; undefined while nothing has been played yet
   worked: boolean;
   onWorked?: () => void;
@@ -39,7 +41,7 @@ const CUE_MS: Record<DuelEvent["kind"], number> = {
 };
 export const cueTime = (events: DuelEvent[]) => events.reduce((longest, event) => Math.max(longest, CUE_MS[event.kind]), 0);
 
-type Pile = "grave" | "banished" | "extra";
+type Pile = "grave" | "banished" | "extra" | "hand";
 type Sheet = { kind: "card"; card: CardView } | { kind: "pile"; controller: number; pile: Pile } | null;
 // the card whose actions float over it, with where it sits on screen
 type Focus = { card: CardView; rect: DOMRect } | null;
@@ -177,7 +179,7 @@ function PileFace({ card }: { card?: CardView }) {
   );
 }
 
-function LifeBar({ name, lp, extra, mine, active, children }: { name: string; lp: number; extra?: string; mine?: boolean; active: boolean; children?: ReactNode }) {
+function LifeBar({ name, lp, extra, mine, active, children, onExtra }: { name: string; lp: number; extra?: string; mine?: boolean; active: boolean; children?: ReactNode; onExtra?: () => void }) {
   const fill = Math.max(0, Math.min(1, lp / START_LP));
   return (
     <div className={`lifebar ${mine ? "mine" : "theirs"} ${active ? "active" : ""}`}>
@@ -185,7 +187,7 @@ function LifeBar({ name, lp, extra, mine, active, children }: { name: string; lp
       <div className="lifebar-body">
         <div className="lifebar-head">
           <span className="lifebar-name">{name}</span>
-          {extra && <span className="lifebar-extra">{extra}</span>}
+          {extra && (onExtra ? <button className="lifebar-extra link" onClick={(event) => (event.stopPropagation(), onExtra())}>{extra}</button> : <span className="lifebar-extra">{extra}</span>)}
           <span className="lifebar-lp">{lp}</span>
         </div>
         <div className="lifebar-track">
@@ -329,7 +331,7 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   );
 }
 
-export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying, states, onSaveState, onLoadState }: Props) {
+export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, replaying, states, onSaveState, onLoadState, viewer }: Props) {
   const [stateList, setStateList] = useState(false);
   const [savedNote, setSavedNote] = useState("");
   const wide = useMedia(WIDE_QUERY);
@@ -468,7 +470,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     const cards = name === "deck" ? [] : player[name];
     const count = name === "deck" ? player.deck : cards.length;
     const top = name === "grave" || name === "banished" ? cards[cards.length - 1] : undefined;
-    const label = { deck: "Deck", grave: "GY", banished: "Banished", extra: "Extra" }[name];
+    const label = { deck: "Deck", grave: "GY", banished: "Banished", extra: "Extra", hand: "Hand" }[name];
     const open = name !== "deck" && count > 0 ? () => setSheet({ kind: "pile", controller, pile: name }) : undefined;
     return (
       <button
@@ -725,8 +727,8 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
       return (
         <>
           <h2>
-            {sheet.controller === 1 ? "Opponent's " : ""}
-            {sheet.pile === "grave" ? "Graveyard" : sheet.pile === "banished" ? "Banished" : "Extra Deck"}
+            {sheet.controller === 1 ? "Opponent's " : sheet.pile === "hand" ? "Your " : ""}
+            {sheet.pile === "grave" ? "Graveyard" : sheet.pile === "banished" ? "Banished" : sheet.pile === "hand" ? "Hand" : "Extra Deck"}
           </h2>
           <div className="card-grid">
             {cards.map((card, index) => (
@@ -776,7 +778,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   const focusActions = focus ? actionsFor(focus.card) : [];
   const myTurn = view.turnPlayer === 0;
 
-  const menu = (
+  const menu = viewer ? (
+    <button className="button ghost" onClick={leave}>
+      Exit
+    </button>
+  ) : (
     <>
       <button
         className="button"
@@ -842,7 +848,14 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   );
 
   const opponentBar = (
-    <LifeBar name="Opponent" lp={them.lp} extra={`Hand ${them.hand.length}`} active={!myTurn}>
+    <LifeBar
+      name="Opponent"
+      lp={them.lp}
+      extra={`Hand ${them.hand.length}`}
+      active={!myTurn}
+      // in a replay every card is shown: the opponent's hand opens like a pile
+      onExtra={viewer && them.hand.some((card) => card.code) ? () => setSheet({ kind: "pile", controller: 1, pile: "hand" }) : undefined}
+    >
       {!wide && (
         <button className="icon-button" aria-label="Menu" onClick={(event) => (event.stopPropagation(), setMenuOpen(!menuOpen))}>
           ☰
@@ -850,7 +863,10 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
       )}
     </LifeBar>
   );
-  const myBar = <LifeBar name="You" lp={me.lp} mine active={myTurn} />;
+  // in a replay the controls sit over your hand: it opens like a pile from here as well
+  const myBar = (
+    <LifeBar name="You" lp={me.lp} mine active={myTurn} extra={viewer ? `Hand ${me.hand.length}` : undefined} onExtra={viewer && me.hand.length ? () => setSheet({ kind: "pile", controller: 0, pile: "hand" }) : undefined} />
+  );
 
   return (
     // a tap anywhere else closes the floating actions and the menus
@@ -867,6 +883,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
       )}
       {!wide && opponentBar}
       {!wide && menuOpen && <div className="menu">{menu}</div>}
+      {viewer && (
+        <div className="viewer-bar" onClick={(event) => event.stopPropagation()}>
+          {viewer}
+        </div>
+      )}
       {replaying && (
         <div className="replay-bar" onClick={(event) => event.stopPropagation()}>
           <span>

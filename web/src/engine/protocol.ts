@@ -183,7 +183,7 @@ export type ToWorker =
   // start a recorded test and make its first `picks` choices at once, showing only where that leaves the duel
   | ({ type: "jump"; picks: (number[] | null)[] } & StartOptions)
   // replay a recorded test and send back every moment of it (for a video), without showing it
-  | ({ type: "views"; id: string; picks: (number[] | null)[] } & StartOptions)
+  | ({ type: "views"; id: string; picks: (number[] | null)[]; reveal?: boolean } & StartOptions)
   | { type: "text"; code: number }
   | { type: "search"; id: number; search: CardSearch }
   | { type: "info"; codes: number[] }
@@ -201,7 +201,8 @@ export type FromWorker =
   | { type: "ready"; cards: number; banlist: { name: string; limits: Record<number, number> } }
   | { type: "view"; view: DuelView }
   | { type: "record"; record: TestRecord }
-  | { type: "views"; id: string; views: DuelView[] }
+  // marks[i]: how many views there were once play i was made (marks[0]: the duel's start)
+  | { type: "views"; id: string; views: DuelView[]; marks: number[] }
   | { type: "text"; card: CardText }
   | { type: "search"; id: number; results: CardInfo[]; more: boolean }
   // asked: the passcode as requested (Omega numbers alternate artworks itself), code: the card it is

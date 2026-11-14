@@ -11,6 +11,8 @@ interface Props {
   onVideo: (test: SavedTest) => void;
   // a video being made: which test, and how far (0-1)
   video: { id: string; share: number } | null;
+  // a replay being prepared for watching
+  loading?: boolean;
 }
 
 const when = (date: number) => {
@@ -28,7 +30,7 @@ const grouped = (codes: number[], nameOf: (code: number) => string) => {
   return [...tally].map(([code, count]) => `${count > 1 ? `${count}× ` : ""}${nameOf(code)}`).join(" · ");
 };
 
-export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, video }: Props) {
+export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, video, loading }: Props) {
   const [onlyWorked, setOnlyWorked] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const shown = onlyWorked ? tests.filter((test) => test.worked) : tests;
@@ -71,8 +73,8 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, video }: Prop
             {expanded && (
               <div className="test-body">
                 <div className="test-actions">
-                  <button className="button small primary" onClick={() => onWatch(test)}>
-                    Watch
+                  <button className="button small primary" disabled={loading} onClick={() => onWatch(test)}>
+                    {loading ? "Loading…" : "Watch"}
                   </button>
                   <button className="button small" disabled={!!video} onClick={() => onVideo(test)}>
                     {video?.id === test.id ? `Video ${Math.round(video.share * 100)}%` : "Save as video"}

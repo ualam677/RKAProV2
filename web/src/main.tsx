@@ -218,7 +218,7 @@ function App() {
         const done = decksRef.current.find((one) => one.id === job.deckId);
         if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
       } else if (message.type === "views") {
-        videoWaiting.current.get(message.id)?.(message.views);
+        videoWaiting.current.get(message.id)?.({ views: message.views, marks: message.marks });
         videoWaiting.current.delete(message.id);
       } else if (message.type === "interruptions") {
         // a working test's board, counted: kept with the test
@@ -491,17 +491,88 @@ function App() {
   };
   // a saved test as a video file: the worker replays it out of sight, the page draws and records every moment
   const [video, setVideo] = useState<{ id: string; share: number } | null>(null);
-  const videoWaiting = useRef(new Map<string, (views: DuelView[]) => void>());
-  const saveVideo = async (saved: SavedTest) => {
+  const videoWaiting = useRef(new Map<string, (replay: { views: DuelView[]; marks: number[] }) => void>());
+  const replayViews = (saved: SavedTest, reveal = false) => {
     const id = newId();
+    const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false };
+    return new Promise<{ views: DuelView[]; marks: number[] }>((resolve) => {
+      videoWaiting.current.set(id, resolve);
+      // the request's own type last: a saved duel's settings must never turn it into something else
+      post({ ...options, picks: saved.picks, reveal, type: "views", id });
+    });
+  };
+
+  // ---- the replay viewer: every play of a saved test, stepped through with every card shown ----
+  type Frame = { index: number; label: string; picks: number };
+  const [viewing, setViewing] = useState<{ test: SavedTest; views: DuelView[]; frames: Frame[]; at: number; back: boolean; playing: boolean } | null>(null);
+  const [loadingReplay, setLoadingReplay] = useState(false);
+  const describeEvents = (events: DuelView["events"]) => {
+    const parts = events.flatMap((event) => {
+      if (event.kind === "summon") return [`Summoned ${event.name}`];
+      if (event.kind === "activate") return [`Activated ${event.name}${event.text ? `: ${event.text}` : ""}`];
+      if (event.kind === "added") return [`Added ${event.name} to the hand`];
+      if (event.kind === "negated") return [`${event.name} negated`];
+      if (event.kind === "attack") return [`${event.name || "a monster"} attacks${event.target ? "" : " directly"}`];
+      return [];
+    });
+    return parts.join(" · ");
+  };
+  const openViewer = async (saved: SavedTest) => {
+    setLoadingReplay(true);
+    try {
+      const { views, marks } = await replayViews(saved, true);
+      // a step per play of yours (declining to chain, zones and positions are part of the play around them), then one per
+      // action of the opponent's that followed it, then your next turn when it comes back to you
+      const minor = (text: string) => /^(Don't chain|Cancel|Select a zone|Select the battle position|Confirm)/.test(text) || /^(Yes|No)$/.test(text) || /: (Yes|No)$/.test(text);
+      const frames: Frame[] = [{ index: Math.max(0, marks[0] - 1), label: "Start of the duel", picks: 0 }];
+      let pending = "";
+      for (let pick = 0; pick + 1 < marks.length; pick++) {
+        const first = marks[pick], last = marks[pick + 1] - 1;
+        const text = saved.steps[pick]?.text ?? `Play ${pick + 1}`;
+        // your part: the views of this play still on your turn
+        let mine = first - 1;
+        while (mine + 1 <= last && views[mine + 1].turnPlayer === 0) mine++;
+        if (!minor(text)) pending = text;
+        if (pending && (mine >= first || pick + 2 === marks.length || views[last].turnPlayer !== 0)) {
+          frames.push({ index: Math.max(first, Math.min(mine, last)), label: pending, picks: pick + 1 });
+          pending = "";
+        } else if (!minor(text) || mine < last) {
+          // nothing to show apart from the choice itself: it shows with the next step
+        }
+        // the opponent's actions that followed
+        let theirs = false;
+        for (let index = Math.max(first, mine + 1); index <= last; index++) {
+          const view = views[index];
+          if (view.turnPlayer !== 1) continue;
+          theirs = true;
+          const said = describeEvents(view.events);
+          if (said) frames.push({ index, label: `Opponent: ${said}`, picks: pick + 1 });
+        }
+        // back to you after their turn
+        if (theirs && views[last].turnPlayer === 0) frames.push({ index: last, label: `Your turn ${views[last].turn}`, picks: pick + 1 });
+      }
+      if (pending) frames.push({ index: marks[marks.length - 1] - 1, label: pending, picks: marks.length - 1 });
+      setViewing({ test: saved, views, frames, at: 0, back: false, playing: false });
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setLoadingReplay(false);
+    }
+  };
+  const viewTo = (at: number, playing?: boolean) =>
+    setViewing((now) => (now ? { ...now, at: Math.max(0, Math.min(now.frames.length - 1, at)), back: at < now.at, playing: playing ?? now.playing } : now));
+  // playing: the next step once this one's animations have been seen
+  useEffect(() => {
+    if (!viewing?.playing) return;
+    if (viewing.at >= viewing.frames.length - 1) return setViewing({ ...viewing, playing: false });
+    const shown = viewing.views[viewing.frames[viewing.at].index];
+    const wait = window.setTimeout(() => viewTo(viewing.at + 1), Math.max(800, cueTime(shown?.events ?? []) + 350));
+    return () => window.clearTimeout(wait);
+  }, [viewing]);
+  const saveVideo = async (saved: SavedTest) => {
     setVideo({ id: saved.id, share: 0 });
     try {
-      const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false };
-      const views = await new Promise<DuelView[]>((resolve) => {
-        videoWaiting.current.set(id, resolve);
-        // the request's own type last: a saved duel's settings must never turn it into something else
-        post({ ...options, picks: saved.picks, type: "views", id });
-      });
+      const { views } = await replayViews(saved);
       const { blob, extension } = await recordVideo(views, (share) => setVideo({ id: saved.id, share }));
       const url = URL.createObjectURL(blob);
       const name = `${deck?.name ?? "RKAPro"} ${new Date(saved.date).toISOString().slice(0, 16).replace("T", " ").replace(":", "-")}.${extension}`;
@@ -569,6 +640,67 @@ function App() {
     [texts],
   );
 
+  if (viewing) {
+    const frame = viewing.frames[viewing.at];
+    const previous = viewing.frames[viewing.at - 1];
+    // going forward shows what happened since the last step; going back or jumping shows the position only
+    const events = !viewing.back && previous ? viewing.views.slice(previous.index + 1, frame.index + 1).flatMap((one) => one.events) : [];
+    const shown = { ...viewing.views[frame.index], prompt: null, events };
+    const undone = viewing.back ? viewing.frames[viewing.at + 1]?.label : null;
+    const controls = (
+      <div className="viewer">
+        <p className="viewer-caption">
+          {undone ? <>Undone: {undone}</> : frame.label}
+          <small>
+            {" "}
+            · step {viewing.at} of {viewing.frames.length - 1}
+          </small>
+        </p>
+        <input className="viewer-scrub" type="range" min={0} max={viewing.frames.length - 1} value={viewing.at} onChange={(event) => viewTo(Number(event.target.value), false)} aria-label="Step" />
+        <div className="viewer-buttons">
+          <button className="button small" onClick={() => viewTo(0, false)} aria-label="Start">⏮</button>
+          <button className="button small" onClick={() => viewTo(viewing.at - 1, false)} aria-label="Back a play">◀</button>
+          <button className="button small primary" onClick={() => setViewing({ ...viewing, playing: !viewing.playing, back: false })} aria-label={viewing.playing ? "Pause" : "Play"}>
+            {viewing.playing ? "⏸" : "▶︎"}
+          </button>
+          <button className="button small" onClick={() => viewTo(viewing.at + 1, false)} aria-label="Forward a play">▶</button>
+          <button className="button small" onClick={() => viewTo(viewing.frames.length - 1, false)} aria-label="End">⏭</button>
+          <button
+            className="button small"
+            onClick={() => {
+              const { test: saved } = viewing;
+              setViewing(null);
+              if (frame.picks > 0) watch(saved, frame.picks);
+              else {
+                newTest(saved.testOf);
+                post({ ...(saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false }), type: "start" });
+              }
+            }}
+          >
+            Play from here
+          </button>
+        </div>
+      </div>
+    );
+    return (
+      <Duel
+        view={shown}
+        texts={texts}
+        requestText={requestText}
+        answer={() => {}}
+        restart={() => {}}
+        leave={() => setViewing(null)}
+        skip={() => {}}
+        worked={false}
+        replaying={null}
+        states={[]}
+        onSaveState={() => undefined}
+        onLoadState={() => {}}
+        viewer={controls}
+      />
+    );
+  }
+
   if (view) {
     return (
       <>
@@ -620,7 +752,7 @@ function App() {
         routing={routing && routing.deckId === deck.id ? { code: routing.code, tried: routing.tried, waiting: routing.queue.map((one) => one.code) } : null}
         choking={choking && choking.deckId === deck.id ? { code: choking.code, waiting: choking.queue.map((one) => one.code) } : null}
         onFindLines={(starts) => findLines(deck, starts)}
-        onWatchLine={(line, code) => watch({ ...line, id: newId(), date: Date.now(), testOf: code })}
+        onWatchLine={(line, code) => openViewer({ ...line, id: newId(), date: Date.now(), testOf: code })}
         onCheck={() => checkDeck(deck)}
       />
     );
@@ -851,7 +983,7 @@ function App() {
             </div>
           </section>
 
-          {deck.tests && deck.tests.length > 0 && <Tests tests={deck.tests} nameOf={nameOf} onWatch={watch} onVideo={saveVideo} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />}
+          {deck.tests && deck.tests.length > 0 && <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />}
         </>
       )}
     </main>

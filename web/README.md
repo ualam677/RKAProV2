@@ -107,6 +107,11 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 - Save as video (saved tests): the worker replays the test out of sight and sends every moment; the page draws each on
   a portrait canvas (both fields, hands, LP, a caption for what happened) for as long as the duel screen holds it, and
   records it with the browser's encoder (MP4 where supported, otherwise WebM). Works on phones.
+- Replay viewer (Watch on a saved test or an engine line): the test is replayed out of sight with every card shown,
+  then stepped through: a step per play of yours (declining to chain, zones and positions are part of the play around
+  them), one per action of the opponent's, then your next turn. Play/pause, back and forward a play (going back says
+  what was undone), start/end, a scrubber, and Play from here to take over. Nothing to answer; both hands, Extra
+  Decks, Graveyards and banished cards open from the life bars and piles.
 - Phases as EDOPro shows them: a DP SP M1 BP M2 EP bar lit in your colour or the opponent's, and a banner at every
   phase change on both turns. Chances to respond say what to ("Respond to Seventh Tachyon?", "Respond to the summon
   of Galaxy Wizard?", "Opponent's End Phase: activate an effect?").
