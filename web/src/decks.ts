@@ -25,6 +25,19 @@ export interface SavedTest extends TestRecord {
   // the counting rules it was counted with: older counts are done again
   counted?: number;
 }
+/** How a test you played went, kept after the test itself is gone: what measured success per start is made of. */
+export interface TestResult {
+  id: string;
+  date: number;
+  // the start it was testing (the Test button's card, or the first starter in the hand)
+  start?: number;
+  hand: number[];
+  // what your first turn ended on
+  interruptions: number;
+  // full: reached a full board; handtrap: a hand trap stopped it; short: fell short on its own; brick: no start in hand
+  kind: "full" | "handtrap" | "short" | "brick";
+  why: string;
+}
 // working tests are kept; of the rest, the newest 5
 const KEEP_OTHERS = 5;
 export function keepTest(tests: SavedTest[] = [], test: SavedTest): SavedTest[] {
@@ -38,6 +51,8 @@ export interface SavedDeck extends Deck {
   name: string;
   updated: number;
   // Deck Optimiser roles, by card (alternate artworks share the original's)
+  // how each test you played went (the newest 300)
+  results?: TestResult[];
   tags?: Record<string, Tag>;
   // what the engine found each card starts, for the deck as it was (`signature`)
   engine?: { signature: string; evidence: CardEvidence[] };

@@ -4,7 +4,7 @@ import { parseYdk, shuffled } from "./deck";
 import { Duel, cueTime } from "./Duel";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt, setArtworkOriginals } from "./CardArt";
-import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest } from "./decks";
+import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
 import type { Piece } from "./engine/interruptions";
 import { CHOKE_TRAPS } from "./engine/probe";
@@ -68,6 +68,12 @@ function startingDecks(saved: Partial<Saved>): SavedDeck[] {
   if (decks.length || !saved.deckText) return decks;
   // the deck opened before the deck list existed becomes the first saved deck
   return [{ ...parseYdk(saved.deckText), id: newId(), name: saved.deckName || "My deck", updated: Date.now() }];
+}
+
+// The start a test was for: the Test button's card, else the first card in the hand tagged (or found by the engine) as one
+function startOf(owner: SavedDeck, hand: number[], testOf?: number): number | undefined {
+  const starter = (code: number) => ["starter", "pair"].includes(owner.tags?.[code]?.role ?? "") || !!owner.engine?.evidence.some((entry) => entry.code === code && entry.alone.deck > 0);
+  return testOf ?? hand.find(starter);
 }
 
 function App() {
@@ -269,6 +275,24 @@ function App() {
       } else if (message.type === "views") {
         videoWaiting.current.get(message.id)?.({ views: message.views, marks: message.marks });
         videoWaiting.current.delete(message.id);
+      } else if (message.type === "interruptions" && message.id.startsWith("outcome:")) {
+        // a finished test, counted at the end of your first turn
+        const id = message.id.slice(8);
+        const pending = outcomes.current.get(id);
+        outcomes.current.delete(id);
+        if (!pending) return;
+        setDecks((all) =>
+          all.map((one) => {
+            if (one.id !== pending.deckId || one.results?.some((result) => result.id === id)) return one;
+            const goal = one.fullAt ?? 3;
+            const count = message.list.length;
+            const kind: TestResult["kind"] = count >= goal ? "full" : pending.start === undefined ? "brick" : pending.trap ? "handtrap" : "short";
+            const why =
+              kind === "full" ? `Full board: ${count} interruption${count === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : kind === "handtrap" ? `${pending.trap}: ended on ${count} of ${goal}` : `Fell short: ${count} of ${goal} interruptions`;
+            const result: TestResult = { id, date: pending.date, start: pending.start, hand: pending.hand, interruptions: count, kind, why };
+            return { ...one, results: [result, ...(one.results ?? [])].slice(0, 300) };
+          }),
+        );
       } else if (message.type === "interruptions") {
         // a working test's board, counted: kept with the test
         setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list, protection: message.protection, nibiru: message.nibiru, counted: COUNTING } : test)) } : one)));
@@ -277,8 +301,10 @@ function App() {
           const owner = decksRef.current.find((one) => one.tests?.some((test) => test.id === message.id));
           const test = owner?.tests?.find((one) => one.id === message.id);
           if (!owner || !test?.worked) return;
-          const starter = (code: number) => ["starter", "pair"].includes(owner.tags?.[code]?.role ?? "") || !!owner.engine?.evidence.some((entry) => entry.code === code && entry.alone.deck > 0);
-          const start = test.testOf ?? test.startHand.find(starter) ?? test.startHand[0];
+          const start = startOf(owner, test.startHand, test.testOf) ?? test.startHand[0];
+          // marked as working: its result is a full board, whatever it was counted as
+          if (owner.results?.some((one) => one.id === test.id && one.kind !== "full"))
+            owner.results = owner.results.map((one) => (one.id === test.id ? { ...one, kind: "full", why: "Marked as working" } : one));
           if (start === undefined) return;
           const before = owner.routes?.[start];
           // the start keeps its best worked line
@@ -557,7 +583,37 @@ function App() {
     if (!record || !current || record.picks.length <= current.from) return;
     keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
   }, [record]);
+  // a test you played (made choices of your own in), counted once you move on from it
+  const outcomes = useRef(new Map<string, { deckId: string; date: number; start?: number; hand: number[]; trap?: string }>());
+  const finishTest = () => {
+    const current = test.current;
+    const played = lastRecord.current;
+    if (!current || !played || played.picks.length <= current.from || !played.steps.some((step) => step.idle)) return;
+    const owner = decksRef.current.find((one) => one.id === current.deckId);
+    if (!owner || owner.results?.some((one) => one.id === current.id) || outcomes.current.has(current.id)) return;
+    const saved: SavedTest = { ...played, id: current.id, date: current.date, testOf: current.testOf };
+    outcomes.current.set(current.id, { deckId: owner.id, date: current.date, start: startOf(owner, played.startHand, current.testOf), hand: played.startHand });
+    void (async () => {
+      const { views } = await replayViews(saved);
+      // your first turn, to its last moment
+      const first = views.find((one) => one.turnPlayer === 0 && one.turn > 0)?.turn;
+      const turn = views.filter((one) => one.turn === first);
+      const end = turn.at(-1) ?? views.at(-1);
+      if (!end) return outcomes.current.delete(current.id);
+      // a hand trap the opponent used in it, and what it answered
+      let last = "";
+      let trap: string | undefined;
+      for (const event of turn.flatMap((one) => one.events)) {
+        if ((event.kind === "activate" || event.kind === "summon") && event.controller === 0) last = event.name;
+        if (event.kind === "activate" && event.controller === 1 && !trap) trap = last ? `${event.name} on ${last}` : event.name;
+      }
+      const pending = outcomes.current.get(current.id);
+      if (pending) pending.trap = trap;
+      post({ type: "interruptions", id: `outcome:${current.id}`, pieces: piecesOf(end), startHand: played.startHand, used: usedIn(played.steps) });
+    })();
+  };
   const newTest = (testOf?: number, from = 0) => {
+    finishTest();
     test.current = deck ? { id: newId(), deckId: deck.id, date: Date.now(), testOf, from } : null;
     setRecord(null);
     setWorked(false);
@@ -642,7 +698,7 @@ function App() {
   const goBack = useRef<() => boolean>(() => false);
   goBack.current = () => {
     if (viewing) return setViewing(null), true;
-    if (view) return skip(), setReplay(null), setView(null), true;
+    if (view) return finishTest(), skip(), setReplay(null), setView(null), true;
     if (editing) return setEditing(false), true;
     if (screen !== "menu") return setScreen("menu"), true;
     return false;
@@ -1011,7 +1067,7 @@ function App() {
             post({ type: "answer", picks });
           }}
           restart={() => start()}
-          leave={() => (skip(), setReplay(null), setView(null))}
+          leave={() => (finishTest(), skip(), setReplay(null), setView(null))}
           skip={skip}
           worked={worked}
           onWorked={record && !replay ? markWorked : undefined}

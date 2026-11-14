@@ -2,6 +2,7 @@
 // turns, and check your worked lines against hand traps.
 import { useEffect, useMemo, useState } from "react";
 import { describeInterruption, describeNibiru, describeProtection } from "./interruptText";
+import type { TestResult } from "./decks";
 import { CardArt } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
@@ -415,6 +416,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
       {main.length > 0 && (
         <section className="opt-section">
           <h3>Deck checks</h3>
+          {(deck.results ?? []).length > 0 && <Measured results={deck.results ?? []} deck />}
           {!hasStart ? (
             <p className="opt-note">Tag your starters first: pick "Starter" next to each card below that starts your combo by itself. Everything else is worked out from that.</p>
           ) : (
@@ -513,6 +515,7 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                       onWatch={() => routes[card.code] && onWatchLine(routes[card.code].record, card.code)}
                     />
                   )}
+                  {(card.tag.role === "starter" || card.tag.role === "pair") && <Measured results={(deck.results ?? []).filter((one) => one.start === card.code)} />}
                 </div>
                 <select value={card.tag.role} onChange={(event) => setRole(card.code, event.target.value as Role)} aria-label={`Role of ${nameOf(card.code)}`}>
                   <option value="none">Not tagged</option>
@@ -734,3 +737,22 @@ function PartnerSheet({ card, main, nameOf, onSave, onClose }: { card: DeckCard;
   );
 }
 
+
+// How your tests went: how many reached a full board, and what stopped the rest, most common first
+function Measured({ results, deck = false }: { results: TestResult[]; deck?: boolean }) {
+  if (!results.length) return deck ? null : <span className="opt-engine measured">Your tests: none yet. Test it and move on (New hand or Exit) and the result is kept here.</span>;
+  const full = results.filter((one) => one.kind === "full").length;
+  const misses = new Map<string, number>();
+  for (const one of results) {
+    if (one.kind === "full") continue;
+    const reason = one.kind === "handtrap" ? one.why.split(":")[0] : one.kind === "brick" ? "no start in the hand" : "fell short on its own";
+    misses.set(reason, (misses.get(reason) ?? 0) + 1);
+  }
+  const list = [...misses].sort((a, b) => b[1] - a[1]);
+  return (
+    <span className={`opt-engine measured ${deck ? "deck" : ""}`}>
+      {deck ? "All your tests" : "Your tests"}: <b>{full} of {results.length}</b> reached a full board ({Math.round((full / results.length) * 100)}%)
+      {list.length > 0 && ` · missed: ${list.map(([reason, count]) => `${reason}${count > 1 ? ` ×${count}` : ""}`).join(" · ")}`}
+    </span>
+  );
+}
