@@ -10,6 +10,11 @@ owner's choices: judge them.
   decks): 41% at exactly 40, most of the rest 41-43, and decks above 40 spend the room on **non-engine** (~17-19 vs 15
   at 40), engine about the same size (`TOP_CUT` in optimiser.ts). Use as a reference, not a rule.
 
+- **Why decks run more than 40: to have fewer dead cards in hand.** Pieces the engine needs in the Deck (searched or
+  summoned from there) and situational one-ofs are dead when drawn, and cutting them breaks lines. Adding live cards
+  (hand traps, starters) instead lowers the chance of opening a dead card, even though it dilutes the best draws. Judge
+  a size by dead-card odds as much as by starter odds: the compare table shows both.
+
 ## 2. Roles: what each card does in the deck (read per card, not per name)
 - **Starter**: makes a combo alone. **1.5-card starter**: needs any one other card (Seventh Tachyon: puts a card from
   hand on top of the Deck). Its "0.5" turns a dead card into a search. **Pair starter**: needs a specific partner.

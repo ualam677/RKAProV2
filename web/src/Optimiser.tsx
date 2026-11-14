@@ -822,6 +822,7 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
                   <th>Combo 1st</th>
                   <th>+ trap</th>
                   <th>2 traps 2nd</th>
+                  <th>Dead card</th>
                 </tr>
               </thead>
               <tbody>
@@ -831,6 +832,7 @@ function DeckSize({ main, nameOf, takenBy }: { main: DeckCard[]; nameOf: (code: 
                     <td>{(row.combo1 * 100).toFixed(1)}%</td>
                     <td>{(row.comboTrap1 * 100).toFixed(1)}%</td>
                     <td>{(row.traps2 * 100).toFixed(1)}%</td>
+                    <td>{(row.dead * 100).toFixed(1)}%</td>
                   </tr>
                 ))}
               </tbody>
