@@ -194,7 +194,9 @@ export type ToWorker =
   // choke points for a line found: each hand trap at each moment, the worst ones searched again
   | { type: "choke"; id: number; main: number[]; extra: number[]; hand: number[]; keys: string[]; goal: number }
   // the interruptions a board holds (a working test's end): cards still in the hand it opened with don't count
-  | { type: "interruptions"; id: string; pieces: Piece[]; startHand: number[] };
+  | { type: "interruptions"; id: string; pieces: Piece[]; startHand: number[] }
+  // card names (from a deck list) to the cards they are
+  | { type: "names"; id: string; names: string[] };
 
 export type FromWorker =
   | { type: "progress"; text: string }
@@ -212,6 +214,7 @@ export type FromWorker =
   | { type: "route"; id: number; tried: number; done?: { route: Route; record: TestRecord } }
   | { type: "choke"; id: number; done?: Choke[] }
   | { type: "interruptions"; id: string; list: Interruption[] }
+  | { type: "names"; id: string; cards: (CardInfo | null)[] }
   | { type: "error"; text: string };
 
 export const LOCATION = { DECK: 1, HAND: 2, MZONE: 4, SZONE: 8, GRAVE: 16, REMOVED: 32, EXTRA: 64 } as const;

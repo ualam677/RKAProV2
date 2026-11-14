@@ -113,6 +113,17 @@ function App() {
       }),
     [],
   );
+  // deck list names to cards, in the order asked
+  const namesWaiting = useRef(new Map<string, (cards: (CardInfo | null)[]) => void>());
+  const names = useCallback(
+    (list: string[]) =>
+      new Promise<(CardInfo | null)[]>((resolve) => {
+        const id = newId();
+        namesWaiting.current.set(id, resolve);
+        post({ type: "names", id, names: list });
+      }),
+    [],
+  );
   const info = useCallback(
     (codes: number[]) =>
       new Promise<(CardInfo & { asked: number })[]>((resolve) => {
@@ -217,6 +228,9 @@ function App() {
         // every line found: now where hand traps hurt each of them
         const done = decksRef.current.find((one) => one.id === job.deckId);
         if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "names") {
+        namesWaiting.current.get(message.id)?.(message.cards);
+        namesWaiting.current.delete(message.id);
       } else if (message.type === "views") {
         videoWaiting.current.get(message.id)?.({ views: message.views, marks: message.marks });
         videoWaiting.current.delete(message.id);
@@ -293,6 +307,25 @@ function App() {
   const readDeck = async (text: string, fileName = "") => {
     const imported = await importDeck(text, fileName);
     const name = fileName.replace(/\.(ydk|txt)$/i, "") || "Imported deck";
+    if ("list" in imported) {
+      // card names to cards; Extra Deck monsters go to the Extra Deck unless the list put them in the Side
+      const found = await names(imported.list.map((entry) => entry.name));
+      const unknown = imported.list.filter((_, index) => !found[index]).map((entry) => entry.name);
+      if (unknown.length) setError(`Not found in the card database, left out: ${unknown.join(", ")}`);
+      const deck = { name, main: [] as number[], extra: [] as number[], side: [] as number[] };
+      imported.list.forEach((entry, index) => {
+        const card = found[index];
+        if (!card) return;
+        const section = entry.section === "side" ? "side" : card.type & EXTRA_TYPES ? "extra" : "main";
+        for (let copy = 0; copy < entry.count; copy++) deck[section].push(card.code);
+      });
+      setCards((known) => {
+        const next = new Map(known);
+        found.forEach((card) => card && next.set(card.code, card));
+        return next;
+      });
+      return deck;
+    }
     const asked = "deck" in imported ? [...imported.deck.main, ...imported.deck.extra, ...imported.deck.side] : [...imported.unsplit.mainAndExtra, ...imported.unsplit.side];
     const found = await info([...new Set(asked)]);
     const known = new Map(found.map((card) => [card.asked, card]));
@@ -789,7 +822,7 @@ function App() {
         </div>
         {pasting && (
           <div className="paste">
-            <textarea value={paste} onChange={(event) => setPaste(event.target.value)} placeholder="A ydke:// link, a YGO Omega deck code, or the text of a .ydk file" rows={3} />
+            <textarea value={paste} onChange={(event) => setPaste(event.target.value)} placeholder={"A card list (\"Main: 3 Mulcharmy Fuwalos\", \"3x Ash Blossom\"), a ydke:// link, a YGO Omega deck code, or the text of a .ydk file"} rows={3} />
             <button className="button primary small" disabled={!paste.trim() || !ready} onClick={async () => { await importText(paste); setPaste(""); setPasting(false); }}>
               Import
             </button>

@@ -178,14 +178,54 @@ export async function toOmega(deck: Deck): Promise<string> {
   return toBase64(await deflate(raw));
 }
 
+// ---- card lists by name: "Main: 3 Mulcharmy Fuwalos", "3x Ash Blossom", "Ash Blossom & Joyous Spring x3",
+// with or without Main / Extra / Side headings (YGOPRODeck, Master Duel and Neuron text exports, forum posts) ----
+export interface ListEntry {
+  section: "main" | "extra" | "side" | null;
+  count: number;
+  name: string;
+}
+export function parseList(text: string): ListEntry[] {
+  const entries: ListEntry[] = [];
+  let section: ListEntry["section"] = null;
+  for (const raw of text.split(/\r?\n/)) {
+    let line = raw.replace(/\s+/g, " ").trim();
+    if (!line || /^(#created|\/\/)/i.test(line)) continue;
+    // a heading, alone or in front of the first card: "Main Deck (40):", "Extra:", "Side Deck", "#main"
+    // (a heading needs ":", "-", "Deck" or nothing after it, so "Extra Veiler" stays a card)
+    const heading = /^[#!]?(main|extra|side)(?:\s*deck)?(?:\s*\(\d+\))?\s*(?::|-|$)\s*(.*)$/i.exec(line) ?? /^[#!]?(main|extra|side)\s+deck\b\s*(.*)$/i.exec(line);
+    if (heading) {
+      section = heading[1].toLowerCase() as ListEntry["section"];
+      line = heading[2].trim();
+      if (!line) continue;
+    }
+    // Master Duel / Neuron group headings carry no cards: "Monster (20)", "Spell Cards", "Traps: 5"
+    if (/^(monsters?|spells?|traps?|extra deck monsters?)( cards?)?\s*(\(\d+\)|:\s*\d*)?$/i.test(line)) continue;
+    // "3 Ash Blossom", "3x Ash Blossom", "Ash Blossom x3", "Ash Blossom (x3)", "Ash Blossom (3)"
+    const front = /^(\d+)\s*[x×*]?\s+(.+)$/i.exec(line);
+    const back = /^(.+?)\s*(?:[x×*]\s*(\d+)|\((?:x\s*)?(\d+)\))$/i.exec(line);
+    const number = front ? Number(front[1]) : back ? Number(back[2] ?? back[3]) : 0;
+    const named = (front ? front[2] : back ? back[1] : "").replace(/^[-*•]\s*/, "").trim();
+    if (number > 0 && named) {
+      if (number <= 3) entries.push({ section, count: number, name: named });
+    } else if (/[a-z]/i.test(line)) entries.push({ section, count: 1, name: line.replace(/^[-*•]\s*/, "") });
+  }
+  return entries;
+}
+const looksLikeList = (text: string) => text.split(/\r?\n/).filter((line) => /[a-z]{3}/i.test(line)).length >= 2 || /^(main|extra|side)/i.test(text.trim());
+
 // What was pasted or opened, without asking which format it is.
-export type Imported = { deck: Deck } | { unsplit: { mainAndExtra: number[]; side: number[] } };
+export type Imported = { deck: Deck } | { unsplit: { mainAndExtra: number[]; side: number[] } } | { list: ListEntry[] };
 export async function importDeck(text: string, fileName = ""): Promise<Imported> {
   const value = text.trim();
   if (fileName.toLowerCase().endsWith(".ydk") || /^#(main|created)/im.test(value)) return { deck: parseYdk(value) };
   if (/^ydke:\/\//i.test(value)) return { deck: parseYdke(value) };
   if (/^[A-Za-z0-9+/=_-]{16,}$/.test(value)) return { unsplit: await parseOmega(value) };
-  throw new Error("Not a deck: paste a .ydk file, a ydke:// link or a YGO Omega code");
+  if (looksLikeList(value)) {
+    const list = parseList(value);
+    if (list.length) return { list };
+  }
+  throw new Error("Not a deck: paste a .ydk file, a ydke:// link, a YGO Omega code or a card list (\"3 Ash Blossom & Joyous Spring\")");
 }
 
 // Fusion, Synchro, Xyz and Link Monsters go to the Extra Deck

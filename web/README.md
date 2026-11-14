@@ -112,6 +112,11 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
   them), one per action of the opponent's, then your next turn. Play/pause, back and forward a play (going back says
   what was undone), start/end, a scrubber, and Play from here to take over. Nothing to answer; both hands, Extra
   Decks, Graveyards and banished cards open from the life bars and piles.
+- Import formats: .ydk, ydke://, YGO Omega codes, and card lists by name: "Main: 3 Mulcharmy Fuwalos", "3x Ash
+  Blossom", "Galaxy Wizard x2", "Effect Veiler (x3)", with or without Main / Extra / Side headings (YGOPRODeck, Master
+  Duel and Neuron text exports). Names match exactly, then ignoring case and punctuation, then the shortest name
+  holding every word; Extra Deck monsters go to the Extra Deck without a heading; unknown names are listed. Every
+  imported code is translated to a card the database knows.
 - Phases as EDOPro shows them: a DP SP M1 BP M2 EP bar lit in your colour or the opponent's, and a banner at every
   phase change on both turns. Chances to respond say what to ("Respond to Seventh Tachyon?", "Respond to the summon
   of Galaxy Wizard?", "Opponent's End Phase: activate an effect?").

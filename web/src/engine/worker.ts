@@ -105,6 +105,33 @@ function search(query: CardSearch): { results: CardInfo[]; more: boolean } {
   return { results: out.slice(0, 300), more: out.length > 300 };
 }
 
+// A card name as typed in a deck list: exact first, then ignoring case and punctuation, then the closest name holding
+// every word. Alternate artworks and tokens never match.
+const plain = (text: string) => text.toLowerCase().replace(/["'`´’“”]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+let byPlainName: Map<string, number> | null = null;
+function cardByName(asked: string): CardInfo | null {
+  if (!byPlainName) {
+    byPlainName = new Map();
+    for (const card of cards.values()) {
+      if ((card.alias && Math.abs(card.alias - card.code) < 20) || card.type & (TYPE_TOKEN_BIT | TYPE_SKILL_BIT)) continue;
+      const key = plain(nameOf(card.code));
+      if (!byPlainName.has(key)) byPlainName.set(key, card.code);
+    }
+  }
+  const key = plain(asked);
+  if (!key) return null;
+  const exact = byPlainName.get(key);
+  if (exact) return infoOf(exact);
+  const words = key.split(" ");
+  let best: [number, number] | null = null;
+  for (const [name, code] of byPlainName) {
+    if (!words.every((word) => name.includes(word))) continue;
+    // the shortest name holding every word is the closest ("ash blossom" -> Ash Blossom & Joyous Spring)
+    if (!best || name.length < best[1]) best = [code, name.length];
+  }
+  return best ? infoOf(best[0]) : null;
+}
+
 function compareCards(a: CardInfo, b: CardInfo) {
   const [ga, la, na] = sortKey(a);
   const [gb, lb, nb] = sortKey(b);
@@ -1357,6 +1384,8 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       void runRoute(message.id, message.main, message.extra, message.hand, message.targets, message.prior, message.goal).catch((error) =>
         send({ type: "error", text: `Route search stopped: ${error instanceof Error ? error.message : error}` }),
       );
+    } else if (message.type === "names") {
+      send({ type: "names", id: message.id, cards: message.names.map(cardByName) });
     } else if (message.type === "interruptions") {
       const canonical = (code: number) => {
         const known = knownCode(code);
