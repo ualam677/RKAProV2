@@ -514,3 +514,9 @@ export const TOP_CUT = {
   nonEngineBySize: { 40: 15.0, 41: 18.9, 42: 17.3, 43: 19.0, 45: 21.3 } as Record<number, number>,
   medianNonEngine: 17,
 };
+
+/** The deck with one copy of `out` taken out and, if given, one copy of `add` put in, as a row to compare. */
+export function changed(cards: DeckCard[], out: number, add?: number): SizeRow {
+  const next = cards.map((card) => ({ ...card, count: card.count - (card.code === out ? 1 : 0) + (card.code === add ? 1 : 0) })).filter((card) => card.count > 0);
+  return rowOf(next, next.reduce((sum, card) => sum + card.count, 0), [out], false, add ? [add] : undefined);
+}

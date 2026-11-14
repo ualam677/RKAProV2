@@ -8,7 +8,7 @@ import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type Save
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
 import {
-  deckSizes, withoutCards, TOP_CUT, type SizeRow, GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
+  deckSizes, withoutCards, changed, TOP_CUT, type SizeRow, GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
 
@@ -445,6 +445,7 @@ export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, o
               <DeckSize main={main} nameOf={nameOf} takenBy={takenBy} />
               <Clashes main={main} nameOf={nameOf} traits={traits} />
               <TwoStarts routes={routes} nameOf={nameOf} />
+              <Suggestions main={main} nameOf={nameOf} traits={traits} takenBy={takenBy} results={deck.results ?? []} />
               {!count("breaker") && <p className="opt-note">No board breakers tagged. Going second, nothing in the Main Deck clears an established board.</p>}
               {count("handtrap", "handtrap2") > 0 && secondOdds.handtrap < 0.75 && (
                 <p className="opt-note">Going second you hold a hand trap in only {pct(secondOdds.handtrap)} of hands. Most decks run 9 to 12 of them.</p>
@@ -998,6 +999,67 @@ function TwoStarts({ routes, nameOf }: { routes: Record<string, SavedRoute>; nam
             </li>
           );
         })}
+      </ul>
+    </div>
+  );
+}
+
+// Suggestions, built on the deckbuilding principles (docs/DECKBUILDING.md), for any deck. Only principled candidates: a
+// one-of only ever pulled from the Deck (must earn its slot), Normal Summon starts over the limit, the third copy of a
+// once-per-turn start, Bricks and Other cards; each cut alone and swapped for another copy of a hand trap you run fewer
+// than three of. Every change shows its trade-off going first and second; nothing is applied for you.
+function Suggestions({ main, nameOf, traits, takenBy, results }: { main: DeckCard[]; nameOf: (code: number) => string; traits: Map<number, string[]>; takenBy: Map<number, number[]>; results: TestResult[] }) {
+  const rows = useMemo(() => {
+    const total = main.reduce((sum, card) => sum + card.count, 0);
+    const isStart = (card: DeckCard) => card.tag.role === "starter" || card.tag.role === "pair";
+    const trait = (code: number, name: string) => (traits.get(code) ?? []).some((one) => one.startsWith(name));
+    const normals = main.filter((card) => isStart(card) && card.tag.normal);
+    const normalCount = normals.reduce((sum, card) => sum + card.count, 0);
+    const candidates: { code: number; why: string }[] = [];
+    for (const card of main) {
+      if (!isStart(card) && card.count === 1 && (takenBy.has(card.code) || card.tag.role === "piece")) candidates.push({ code: card.code, why: `a one-of${takenBy.has(card.code) ? ` pulled from the Deck by ${takenBy.get(card.code)!.map(nameOf).join(", ")}` : " kept in the Deck"}: the odds don't see what that line loses without it. Keep it if it gives a line, an interruption or a way through a hand trap nothing else does` });
+      else if (card.tag.role === "brick" || card.tag.role === "other") candidates.push({ code: card.code, why: `tagged ${card.tag.role === "brick" ? "Brick" : "Other"}` });
+      else if (isStart(card) && card.count === 3 && trait(card.code, "once per turn by name")) candidates.push({ code: card.code, why: "third copy of a once-per-turn start" });
+    }
+    if (normalCount > normalLimit(total)) for (const card of normals) candidates.push({ code: card.code, why: `${normalCount} Normal Summon starts, more than ${normalLimit(total)} for ${total} cards` });
+    const traps = main.filter((card) => card.tag.role === "handtrap" && card.count < 3);
+    const now = changed(main, -1);
+    // starts count double (every game), a hand trap kept going first and two going second once each
+    const worth = (row: SizeRow) => (row.combo1 - now.combo1) * 2 + (row.comboTrap1 - now.comboTrap1) + (row.traps2 - now.traps2);
+    const out: { label: string; why: string; row: SizeRow; worth: number }[] = [];
+    for (const { code, why } of candidates) {
+      const cut = changed(main, code);
+      out.push({ label: `−1 ${nameOf(code)}`, why, row: cut, worth: worth(cut) });
+      for (const trap of traps) {
+        const swap = changed(main, code, trap.code);
+        out.push({ label: `−1 ${nameOf(code)}, +1 ${nameOf(trap.code)}`, why, row: swap, worth: worth(swap) });
+      }
+    }
+    return { now, list: out.sort((a, b) => b.worth - a.worth).slice(0, 6) };
+  }, [main, traits, takenBy]);
+  const delta = (after: number, before: number) => `${after >= before ? "+" : ""}${((after - before) * 100).toFixed(1)}%`;
+  // a start your tests show failing often is worth knowing about whatever the odds say
+  const measured = main
+    .filter((card) => card.tag.role === "starter" || card.tag.role === "pair")
+    .flatMap((card) => {
+      const mine = results.filter((one) => one.start === card.code);
+      const full = mine.filter((one) => one.kind === "full").length;
+      return mine.length >= 5 && full / mine.length < 0.6 ? [`${nameOf(card.code)} reached a full board in only ${full} of ${mine.length} of your tests`] : [];
+    });
+  if (!rows.list.length && !measured.length) return null;
+  return (
+    <div className="opt-note">
+      <b>Suggestions.</b> Changes worth considering, each with what it costs and gains. Nothing is applied: you know your lines and matchups.
+      <ul className="opt-clashes">
+        {rows.list.map((one) => (
+          <li key={one.label}>
+            <b>{one.label}</b> <span className="muted">({one.why})</span>: combo going 1st {delta(one.row.combo1, rows.now.combo1)}, combo + hand trap {delta(one.row.comboTrap1, rows.now.comboTrap1)}, 2 hand traps going 2nd{" "}
+            {delta(one.row.traps2, rows.now.traps2)}. {one.worth > 0.02 ? "On balance better." : one.worth < -0.02 ? "On balance worse." : "Close: your call."}
+          </li>
+        ))}
+        {measured.map((line) => (
+          <li key={line}>{line}: look at what stopped it in its record above before trusting its odds.</li>
+        ))}
       </ul>
     </div>
   );
