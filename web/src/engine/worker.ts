@@ -1380,6 +1380,32 @@ async function drive<R>(steps: Generator<unknown, R, unknown>, env: Env, hand: n
   }
 }
 
+// What a card does that matters for building a deck, from its text, in a few words each: conditions that clash with
+// other cards, the Normal Summon, once per turn, locks, and which hand traps can stop it (or can't).
+function traitsOf(code: number): string[] {
+  const text = (texts.get(code) ?? "").replace(/\s+/g, " ");
+  const type = cards.get(code)?.type ?? 0;
+  const out: string[] = [];
+  if (/while you control no monsters|If you control no monsters/i.test(text)) out.push("needs an empty field");
+  if (/Normal Summon[^.]*in addition to your Normal Summon/i.test(text)) out.push("gives an extra Normal Summon");
+  if (/Must (first )?be Special Summoned|Special Summon(ed)? (this card )?\(from your hand\)/i.test(text)) out.push("summons itself by its own rule: can't be negated");
+  if (/You can only (use|activate) (each|this|1)[^.]*(once per turn|per turn)/i.test(text)) out.push("once per turn by name");
+  const lock = /you cannot (Special Summon[^.]*?except [^.,]+)/i.exec(text)?.[1];
+  if (lock) out.push(`locks you: cannot ${lock.replace(/ for the rest of this turn/i, "")}`);
+  const weak: string[] = [];
+  // each effect on its own: its condition and what it does
+  // (a Spell or Trap's activation is its effect; "You can only use ... once per turn" is a limit, not an effect)
+  const effects = type & 1 ? text.split(/(?<=\.) (?=[A-Z(●])/).filter((one) => /You can|Quick Effect|:/.test(one) && !/^\(?You can only/.test(one)) : [text];
+  if (effects.some((one) => /\bDeck\b/.test(one) && /(add|Special Summon|send|take)/i.test(one))) weak.push("Ash");
+  if (/add [^.]*to your hand/i.test(text)) weak.push("Droll after it");
+  // a monster effect used while it's face-up on the field (not one from the hand or the GY)
+  const fromElsewhere = /this card (from|in) your (hand|GY)|this card is sent to the GY|this card is in your GY|this card from your hand/i;
+  if (type & 1 && effects.some((one) => /You can|Quick Effect/.test(one) && !fromElsewhere.test(one))) weak.push("Veiler / Imperm on the field");
+  if (weak.length) out.push(`stopped by ${weak.join(", ")}`);
+  if (/(in your GY|from your GY|is sent to the GY|this card in your GY)/i.test(text)) out.push("has a GY effect: out of Veiler / Imperm's reach");
+  return out;
+}
+
 // What a line leaves in place for the opponent's turn: an effect it used whose operation protects your cards until
 // then (Galaxy-Eyes Cipher X Dragon: they cannot target your LIGHT monsters), in the card's own words.
 function protectionOf(used: { code: number; effect?: string }[]): Protection[] {
@@ -1535,6 +1561,8 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       void runRoute(message.id, message.main, message.extra, message.hand, message.targets, message.prior, message.goal).catch((error) =>
         send({ type: "error", text: `Route search stopped: ${error instanceof Error ? error.message : error}` }),
       );
+    } else if (message.type === "traits") {
+      send({ type: "traits", traits: message.codes.map((code) => [code, traitsOf(knownCode(code))]) });
     } else if (message.type === "names") {
       send({ type: "names", id: message.id, cards: message.names.map(cardByName) });
     } else if (message.type === "interruptions") {

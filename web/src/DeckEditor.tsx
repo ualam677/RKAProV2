@@ -12,6 +12,8 @@ interface Props {
   texts: Map<number, CardText>;
   banlist: { name: string; limits: Record<number, number> };
   requestInfo: (codes: number[]) => void;
+  traits: Map<number, string[]>;
+  requestTraits: (codes: number[]) => void;
   requestText: (code: number) => void;
   search: (query: CardSearch) => Promise<{ results: CardInfo[]; more: boolean }>;
   onChange: (deck: SavedDeck) => void;
@@ -80,7 +82,7 @@ function Thumb({ code, card, limit, onTap, onHold }: { code: number; card?: Card
   );
 }
 
-export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestText, search, onChange, onClose, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
+export function DeckEditor({ deck, cards, texts, banlist, requestInfo, traits, requestTraits, requestText, search, onChange, onClose, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
   const [query, setQuery] = useState<CardSearch>({});
   const [results, setResults] = useState<{ results: CardInfo[]; more: boolean }>({ results: [], more: false });
   const [filters, setFilters] = useState(false);
@@ -300,7 +302,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, requestTe
         <div className="deck-area">{(["main", "extra", "side"] as Section[]).map(section)}</div>
 
         {optimising ? (
-          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} routing={routing} choking={choking} onFindLines={onFindLines} onCheckChokes={onCheckChokes} onWatchLine={onWatchLine} />
+          <Optimiser deck={deck} cards={cards} nameKey={nameKey} room={(key) => limitOf(key) - copies(key)} onChange={onChange} onShow={(code) => show(deck.main.find((one) => nameKey(one) === code) ?? code, "main")} requestInfo={requestInfo} traits={traits} requestTraits={requestTraits} onTest={onTest} engineProgress={engineProgress} onCheck={onCheck} routing={routing} choking={choking} onFindLines={onFindLines} onCheckChokes={onCheckChokes} onWatchLine={onWatchLine} />
         ) : (
         <div className="search-area">
           <div className="search-bar">

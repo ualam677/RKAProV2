@@ -26,6 +26,8 @@ interface Props {
   routing: { code: number; tried: number; waiting: number[] } | null;
   choking: { code: number; waiting: number[] } | null;
   onFindLines: (starts: { code: number; hand: number[] }[]) => void;
+  traits: Map<number, string[]>;
+  requestTraits: (codes: number[]) => void;
   onCheckChokes: (starts: { code: number; hand: number[] }[]) => void;
   onWatchLine: (line: TestRecord, code: number) => void;
 }
@@ -35,7 +37,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
+export function Optimiser({ traits, requestTraits, deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -202,6 +204,11 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
   const normalCards = main.filter((card) => card.tag.normal);
   const normalCount = normalCards.reduce((sum, card) => sum + card.count, 0);
   // what the engine's lines take from the Deck: candidates for "Combo piece in the Deck"
+  // each card's deckbuilding traits, asked for once
+  useEffect(() => {
+    const missing = main.map((card) => card.code).filter((code) => !traits.has(code));
+    if (missing.length) requestTraits(missing);
+  }, [main]);
   const takenBy = useMemo(() => {
     const map = new Map<number, number[]>();
     for (const entry of evidence.values()) if (entry.alone.deck > 0) for (const code of new Set(entry.alone.taken)) map.set(code, [...(map.get(code) ?? []), entry.code]);
@@ -459,6 +466,12 @@ export function Optimiser({ deck, cards, nameKey, room, onChange, onShow, reques
                     {nameOf(card.code)} <span className="muted">×{card.count}</span>
                     {card.tag.guessed && <span className="opt-guess">guess</span>}
                     {card.tag.engine && <span className="opt-guess engine">engine</span>}
+                    {takenBy.has(card.code) && <span className="opt-trait">pulled from the Deck by {takenBy.get(card.code)!.map(nameOf).join(", ")}</span>}
+                    {(traits.get(card.code) ?? []).map((trait) => (
+                      <span key={trait} className="opt-trait">
+                        {trait}
+                      </span>
+                    ))}
                   </button>
                   <EngineLine
                     found={evidence.get(card.code)}

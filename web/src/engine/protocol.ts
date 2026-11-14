@@ -202,7 +202,9 @@ export type ToWorker =
   // fifth: what you had right after your 5th summon, if the line made 5 (for Nibiru)
   | { type: "interruptions"; id: string; pieces: Piece[]; startHand: number[]; used?: { code: number; effect?: string }[]; summons?: number; fifth?: Piece[] }
   // card names (from a deck list) to the cards they are
-  | { type: "names"; id: string; names: string[] };
+  | { type: "names"; id: string; names: string[] }
+  // what each card does that matters for building a deck, read from its text
+  | { type: "traits"; codes: number[] };
 
 export type FromWorker =
   | { type: "progress"; text: string }
@@ -221,6 +223,7 @@ export type FromWorker =
   | { type: "choke"; id: number; done?: Choke[]; combo?: ChokeCombo }
   | { type: "interruptions"; id: string; list: Interruption[]; protection: Protection[]; nibiru?: NibiruCheck }
   | { type: "names"; id: string; cards: (CardInfo | null)[] }
+  | { type: "traits"; traits: [number, string[]][] }
   | { type: "error"; text: string };
 
 export const LOCATION = { DECK: 1, HAND: 2, MZONE: 4, SZONE: 8, GRAVE: 16, REMOVED: 32, EXTRA: 64 } as const;

@@ -566,3 +566,5 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .opt-size-table th:first-child, .opt-size-table td:first-child { text-align: left; }
 .opt-size-table th { color: var(--muted); font-weight: 600; }
 .opt-size-table tr.now td { color: var(--accent-strong); font-weight: 700; }
+
+.opt-trait { display: inline-block; margin: 2px 4px 0 0; padding: 0 6px; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; color: var(--muted); font-weight: 400; }

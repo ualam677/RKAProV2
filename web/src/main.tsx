@@ -116,6 +116,8 @@ function App() {
   const [view, setView] = useState<DuelView | null>(null);
   const [texts, setTexts] = useState(new Map<number, CardText>());
   const [cards, setCards] = useState(new Map<number, CardInfo>());
+  // what each card does for deckbuilding (read by the worker from its text)
+  const [traits, setTraits] = useState(new Map<number, string[]>());
   // card pictures: an alternate artwork the picture servers lack shows the original card's picture
   setArtworkOriginals((code) => {
     const card = cards.get(code);
@@ -269,6 +271,8 @@ function App() {
         // every line found: now where hand traps hurt each of them
         const done = decksRef.current.find((one) => one.id === job.deckId);
         if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "traits") {
+        setTraits((known) => new Map([...known, ...message.traits]));
       } else if (message.type === "names") {
         namesWaiting.current.get(message.id)?.(message.cards);
         namesWaiting.current.delete(message.id);
@@ -1089,6 +1093,8 @@ function App() {
         texts={texts}
         banlist={banlist}
         requestInfo={(codes) => void info(codes)}
+        traits={traits}
+        requestTraits={(codes) => post({ type: "traits", codes })}
         requestText={requestText}
         search={search}
         onChange={changeDeck}
