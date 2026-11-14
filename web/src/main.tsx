@@ -17,6 +17,17 @@ import "./style.css";
 const COVER_URL = import.meta.env.VITE_COVER_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/Distribution/master/textures/cover.png";
 document.documentElement.style.setProperty("--cover", `url("${COVER_URL}")`);
 
+// works offline once opened online (public/sw.js); not in development, where it would serve stale code
+if (import.meta.env.PROD && "serviceWorker" in navigator) void navigator.serviceWorker.register("./sw.js").catch(() => {});
+// the browser's own "install this app" offer, kept for the Install button
+let installOffer: (Event & { prompt(): Promise<void> }) | null = null;
+const installListeners = new Set<() => void>();
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installOffer = event as typeof installOffer;
+  installListeners.forEach((listener) => listener());
+});
+
 // hand test settings, remembered on this device only
 const SAVED = "rka.handtest";
 interface Saved {
@@ -64,6 +75,13 @@ function App() {
   decksRef.current = decks;
   const [deckId, setDeckId] = useState(saved.deckId ?? decks[0]?.id ?? "");
   const [editing, setEditing] = useState(false);
+  // "Install app": shown when the browser offers it (Chrome / Edge / Android); iPhone uses Share > Add to Home Screen
+  const [canInstall, setCanInstall] = useState(!!installOffer);
+  useEffect(() => {
+    const listener = () => setCanInstall(true);
+    installListeners.add(listener);
+    return () => void installListeners.delete(listener);
+  }, []);
   // the main menu, or one of its sections
   const [screen, setScreen] = useState<"menu" | "decks" | "test" | "replays" | "sync">("menu");
   // the editor opens on the deck (Edit deck) or on the optimiser (Optimise)
@@ -854,6 +872,18 @@ function App() {
               <b>Choose or import a deck</b>
             )}
           </button>
+          {canInstall && (
+            <button
+              className="button small"
+              onClick={async () => {
+                await installOffer?.prompt();
+                installOffer = null;
+                setCanInstall(false);
+              }}
+            >
+              Install RKAPro as an app (works offline)
+            </button>
+          )}
           <div className="menu-grid">
             <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(false)}>
               <b>Edit deck</b>

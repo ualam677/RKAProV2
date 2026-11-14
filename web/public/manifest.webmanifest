@@ -1,0 +1,15 @@
+{
+  "name": "RKAPro",
+  "short_name": "RKAPro",
+  "description": "Yu-Gi-Oh! combo testing, deck optimiser and replays, on the EDOPro engine.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#03060c",
+  "theme_color": "#03060c",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
