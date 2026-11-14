@@ -10,6 +10,7 @@ interface Props {
   onDelete: (id: string) => void;
   onVideo: (test: SavedTest) => void;
   onShare: (test: SavedTest) => void;
+  onWorked: (test: SavedTest) => void;
   // a video being made: which test, and how far (0-1)
   video: { id: string; share: number } | null;
   // a replay being prepared for watching
@@ -31,7 +32,7 @@ const grouped = (codes: number[], nameOf: (code: number) => string) => {
   return [...tally].map(([code, count]) => `${count > 1 ? `${count}× ` : ""}${nameOf(code)}`).join(" · ");
 };
 
-export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, video, loading }: Props) {
+export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, onWorked, video, loading }: Props) {
   const [onlyWorked, setOnlyWorked] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const shown = onlyWorked ? tests.filter((test) => test.worked) : tests;
@@ -50,7 +51,7 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, vide
           </button>
         </div>
       </div>
-      <p className="muted">Every hand test is saved as you play. In the duel menu, "This worked" keeps it for good and records the board you ended on.</p>
+      <p className="muted">Every hand test is saved as you play; the newest 5 are kept unless marked as working. Working tests are kept for good, with the board they ended on.</p>
       {shown.length === 0 && <p className="muted">No working tests yet.</p>}
       {shown.map((test) => {
         const expanded = open === test.id;
@@ -79,6 +80,9 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, vide
                   </button>
                   <button className="button small" disabled={!!video} onClick={() => onVideo(test)}>
                     {video?.id === test.id ? `Video ${Math.round(video.share * 100)}%` : "Save as video"}
+                  </button>
+                  <button className={`button small ${test.worked ? "on" : ""}`} onClick={() => onWorked(test)}>
+                    {test.worked ? "✓ Worked" : "Mark as working"}
                   </button>
                   <button className="button small" onClick={() => onShare(test)}>
                     Share link

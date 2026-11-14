@@ -32,7 +32,7 @@ function loadArt(code: number): Promise<void> {
     image.onload = () => (art.set(code, image), resolve());
     image.onerror = () => (art.set(code, null), resolve());
     image.src = SOURCES[0](code);
-    window.setTimeout(() => (art.has(code) || art.set(code, null), resolve()), 4000);
+    window.setTimeout(() => (art.has(code) || art.set(code, null), resolve()), 2500);
   });
 }
 
@@ -61,7 +61,14 @@ function drawCard(g: CanvasRenderingContext2D, card: CardView | null, x: number,
   g.fillStyle = hidden ? "#5a2a12" : colourOf(card.type);
   g.fillRect(left, top, w, h);
   const image = art.get(card.code);
-  if (image) g.drawImage(image, left + 4, top + 4, w - 8, h - 8);
+  if (image && sideways) {
+    // a Defense Position card is the picture turned on its side, never stretched
+    g.save();
+    g.translate(left + w / 2, top + h / 2);
+    g.rotate(-Math.PI / 2);
+    g.drawImage(image, -(CARD_W - 8) / 2, -(CARD_H - 8) / 2, CARD_W - 8, CARD_H - 8);
+    g.restore();
+  } else if (image) g.drawImage(image, left + 4, top + 4, w - 8, h - 8);
   else if (!hidden) {
     g.fillStyle = "#0b1426";
     g.font = "600 15px system-ui, sans-serif";
@@ -92,6 +99,78 @@ function wrap(g: CanvasRenderingContext2D, text: string, x: number, y: number, w
   if (row) g.fillText(row, x, y + at * line);
 }
 
+const zoneX = (index: number) => 40 + index * 130;
+// where a card on the field is drawn: the opponent's side is mirrored, the Extra Monster Zones sit in the middle row
+function zoneAt(controller: number, location: number, sequence: number): [number, number] | null {
+  if (location === 4 && sequence >= 5) return [zoneX(controller === 0 ? (sequence === 5 ? 1 : 3) : sequence === 5 ? 3 : 1), 422];
+  if (location === 4) return controller === 0 ? [zoneX(sequence), 588] : [zoneX(4 - sequence), 256];
+  if (location === 8 && sequence < 5) return controller === 0 ? [zoneX(sequence), 754] : [zoneX(4 - sequence), 90];
+  return null;
+}
+const ease = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
+
+// the moment's animation over the board, `t` from 0 to 1 across the time it is held
+function animate(g: CanvasRenderingContext2D, view: DuelView, events: DuelEvent[], t: number) {
+  // summons: the zone flashes and fades
+  for (const event of events.filter((one) => one.kind === "summon" || one.kind === "attack")) {
+    const at = zoneAt(event.controller, event.location, event.sequence);
+    if (!at) continue;
+    g.save();
+    g.globalAlpha = Math.max(0, 1 - t * 1.6);
+    g.strokeStyle = event.kind === "attack" ? "#ff8a7a" : "#9cc8ff";
+    g.lineWidth = 6;
+    g.shadowColor = event.kind === "attack" ? "#e25a4a" : "#5aa0ff";
+    g.shadowBlur = 24;
+    const grow = 6 + ease(t) * 14;
+    g.strokeRect(at[0] - grow, at[1] - grow, CARD_W + grow * 2, CARD_H + grow * 2);
+    g.restore();
+  }
+  // an activation: the card in the middle with its chain link, popping in
+  const activate = events.filter((one) => one.kind === "activate").pop();
+  if (activate) {
+    const scale = 0.6 + ease(t * 4) * 0.4;
+    g.save();
+    g.globalAlpha = Math.min(1, t * 5);
+    g.fillStyle = "rgba(3,6,12,0.55)";
+    g.fillRect(0, 380, W, 360);
+    g.translate(W / 2, 560);
+    g.scale(scale * 1.6, scale * 1.6);
+    drawCard(g, { code: activate.code, name: activate.name, type: 0, attack: -1, defense: -1, level: 0, position: 1, materials: 0, overlay: [], counters: [], controller: 0, location: 0, sequence: 0 } as CardView, -CARD_W / 2, -CARD_H / 2);
+    g.restore();
+    g.save();
+    g.fillStyle = "#3b8bff";
+    g.fillRect(W / 2 - 70, 400, 140, 34);
+    g.fillStyle = "#ffffff";
+    g.font = "800 20px system-ui, sans-serif";
+    g.textAlign = "center";
+    g.fillText(`CHAIN ${activate.chain ?? 1}`, W / 2, 424);
+    g.restore();
+  }
+  // cards added to the hand slide up from the bottom
+  const added = events.filter((one) => one.kind === "added");
+  added.forEach((card, index) => {
+    const y = H - 140 - ease(t * 3) * 220;
+    const x = W / 2 - (added.length * (CARD_W + 10)) / 2 + index * (CARD_W + 10);
+    drawCard(g, { code: card.code, name: card.name, type: 0, attack: -1, defense: -1, level: 0, position: 1, materials: 0, overlay: [], counters: [], controller: 0, location: 2, sequence: 0 } as CardView, x, y);
+  });
+  // a negation: a stamp
+  const negated = events.filter((one) => one.kind === "negated").pop();
+  if (negated) {
+    g.save();
+    g.translate(W / 2, 560);
+    g.rotate(-0.2);
+    g.scale(1.4 - ease(t * 4) * 0.4, 1.4 - ease(t * 4) * 0.4);
+    g.strokeStyle = "#ff5a4a";
+    g.lineWidth = 6;
+    g.strokeRect(-160, -40, 320, 80);
+    g.fillStyle = "#ff5a4a";
+    g.font = "900 44px system-ui, sans-serif";
+    g.textAlign = "center";
+    g.fillText("NEGATED", 0, 16);
+    g.restore();
+  }
+}
+
 function draw(g: CanvasRenderingContext2D, view: DuelView, title: string) {
   g.fillStyle = "#03060c";
   g.fillRect(0, 0, W, H);
@@ -109,7 +188,6 @@ function draw(g: CanvasRenderingContext2D, view: DuelView, title: string) {
     g.fillText(String(lp), W - 32, y + 38);
   };
   bar(`Opponent · hand ${them.hand.length}`, them.lp, 16, "#ff8a7a");
-  const zoneX = (index: number) => 40 + index * 130;
   // the opponent's Spells/Traps and monsters, seen from your side (mirrored), then the Extra Monster Zones, then yours
   them.spells.slice(0, 5).forEach((card, index) => drawCard(g, card, zoneX(4 - index), 90));
   them.monsters.slice(0, 5).forEach((card, index) => drawCard(g, card, zoneX(4 - index), 256, !!card && (card.position & 0xc) !== 0));
@@ -155,10 +233,16 @@ export async function recordVideo(views: DuelView[], progress: (share: number) =
   for (let index = 0; index < views.length; index++) {
     const view = views[index];
     title = caption(view.events) || title;
-    draw(g, view, title);
-    // each moment as long as the duel screen holds it; the last one a little longer
-    const hold = index === views.length - 1 ? 2200 : Math.max(450, cueTime(view.events));
-    await new Promise((resolve) => window.setTimeout(resolve, hold));
+    // each moment a little quicker than the duel screen holds it, animated across that time; the last one longer
+    const hold = index === views.length - 1 ? 1500 : Math.max(300, Math.round(cueTime(view.events) * 0.75));
+    const begin = performance.now();
+    for (;;) {
+      const t = (performance.now() - begin) / hold;
+      draw(g, view, title);
+      if (view.events.length) animate(g, view, view.events, Math.min(1, t));
+      if (t >= 1) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 33));
+    }
     progress((index + 1) / views.length);
   }
   recorder.stop();

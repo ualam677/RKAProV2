@@ -518,3 +518,9 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .screen-head h2 { margin: 0; font-size: 18px; color: var(--accent-strong); letter-spacing: 0.04em; text-transform: uppercase; }
 .start-test { min-height: 52px; font-size: 17px; }
 @media (min-width: 900px) { .menu-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* the replay bar takes its own room at the bottom, so it never covers the hand */
+.duel.with-viewer { padding-bottom: 168px; }
+.duel.with-viewer:has(.viewer.mini) { padding-bottom: 56px; }
+.viewer.mini { display: flex; align-items: center; gap: 6px; }
+.viewer.mini .viewer-caption { flex: 1; font-size: 13px; }
+.viewer-bar:has(.viewer.mini) { padding: 4px 6px 4px 12px; }

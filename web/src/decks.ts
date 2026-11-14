@@ -20,8 +20,8 @@ export interface SavedTest extends TestRecord {
   pieces?: Piece[];
   interruptions?: Interruption[];
 }
-// working tests are kept; of the rest, the newest few
-const KEEP_OTHERS = 30;
+// working tests are kept; of the rest, the newest 5
+const KEEP_OTHERS = 5;
 export function keepTest(tests: SavedTest[] = [], test: SavedTest): SavedTest[] {
   const next = [test, ...tests.filter((one) => one.id !== test.id)].sort((a, b) => b.date - a.date);
   let others = 0;

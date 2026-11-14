@@ -567,7 +567,36 @@ function App() {
 
   // ---- the replay viewer: every play of a saved test, stepped through with every card shown ----
   type Frame = { index: number; label: string; picks: number };
-  const [viewing, setViewing] = useState<{ test: SavedTest; views: DuelView[]; frames: Frame[]; at: number; back: boolean; playing: boolean } | null>(null);
+  // fast: playing straight through, nothing described until paused; mini: the bar folded down to one line
+  const [viewing, setViewing] = useState<{ test: SavedTest; views: DuelView[]; frames: Frame[]; at: number; back: boolean; playing: boolean; fast?: boolean; mini?: boolean } | null>(null);
+  // what matters on the opponent's turn, from a view: field (with Xyz Materials), hand, GY
+  const piecesOf = (shown: DuelView) => {
+    const mine = shown.players[0];
+    return [
+      ...mine.monsters.flatMap((card) => (card?.code ? [{ code: card.code, location: 4, materials: card.overlay?.length ?? 0 }] : [])),
+      ...mine.spells.flatMap((card) => (card?.code ? [{ code: card.code, location: 8, materials: 0 }] : [])),
+      ...mine.hand.flatMap((card) => (card.code ? [{ code: card.code, location: 2, materials: 0 }] : [])),
+      ...mine.grave.flatMap((card) => (card.code ? [{ code: card.code, location: 16, materials: 0 }] : [])),
+    ];
+  };
+  // mark a saved test as working (or not) after the fact: its end is the board it worked to
+  const markTestWorked = async (saved: SavedTest, finalView?: DuelView) => {
+    const target = decks.find((one) => one.tests?.some((test) => test.id === saved.id)) ?? deck;
+    if (!target) return;
+    if (saved.worked) {
+      changeDeck({ ...target, tests: (target.tests ?? []).map((test) => (test.id === saved.id ? { ...test, worked: false, board: undefined, pieces: undefined, interruptions: undefined } : test)) });
+      return;
+    }
+    const last = finalView ?? (await replayViews(saved)).views.at(-1);
+    if (!last) return;
+    const pieces = piecesOf(last);
+    const board = [...last.players[0].monsters, ...last.players[0].spells].flatMap((card) => (card?.code ? [card.code] : []));
+    const latest = decksRef.current.find((one) => one.id === target.id) ?? target;
+    const known = latest.tests?.some((test) => test.id === saved.id);
+    const marked = { ...saved, worked: true, board, pieces };
+    changeDeck({ ...latest, tests: known ? (latest.tests ?? []).map((test) => (test.id === saved.id ? marked : test)) : keepTest(latest.tests, marked) });
+    post({ type: "interruptions", id: saved.id, pieces, startHand: saved.startHand });
+  };
   const [loadingReplay, setLoadingReplay] = useState(false);
   const describeEvents = (events: DuelView["events"]) => {
     const parts = events.flatMap((event) => {
@@ -591,7 +620,11 @@ function App() {
       let pending = "";
       for (let pick = 0; pick + 1 < marks.length; pick++) {
         const first = marks[pick], last = marks[pick + 1] - 1;
-        const text = saved.steps[pick]?.text ?? `Play ${pick + 1}`;
+        // a test you played names each choice; an engine line's steps don't line up with its choices one to one, so
+        // its plays are described by what happened
+        const aligned = saved.steps.length === saved.picks.length;
+        const happened = describeEvents(views.slice(first, last + 1).filter((view) => view.turnPlayer === 0).flatMap((view) => view.events));
+        const text = aligned ? saved.steps[pick]?.text ?? `Play ${pick + 1}` : happened || "Don't chain";
         // your part: the views of this play still on your turn
         let mine = first - 1;
         while (mine + 1 <= last && views[mine + 1].turnPlayer === 0) mine++;
@@ -627,9 +660,10 @@ function App() {
   // playing: the next step once this one's animations have been seen
   useEffect(() => {
     if (!viewing?.playing) return;
-    if (viewing.at >= viewing.frames.length - 1) return setViewing({ ...viewing, playing: false });
+    if (viewing.at >= viewing.frames.length - 1) return setViewing({ ...viewing, playing: false, fast: false });
     const shown = viewing.views[viewing.frames[viewing.at].index];
-    const wait = window.setTimeout(() => viewTo(viewing.at + 1), Math.max(800, cueTime(shown?.events ?? []) + 350));
+    // fast forward: a play every tenth of a second, nothing described or animated until paused
+    const wait = window.setTimeout(() => viewTo(viewing.at + 1), viewing.fast ? 110 : Math.max(800, cueTime(shown?.events ?? []) + 350));
     return () => window.clearTimeout(wait);
   }, [viewing]);
   // a link to this test's replay, shared or copied
@@ -731,13 +765,26 @@ function App() {
     const frame = viewing.frames[viewing.at];
     const previous = viewing.frames[viewing.at - 1];
     // going forward shows what happened since the last step; going back or jumping shows the position only
-    const events = !viewing.back && previous ? viewing.views.slice(previous.index + 1, frame.index + 1).flatMap((one) => one.events) : [];
+    const events = !viewing.back && !viewing.fast && previous ? viewing.views.slice(previous.index + 1, frame.index + 1).flatMap((one) => one.events) : [];
     const shown = { ...viewing.views[frame.index], prompt: null, events };
     const undone = viewing.back ? viewing.frames[viewing.at + 1]?.label : null;
-    const controls = (
+    const caption = viewing.fast && viewing.playing ? "Fast forward… pause to see what happened" : undone ? `Undone: ${undone}` : frame.label;
+    const saved = viewing.test.id && decks.some((one) => one.tests?.some((test) => test.id === viewing.test.id)) ? (deck?.tests ?? []).find((test) => test.id === viewing.test.id) : undefined;
+    const isWorked = !!(saved ?? viewing.test).worked;
+    const controls = viewing.mini ? (
+      <div className="viewer mini">
+        <p className="viewer-caption">{caption}</p>
+        <button className="button small primary" onClick={() => setViewing({ ...viewing, playing: !viewing.playing, fast: false, back: false })} aria-label={viewing.playing ? "Pause" : "Play"}>
+          {viewing.playing ? "⏸" : "▶︎"}
+        </button>
+        <button className="button small" onClick={() => setViewing({ ...viewing, mini: false })} aria-label="Show the controls">
+          ⌃
+        </button>
+      </div>
+    ) : (
       <div className="viewer">
         <p className="viewer-caption">
-          {undone ? <>Undone: {undone}</> : frame.label}
+          {caption}
           <small>
             {" "}
             · step {viewing.at} of {viewing.frames.length - 1}
@@ -747,11 +794,26 @@ function App() {
         <div className="viewer-buttons">
           <button className="button small" onClick={() => viewTo(0, false)} aria-label="Start">⏮</button>
           <button className="button small" onClick={() => viewTo(viewing.at - 1, false)} aria-label="Back a play">◀</button>
-          <button className="button small primary" onClick={() => setViewing({ ...viewing, playing: !viewing.playing, back: false })} aria-label={viewing.playing ? "Pause" : "Play"}>
+          <button className="button small primary" onClick={() => setViewing({ ...viewing, playing: !viewing.playing, fast: false, back: false })} aria-label={viewing.playing ? "Pause" : "Play"}>
             {viewing.playing ? "⏸" : "▶︎"}
           </button>
           <button className="button small" onClick={() => viewTo(viewing.at + 1, false)} aria-label="Forward a play">▶</button>
+          <button className={`button small ${viewing.fast && viewing.playing ? "on" : ""}`} onClick={() => setViewing({ ...viewing, playing: !(viewing.fast && viewing.playing), fast: !(viewing.fast && viewing.playing), back: false })} aria-label="Fast forward">
+            ⏩
+          </button>
           <button className="button small" onClick={() => viewTo(viewing.frames.length - 1, false)} aria-label="End">⏭</button>
+          <button className="button small" onClick={() => setViewing({ ...viewing, mini: true })} aria-label="Minimise">
+            ⌄
+          </button>
+          <button
+            className={`button small ${isWorked ? "on" : ""}`}
+            onClick={async () => {
+              await markTestWorked({ ...viewing.test, ...(saved ?? {}) }, viewing.views[viewing.frames[viewing.frames.length - 1].index]);
+              setViewing((now) => now && { ...now, test: { ...now.test, worked: !isWorked } });
+            }}
+          >
+            {isWorked ? "✓ Worked" : "Mark as working"}
+          </button>
           <button
             className="button small"
             onClick={() => {
@@ -1164,7 +1226,7 @@ function App() {
             <h2>Replays</h2>
           </div>
           {deck.tests?.length ? (
-            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} onShare={shareReplay} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />
+            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} onShare={shareReplay} onWorked={(saved) => void markTestWorked(saved)} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />
           ) : (
             <p className="muted">No saved tests yet. Every hand you test is saved here as you play.</p>
           )}

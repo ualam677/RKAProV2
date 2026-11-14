@@ -870,7 +870,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
 
   return (
     // a tap anywhere else closes the floating actions and the menus
-    <div className={`duel ${wide ? "wide" : "phone"}`} onClick={() => (setFocus(null), setPhaseOpen(false), setMenuOpen(false))}>
+    <div className={`duel ${wide ? "wide" : "phone"} ${viewer ? "with-viewer" : ""}`} onClick={() => (setFocus(null), setPhaseOpen(false), setMenuOpen(false))}>
       {wide && (
         <aside className="side">
           {opponentBar}
