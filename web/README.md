@@ -134,22 +134,17 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
   hand size and chosen cards are remembered on the device.
 
-## Next, in order
-0. Agreed with the owner: faster searches (several workers in parallel), install as an app that works offline,
-   choke points with a chosen number of hand traps, shareable replays (a link that carries a saved test); later, a full
-   UI overhaul so the site looks less busy.
-1. Going second: the opponent goes first and builds a board to break. Then choke points: replay lines with the
-   opponent holding one hand trap, at every moment the engine allows it, then the
-   opponent: hand traps (easy / smart), then plays its own turn with board breakers
-   (Veiler / Imperm on the player's turn, Imperm at the start of its turn, Lightning Storm, Cosmic Cyclone-style cards).
-2. Routes learned from saved replays, then end-board suggestion from a random hand (beam search over the core, scored
-   against learned end boards).
-3. Save states (seed + response log), replays, takeover.
-4. Omega deck folder link with write-back, Google Drive sync.
-5. Replay to mp4 / GIF.
-
-The C++ fork in `gframe/` already implements 1-2 for desktop (see `deck_optimizer.h`, `handtrap_ai.h`, `single_mode.cpp`);
-port the logic from there.
+## Next, in order (agreed with the owner)
+1. Choke points with a chosen number of hand traps (the opponent holds 2 or 3: Ash and Imperm is the usual fear).
+   Start from `chokePoints` in probe.ts: with one hand trap fixed at its worst moment, search the second the same way.
+2. Faster searches: a pool of engine workers (`navigator.hardwareConcurrency`, at most 3 extra) for the probe, route
+   search and choke points. Each worker loads its own card database (about 100 MB), so keep the pool small on phones,
+   start it only for a search and close it after.
+3. Measured success per start, with why it failed: from saved tests, how often each start reached a full board, and
+   for the misses, what stopped it (bricked hand, a hand trap, a step missing). Feeds the optimiser's odds.
+4. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).
+Not wanted: a Side Deck planner, WindBot Ignite. Maybe later: drill mode, custom odds conditions, OCG / Master Duel ban
+lists.
 
 ## v1 vs v2 optimiser on the Galaxy-Eyes list (`node web/tools/compare-v1-v2.mjs <path to ualam677/rkapro>`)
 
@@ -190,6 +185,21 @@ State of the repo
   environment allows this branch.
 - `gframe/` holds a working desktop C++ fork with the optimiser, hand-trap opponent (easy / smart), save states,
   replay takeover and route learning. It is reference material for the web port now.
+
+Session notes (Nov 2026)
+- Everything a duel needs to replay exactly is a `TestRecord` (protocol.ts): deck order, seed, settings and every
+  choice as the duel screen numbers it. Saved tests, save states, engine lines, the replay viewer, videos and share links
+  are all that one shape. Never spread a saved `options` object after a message's `type`: it carried "start" once and
+  silently turned "jump" / "views" requests into plain starts.
+- The engine search (`src/engine/probe.ts`) runs tiny duels replayed from the start for every branch (the core cannot
+  copy a duel). `play()` records each choice in the duel screen's numbering (`uiPicks`), so its lines replay in the app.
+- Card wording: current scripts number a card's strings as passcode << 20 | n, not passcode * 16 + n (`describe`).
+- Interruptions are read from scripts (`interruptions.ts`); conditions only on your own field are checked, anything
+  else is left to the engine. Battle-only effects (Galaxy-Eyes Photon Dragon) don't count.
+- The computer opponent is deterministic on purpose (replays depend on it). It plans with the route search at its
+  first Main Phase (about 10 s).
+- Tests: Playwright scripts in the session scratchpad drove every feature on a Pixel 7 profile and a 1440x900 window;
+  `tools/check-optimiser.mjs` and `tools/probe-deck.mjs` run the maths and the engine search in Node.
 
 Things that cost time
 - `duelQueryLocation` returns misaligned data when asked for TYPE, LEVEL or RANK. Ask only for CODE, POSITION, ATTACK,
