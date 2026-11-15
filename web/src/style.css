@@ -865,3 +865,5 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 /* card pictures stay inside their frame: the frame is the positioned box, the picture sits in its padding */
 .deck-cover, .trap-pick-art, .pick-art, .mini-card, .opt-thumb { position: relative; }
 .deck-cover .art, .trap-pick-art .art, .pick-art .art, .mini-card .art, .opt-thumb.framed .art { position: static; }
+.pick-grid { padding: 8px 8px 2px 2px; }
+.slot.filled:has(img.art) .slot-name { display: none; }
