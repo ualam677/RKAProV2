@@ -635,7 +635,11 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 
 /* what you can use glows blue and breathes */
 .tile.glow { box-shadow: 0 0 0 1.5px #9cd0ff, 0 0 10px 2px var(--blue-glow); animation: can-use 1.6s ease-in-out infinite; }
-@keyframes can-use { 50% { box-shadow: 0 0 0 1.5px #b9ddff, 0 0 16px 4px rgba(90, 170, 255, 0.7); } }
+/* both ends given: a frame's own shadow (the Xyz gold line) can't be faded into, so without them the glow snapped on and off */
+@keyframes can-use {
+  0%, 100% { box-shadow: 0 0 0 1.5px #9cd0ff, 0 0 10px 2px rgba(90, 170, 255, 0.45); }
+  50% { box-shadow: 0 0 0 1.5px #b9ddff, 0 0 16px 4px rgba(90, 170, 255, 0.7); }
+}
 .tile.picked { box-shadow: 0 0 0 3px var(--gold), 0 0 14px var(--gold-soft); }
 
 /* negated, for as long as it lasts */
