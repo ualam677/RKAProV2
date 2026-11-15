@@ -1388,16 +1388,14 @@ function App() {
           </section>
 
           <section className="box">
-            <h2>Hand traps in my hand</h2>
-            <div className="segmented two">
+            <div className="segmented two" title="Ignore: on your turn, hand traps in your hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos. On the opponent's turn they always can.">
               <button className={`button ${!ignoreHandTraps ? "on" : ""}`} onClick={() => setIgnoreHandTraps(false)}>
-                Ask to chain
+                My hand traps: ask
               </button>
               <button className={`button ${ignoreHandTraps ? "on" : ""}`} onClick={() => setIgnoreHandTraps(true)}>
-                Ignore
+                My hand traps: ignore
               </button>
             </div>
-            <p className="muted">Ignore: on your turn, hand traps in your hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos. On the opponent's turn they always can.</p>
           </section>
 
           <section className="box">
@@ -1438,7 +1436,6 @@ function App() {
                 </button>
               )}
             </div>
-            <p className="muted">Tap cards below to open with them. Empty slots are drawn at random.</p>
             <div className="slots">
               {Array.from({ length: hand }, (_, slot) => {
                 const code = chosen[slot];
@@ -1467,7 +1464,10 @@ function App() {
             </div>
           </section>
           <button className="button primary start-test" disabled={!ready || deck.main.length === 0} onClick={() => start()}>
-            Start the test
+            {chosen.length === 0 ? "Random hand" : chosen.length < hand ? `${chosen.length} chosen + random` : "Chosen hand"}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 4v16l13-8z" />
+            </svg>
           </button>
         </>
       )}

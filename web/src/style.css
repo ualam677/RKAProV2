@@ -495,7 +495,7 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .test-card { position: relative; width: 40px; aspect-ratio: 59 / 86; border-radius: 3px; background: #1a2338; overflow: hidden; opacity: 0.55; }
 .test-card.interrupts { opacity: 1; box-shadow: 0 0 0 2px var(--accent-strong), 0 0 8px var(--accent); }
 .test-card.off { box-shadow: 0 0 0 2px #7aa7e0; }
-.test-card i { position: absolute; inset: 0; padding: 2px; font-style: normal; font-size: 7px; line-height: 1.1; color: var(--muted); overflow: hidden; }
+.test-card i { position: absolute; inset: 0; padding: 2px; font-style: normal; font-size: 7px; line-height: 1.1; color: var(--muted); overflow: hidden; overflow-wrap: anywhere; }
 .test-card small { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; padding: 1px 0; background: rgba(4, 10, 24, 0.85); color: #fff; font-size: 8px; text-align: center; text-transform: uppercase; }
 .sync summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
 .sync summary::-webkit-details-marker { display: none; }
@@ -778,3 +778,44 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .tile-icon { width: 30px; height: 30px; fill: none; stroke: var(--gold, #e6c36a); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tile-number small:not(.good) { margin-left: -6px; }
 .menu-grid .menu-tile:last-child:nth-child(odd) { grid-column: span 2; min-height: 60px; flex-direction: row; align-items: center; }
+
+/* Test: start rows with a framed card and a round play button; a line as its end board and marks; hand traps as cards */
+.opt-line { gap: 6px; padding: 10px 0; border-bottom-color: #141b28; }
+.opt-line-head { justify-content: flex-start; gap: 12px; }
+.opt-line-head > b { flex: 1; min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
+.opt-thumb.framed.small { width: 40px; flex: none; cursor: default; }
+.play-round { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; border: 1px solid #23324d; border-radius: 50%; background: rgba(61, 139, 255, 0.08); color: var(--accent-strong); cursor: pointer; box-shadow: 0 0 10px rgba(61, 139, 255, 0.25); }
+.play-round svg { width: 18px; height: 18px; fill: currentColor; }
+.play-round:disabled { opacity: 0.35; box-shadow: none; }
+.route-line { display: grid; gap: 6px; min-width: 0; }
+.route-marks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.int-badge { display: inline-flex; align-items: baseline; gap: 3px; height: 30px; padding: 0 10px; border: 1px solid; border-radius: 15px; background: none; font-family: var(--display); font-weight: 700; font-size: 20px; line-height: 28px; cursor: pointer; }
+.int-badge small { font-size: 12px; letter-spacing: 0.04em; }
+.int-badge.good { border-color: #2f7a55; color: #6fd39b; background: rgba(111, 211, 155, 0.08); box-shadow: 0 0 10px rgba(111, 211, 155, 0.25); }
+.int-badge.warn, .route-mark.warn { border-color: rgba(242, 181, 68, 0.5); color: #f2b544; background: rgba(242, 181, 68, 0.08); }
+.int-badge.bad, .route-mark.bad { border-color: rgba(255, 107, 120, 0.5); color: #ff6b78; background: rgba(255, 107, 120, 0.08); }
+.route-mark { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 8px; border: 1px solid #2a3550; border-radius: 8px; background: #0b1120; color: #b9c6de; font-family: var(--display); font-weight: 700; font-size: 15px; cursor: pointer; white-space: nowrap; }
+.route-mark.good { border-color: #1f4a3a; background: #07140f; color: #6fd39b; }
+.route-mark svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linejoin: round; }
+.route-mark .mini-card, .opt-through-row .mini-card { width: 18px; height: 26px; border-color: #ff6b78; }
+.route-watch { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; margin-left: auto; padding: 0 10px; border: 1px solid #23324d; border-radius: 15px; background: none; color: var(--accent-strong); font: inherit; font-size: 13px; cursor: pointer; }
+.route-watch svg { width: 12px; height: 12px; fill: currentColor; }
+.opt-fullat { display: inline-flex; align-items: center; gap: 6px; font-family: var(--display); font-weight: 700; font-size: 16px; color: #8a96ad; }
+.opt-fullat b { font-size: 22px; color: var(--text); min-width: 14px; text-align: center; }
+.opt-fullat small { font-size: 12px; }
+.opt-holds { font-size: 12px; color: #8a96ad; font-weight: 500; }
+.opt-holds b { color: var(--text); }
+.trap-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin-top: 6px; }
+.trap-pick { display: grid; gap: 4px; justify-items: center; padding: 4px; border: 1px solid #1c2536; border-radius: 8px; background: #0b1120; color: #8a96ad; font: inherit; cursor: pointer; min-width: 0; }
+.trap-pick-art { width: 44px; aspect-ratio: 59 / 86; padding: 2px; border-radius: 3px; background: var(--frame-monster); opacity: 0.55; filter: grayscale(0.6); }
+.trap-pick-art .art { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 1px; }
+.trap-pick-name { width: 100%; font-size: 10px; line-height: 1.2; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.trap-pick.on { border-color: #f09ac8; color: var(--text); background: rgba(240, 154, 200, 0.1); box-shadow: 0 0 10px rgba(240, 154, 200, 0.35); }
+.trap-pick.on .trap-pick-art { opacity: 1; filter: none; }
+.opt-through-list { display: flex; flex-wrap: wrap; gap: 10px; }
+.opt-through-row { display: inline-flex; align-items: center; gap: 4px; }
+.opt-through-row b { font-family: var(--display); font-weight: 700; font-size: 17px; }
+.start-test { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 54px; border: 1px solid #e6c36a; border-radius: 12px; background: linear-gradient(180deg, #5aa2ff, #3d8bff 60%, #2563d9); color: #04070d; font-family: var(--display); font-weight: 700; font-size: 22px; letter-spacing: 0.04em; text-transform: uppercase; box-shadow: 0 0 18px rgba(61, 139, 255, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.start-test svg { width: 20px; height: 20px; fill: currentColor; }
+.opt-through > .trap-picks { display: grid; gap: 8px; }
+.opt-through { padding: 10px; }

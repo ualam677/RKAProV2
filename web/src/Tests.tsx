@@ -2,6 +2,7 @@
 // choice in it and play on from there yourself.
 import { useState } from "react";
 import type { SavedTest } from "./decks";
+import type { Interruption } from "./engine/interruptions";
 import { CardArt } from "./CardArt";
 import { describeInterruption, describeNibiru, describeProtection, shortWhat } from "./interruptText";
 
@@ -72,32 +73,7 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, onWo
               )}
               {test.worked && test.board && test.board.length > 0 && (
                 // the end board in small cards; the ones that interrupt are lit, with what they do
-                <span className="test-cards">
-                  {test.board.map((code, index) => {
-                    const uses = (test.interruptions ?? []).filter((one) => (one.code === code || nameOf(one.code) === nameOf(code)) && one.from !== "hand" && one.from !== "gy");
-                    return (
-                      <span key={index} className={`test-card ${uses.length ? "interrupts" : ""}`} title={nameOf(code)}>
-                        <i>{nameOf(code)}</i>
-                        <CardArt code={code} />
-                        {uses.length > 0 && <small>{[...new Set(uses.map((one) => (one.via ? "→ " : "") + shortWhat(one)))].join(" + ")}</small>}
-                      </span>
-                    );
-                  })}
-                  {(test.interruptions ?? [])
-                    // ones not on the field: a Trap still in the hand to Set, a hand trap, an effect in the GY
-                    .filter((one) => one.from === "hand" || one.from === "gy" || !test.board!.some((code) => code === one.code || nameOf(code) === nameOf(one.code)))
-                    .map((one, index) => (
-                      <span key={`off${index}`} className="test-card interrupts off" title={describeInterruption(one, nameOf)}>
-                        <i>{nameOf(one.code)}</i>
-                        <CardArt code={one.code} />
-                        <small>
-                          {(one.via ? "→ " : "") + shortWhat(one)}
-                          <br />
-                          {one.from === "hand" ? "HAND" : one.from === "gy" ? "GY" : "SET"}
-                        </small>
-                      </span>
-                    ))}
-                </span>
+                <EndBoard board={test.board} interruptions={test.interruptions ?? []} nameOf={nameOf} />
               )}
               {test.worked && test.interruptions && test.interruptions.length > 0 && (
                 <span className="test-board">{test.interruptions.map((one) => describeInterruption(one, nameOf)).join(" · ")}</span>
@@ -142,5 +118,37 @@ export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, onWo
         );
       })}
     </section>
+  );
+}
+
+/** A line's end board in small cards: the ones that interrupt lit, with what they do, then the ones off the field. */
+export function EndBoard({ board, interruptions, nameOf }: { board: number[]; interruptions: Interruption[]; nameOf: (code: number) => string }) {
+  return (
+    <span className="test-cards">
+      {board.map((code, index) => {
+        const uses = interruptions.filter((one) => (one.code === code || nameOf(one.code) === nameOf(code)) && one.from !== "hand" && one.from !== "gy");
+        return (
+          <span key={index} className={`test-card ${uses.length ? "interrupts" : ""}`} title={nameOf(code)}>
+            <i>{nameOf(code)}</i>
+            <CardArt code={code} />
+            {uses.length > 0 && <small>{[...new Set(uses.map((one) => (one.via ? "→ " : "") + shortWhat(one)))].join(" + ")}</small>}
+          </span>
+        );
+      })}
+      {interruptions
+        // ones not on the field: a Trap still in the hand to Set, a hand trap, an effect in the GY
+        .filter((one) => one.from === "hand" || one.from === "gy" || !board.some((code) => code === one.code || nameOf(code) === nameOf(one.code)))
+        .map((one, index) => (
+          <span key={`off${index}`} className="test-card interrupts off" title={describeInterruption(one, nameOf)}>
+            <i>{nameOf(one.code)}</i>
+            <CardArt code={one.code} />
+            <small>
+              {(one.via ? "→ " : "") + shortWhat(one)}
+              <br />
+              {one.from === "hand" ? "HAND" : one.from === "gy" ? "GY" : "SET"}
+            </small>
+          </span>
+        ))}
+    </span>
   );
 }

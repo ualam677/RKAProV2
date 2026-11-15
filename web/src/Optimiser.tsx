@@ -5,6 +5,7 @@ import { describeInterruption, describeNibiru, describeProtection } from "./inte
 import { hasRole, rolesOf, secondOnly } from "./optimiser";
 import type { TestResult } from "./decks";
 import { CardArt } from "./CardArt";
+import { EndBoard } from "./Tests";
 import { MiniCards, RoleBadges, RoleStrip, TraitGlyphs, type Mini } from "./CardGlyphs";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
@@ -493,8 +494,8 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
       {main.length > 0 && only === "lines" && (
         <>
           <div className="opt-find">
-            <span className="opt-fullat" title="An interruption: an effect usable on the opponent's turn that negates or removes, read from the card scripts">
-              Full board: at least
+            <span className="opt-fullat" title="Full board: at least this many interruptions (effects usable on the opponent's turn that negate or remove)">
+              FULL ≥
               <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.max(1, fullAt - 1), updated: Date.now() })} aria-label="Fewer">
                 −
               </button>
@@ -502,30 +503,41 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
               <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.min(8, fullAt + 1), updated: Date.now() })} aria-label="More">
                 +
               </button>
-              interruptions
+              <small>INT</small>
             </span>
           </div>
           <div className="opt-through">
-            <span className="muted">
-              The opponent is a dud deck (Marshmallon) holding <b>{holding.length ? holding.map(nameOf).join(" + ") : "no hand traps"}</b>. Pick up to 3, or none.
+            <span className="opt-holds" title="The opponent is a dud deck (Marshmallon) holding the hand traps you pick: up to 3, or none">
+              Opponent holds <b>{holding.length}/3</b>
             </span>
-            <div className="opt-chips">
+            <div className="trap-picks">
               {trapChoices.map((trap) => (
-                <button key={trap} className={`button small ${holding.includes(trap) ? "on" : ""}`} onClick={() => toggleHeld(trap)}>
-                  {nameOf(trap)}
+                <button key={trap} className={`trap-pick ${holding.includes(trap) ? "on" : ""}`} onClick={() => toggleHeld(trap)} aria-pressed={holding.includes(trap)}>
+                  <span className="trap-pick-art">
+                    <CardArt code={trap} />
+                  </span>
+                  <span className="trap-pick-name">{nameOf(trap)}</span>
                 </button>
               ))}
             </div>
-            {reached && together !== null && (
-              <span className="opt-through-row">
-                Full board through {holding.map(nameOf).join(" + ")}: <b>{pct(together)}</b>
+            {reached && together !== null && holding.length > 1 && (
+              <span className="opt-through-row" aria-label={`Full board through ${holding.map(nameOf).join(" + ")}`}>
+                {holding.map((trap) => (
+                  <span key={trap} className="mini-card">
+                    <CardArt code={trap} />
+                  </span>
+                ))}
+                <b>{pct(together)}</b>
               </span>
             )}
             {through.length > 0 && reached && (
-              <div>
+              <div className="opt-through-list">
                 {through.map(({ trap, odds: value }) => (
-                  <span key={trap} className="opt-through-row">
-                    {nameOf(trap)} <b>{pct(value)}</b>
+                  <span key={trap} className="opt-through-row" aria-label={`Full board through ${nameOf(trap)}`}>
+                    <span className="mini-card">
+                      <CardArt code={trap} />
+                    </span>
+                    <b>{pct(value)}</b>
                   </span>
                 ))}
               </div>
@@ -540,16 +552,22 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
           {startCards.map((card) => (
             <div key={card.code} className="opt-line">
               <div className="opt-line-head">
+                <span className={`opt-thumb framed small ${frameOf(cards.get(card.code)?.type ?? 0)}`} aria-hidden="true">
+                  <CardArt code={card.code} />
+                </span>
                 <b>{nameOf(card.code)}</b>
                 <button
-                  className="button small"
+                  className="play-round"
+                  aria-label={`Test ${nameOf(card.code)}`}
                   onClick={() => {
                     const hand = testHand(card, main);
                     if (hand) onTest(hand.map((code) => held.get(code) ?? code));
                   }}
                   disabled={!testHand(card, main)}
                 >
-                  Test
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 4v16l13-8z" />
+                  </svg>
                 </button>
               </div>
               {routes[card.code] ? (
@@ -565,7 +583,7 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
                   onWatch={() => routes[card.code] && onWatchLine(routes[card.code].record, card.code)}
                 />
               ) : (
-                <span className="muted opt-engine">No line yet: test it and mark the replay as working.</span>
+                <span className="muted opt-engine">No line yet</span>
               )}
               <Measured results={(deck.results ?? []).filter((one) => one.start === card.code)} nameOf={nameOf} />
             </div>
@@ -592,35 +610,73 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
 function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, nameOf, onWatch }: { route?: SavedRoute; full: boolean; fullAt: number; checking: "now" | "waiting" | null; fresh: boolean; searching: number | null; waiting: boolean; nameOf: (code: number) => string; onWatch: () => void }) {
   if (searching !== null) return <span className="opt-engine">Searching for a line… {searching} tried</span>;
   if (waiting) return <span className="opt-engine">Waiting to search</span>;
+  const [said, setSaid] = useState<string | null>(null);
   if (!route) return null;
-  const board = route.board.length ? route.board.map(nameOf).join(", ") : "nothing on the field";
   const stops = route.interruptions ?? [];
+  const say = (text: string) => setSaid(said === text ? null : text);
+  const stopsText = stops.length ? `${stops.length} interruption${stops.length > 1 ? "s" : ""}: ${stops.map((one) => describeInterruption(one, nameOf)).join(", ")}` : "No interruptions";
+  const protectText = route.protection?.length ? `Protection on their turn: ${route.protection.map((one) => describeProtection(one, nameOf)).join(" · ")}` : "";
+  const nibiruText = route.nibiru ? describeNibiru(route.nibiru, nameOf) : "";
+  const combo = route.combo;
+  const comboText = combo
+    ? `${combo.traps.map(nameOf).join(" + ")} together: ${
+        combo.steps.length
+          ? `${combo.steps.map((step) => `${nameOf(step.trap)} on ${step.at}`).join(", then ")} → ${combo.interruptions >= fullAt ? `still ${combo.interruptions}` : combo.interruptions === 0 ? "0: stops the line" : combo.interruptions}${combo.unused.length ? ` (${combo.unused.map(nameOf).join(", ")} not needed)` : ""}`
+          : "never usable against this line"
+      }`
+    : "";
+  const tone = (count: number) => (count >= fullAt ? "good" : count === 0 ? "bad" : "warn");
   return (
-    <span className={`opt-engine route ${full ? "full" : ""}`}>
-      Your line: ends on {board}. {full ? "✓ " : ""}
-      {stops.length
-        ? `${stops.length} interruption${stops.length > 1 ? "s" : ""}: ${stops.map((one) => describeInterruption(one, nameOf)).join(", ")}`
-        : "No interruptions"}
-      {route.protection && route.protection.length > 0 && ` · Protection on their turn: ${route.protection.map((one) => describeProtection(one, nameOf)).join(" · ")}`}
-      {route.nibiru && ` · ${describeNibiru(route.nibiru, nameOf)}`}
-      {route.aimed && route.coverage > 0 && ` · ${Math.round(route.coverage * 100)}% of your closest working board`}
-      {!fresh && " · deck changed since"}{" "}
-      <button className="opt-link" onClick={onWatch}>
-        Watch
-      </button>
-      {checking === "now" && <span className="opt-chokes"> · Checking hand traps against this line…</span>}
-      {checking === "waiting" && <span className="opt-chokes"> · Hand traps next</span>}
-      {!checking && route.combo && (
-        <span className="opt-chokes">
-          {" "}
-          · {route.combo.traps.map(nameOf).join(" + ")} together:{" "}
-          {route.combo.steps.length
-            ? `${route.combo.steps.map((step) => `${nameOf(step.trap)} on ${step.at}`).join(", then ")} → ${route.combo.interruptions >= fullAt ? `still ${route.combo.interruptions}` : route.combo.interruptions === 0 ? "0: stops the line" : route.combo.interruptions}${route.combo.unused.length ? ` (${route.combo.unused.map(nameOf).join(", ")} not needed)` : ""}`
-            : "never usable against this line"}
-        </span>
-      )}
+    <div className={`route-line ${full ? "full" : ""}`}>
+      {route.board.length > 0 && <EndBoard board={route.board} interruptions={stops} nameOf={nameOf} />}
+      <div className="route-marks">
+        <button className={`int-badge ${tone(stops.length)}`} onClick={() => say(stopsText)} aria-label={stopsText}>
+          {stops.length}
+          <small>INT</small>
+          {full && <span aria-hidden="true">✓</span>}
+        </button>
+        {route.nibiru && (
+          <button className={`route-mark ${route.nibiru.proof ? "good" : "warn"}`} onClick={() => say(nibiruText)} aria-label={nibiruText}>
+            <span className="mini-card">
+              <CardArt code={27204311} />
+            </span>
+            {route.nibiru.proof ? "✓" : "✕"}
+          </button>
+        )}
+        {protectText && (
+          <button className="route-mark good" onClick={() => say(protectText)} aria-label={protectText}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z" />
+            </svg>
+          </button>
+        )}
+        {combo && !checking && (
+          <button className={`route-mark ${tone(combo.steps.length ? combo.interruptions : fullAt)}`} onClick={() => say(comboText)} aria-label={comboText}>
+            {combo.traps.map((trap) => (
+              <span key={trap} className="mini-card">
+                <CardArt code={trap} />
+              </span>
+            ))}
+            → {combo.steps.length ? combo.interruptions : "–"}
+          </button>
+        )}
+        {!fresh && (
+          <span className="route-mark warn" title="The deck changed since this line">
+            Δ
+          </span>
+        )}
+        <button className="route-watch" onClick={onWatch} aria-label="Watch the line">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 4v16l13-8z" />
+          </svg>
+          Watch
+        </button>
+      </div>
+      {said && <p className="trait-said">{said}</p>}
+      {checking === "now" && <span className="opt-chokes">Checking hand traps against this line…</span>}
+      {checking === "waiting" && <span className="opt-chokes">Hand traps next</span>}
       {!checking && route.chokes && route.chokes.length > 0 && <Chokes chokes={route.chokes} fullAt={fullAt} nameOf={nameOf} />}
-    </span>
+    </div>
   );
 }
 
@@ -762,7 +818,7 @@ function PartnerSheet({ card, main, nameOf, onSave, onClose }: { card: DeckCard;
 
 // How your tests went, split by the hand traps the opponent held: "no hand traps 3/4 · D.D. Crow 1/3", then what stopped the misses
 function Measured({ results, deck = false, nameOf }: { results: TestResult[]; deck?: boolean; nameOf?: (code: number) => string }) {
-  if (!results.length) return deck ? null : <span className="opt-engine measured muted">No tests yet.</span>;
+  if (!results.length) return null;
   const groups = new Map<string, TestResult[]>();
   for (const one of results) {
     const key = one.held === undefined ? "?" : one.held.length ? one.held.map((code) => nameOf?.(code) ?? `#${code}`).join(" + ") : "no hand traps";
