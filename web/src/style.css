@@ -706,3 +706,50 @@ h1 { margin: 0; font-size: 22px; letter-spacing: 0.06em; color: var(--accent-str
 .mini-card:has(img[src*="10045474"]) { background: var(--frame-trap); }
 .trait-said { margin: 6px 0 0; padding: 6px 8px; border-left: 2px solid var(--gold, #e6c36a); background: #0b1120; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .opt-chip.warn { border-color: #f2b544; color: #f2b544; }
+
+/* Optimise Odds: big glowing number, odds rows as card symbols, the deck as a strip of role-coloured blocks */
+.opt-turns { display: flex; gap: 8px; }
+.opt-turns button { height: 34px; padding: 0 14px; border: 1px solid #2a3550; border-radius: 17px; background: none; color: #5e6a82; font-family: var(--display); font-weight: 700; font-size: 16px; cursor: pointer; }
+.opt-turns button.on { border-color: var(--accent-strong); background: rgba(61, 139, 255, 0.16); color: var(--text); }
+.opt-big { align-items: flex-end; flex-wrap: wrap; row-gap: 4px; padding: 10px 2px 4px; }
+.opt-big > b { font-family: var(--display); font-weight: 700; font-size: 72px; line-height: 0.85; color: #dcebff; text-shadow: 0 0 18px rgba(61, 139, 255, 0.65); }
+.opt-big > b small { font-size: 30px; color: #8a96ad; text-shadow: none; }
+.opt-big > span { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; padding-bottom: 4px; }
+.opt-big > span small { flex-basis: 100%; font-size: 11px; line-height: 1.3; }
+.mini-glyphs { display: inline-flex; gap: 3px; flex: none; }
+.mini-glyph { width: 20px; height: 29px; border-radius: 3px; border: 1px solid; display: flex; align-items: center; justify-content: center; }
+.mini-glyph svg { width: 12px; height: 12px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.mini-glyph.start { background: var(--frame-monster); border-color: #f0c27a; box-shadow: 0 0 6px rgba(240, 194, 122, 0.5); }
+.mini-glyph.start svg { stroke: #1a1206; }
+.mini-glyph.trap { background: #7a2556; border-color: #f09ac8; }
+.mini-glyph.extend { background: #1e4a8a; border-color: #7fb2ff; }
+.mini-glyph.break { background: #6a2a1a; border-color: #ff9a6b; }
+.mini-glyph.warn { background: rgba(242, 181, 68, 0.1); border-color: rgba(242, 181, 68, 0.5); }
+.mini-glyph.warn svg { stroke: #f2b544; }
+.opt-odds { gap: 4px; }
+.opt-odds li { display: block; }
+.opt-odds li > button { width: 100%; display: grid; grid-template-columns: 72px minmax(0, 1fr) 60px; align-items: center; gap: 10px; min-height: 36px; padding: 2px 0; border: 0; background: none; color: var(--text); cursor: pointer; text-align: left; }
+.opt-odds li > button b { font-family: var(--display); font-weight: 600; font-size: 19px; text-align: right; }
+.opt-odds .opt-bar { height: 6px; border: 0; background: #121a2a; }
+.opt-odds .opt-bar i { border-radius: 3px; box-shadow: 0 0 8px var(--accent-strong); }
+.role-strip { margin-top: 10px; padding-top: 12px; border-top: 1px solid #141b28; }
+.role-blocks { display: flex; flex-wrap: wrap; gap: 2px; }
+.role-blocks i, .role-legend i { width: 12px; height: 18px; border-radius: 2px; border: 1px solid; }
+.role-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 10px; }
+.role-legend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.role-legend i { width: 9px; height: 13px; }
+.role-legend b { font-family: var(--display); font-weight: 700; font-size: 18px; }
+.role-legend small { font-size: 11px; color: var(--muted); }
+.role-total { font-family: var(--display); font-weight: 700; font-size: 22px; color: var(--gold, #e6c36a); }
+.role-strip i.start { background: var(--frame-monster); border-color: #f0c27a; }
+.role-strip i.extend { background: #1e4a8a; border-color: #7fb2ff; }
+.role-strip i.trap { background: #7a2556; border-color: #f09ac8; }
+.role-strip i.break { background: #6a2a1a; border-color: #ff9a6b; }
+.role-strip i.piece { background: #4a3c1e; border-color: #c9a85a; }
+.role-strip i.brick { background: #2a2f3a; border-color: #8a96ad; }
+.role-strip i.none { background: none; border-color: #f2b544; border-style: dashed; }
+.opt-warnings { gap: 8px; margin-top: 12px; }
+.opt-warning { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 4px; border: 1px solid rgba(242, 181, 68, 0.35); border-radius: 10px; background: rgba(242, 181, 68, 0.08); }
+.opt-warning > button:first-child { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; cursor: pointer; }
+.opt-warning > button:first-child b { font-family: var(--display); font-weight: 700; font-size: 16px; color: #f2b544; white-space: nowrap; }
+.opt-warning .opt-link { margin-left: 2px; }

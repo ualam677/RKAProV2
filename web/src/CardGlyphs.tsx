@@ -101,3 +101,59 @@ export function TraitGlyphs({ traits, normal, open, onOpen }: { traits: string[]
     </>
   );
 }
+
+// tiny card-shaped symbols for the odds: a starter (▶), a hand trap (✋), an extender (+), a breaker (hammer),
+// a Normal Summon card (N), a dead card (✕), no breaker (crossed hammer)
+export type Mini = "play" | "hand" | "plus" | "break" | "n" | "dead" | "nobreak";
+const MINI: Record<Mini, { tone: string; path: string }> = {
+  play: { tone: "start", path: "M8 5v14l11-7z" },
+  hand: { tone: "trap", path: ROLE_BADGE.handtrap!.path },
+  plus: { tone: "extend", path: "M12 5v14M5 12h14" },
+  break: { tone: "break", path: ROLE_BADGE.breaker!.path },
+  nobreak: { tone: "warn", path: `${ROLE_BADGE.breaker!.path}M3 3l18 18` },
+  n: { tone: "start", path: "M7 19V5l10 14V5" },
+  dead: { tone: "warn", path: "M5 5l14 14M19 5 5 19" },
+};
+export function MiniCards({ kinds }: { kinds: Mini[] }) {
+  return (
+    <span className="mini-glyphs" aria-hidden="true">
+      {kinds.map((kind, at) => (
+        <span key={at} className={`mini-glyph ${MINI[kind].tone}`}>
+          <svg viewBox="0 0 24 24">
+            <path d={MINI[kind].path} />
+          </svg>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+const STRIP_ORDER: Role[] = ["starter", "pair", "extender", "handtrap", "breaker", "piece", "brick", "other", "none"];
+const STRIP_TONE = (role: Role) => (role === "none" ? "none" : role === "handtrap2" ? "trap" : (ROLE_BADGE[role]?.tone ?? "piece"));
+/** Every Main Deck card as a small block coloured by its first role, with a count per kind. */
+export function RoleStrip({ cards }: { cards: { count: number; role: Role }[] }) {
+  const blocks = STRIP_ORDER.flatMap((role) => cards.filter((card) => card.role === role).flatMap((card) => Array.from({ length: card.count }, () => STRIP_TONE(role))));
+  const legend = (["start", "extend", "trap", "break", "piece", "brick", "none"] as const)
+    .map((tone) => ({ tone, n: blocks.filter((one) => one === tone).length }))
+    .filter((one) => one.n > 0);
+  const names: Record<string, string> = { start: "start", extend: "extend", trap: "hand trap", break: "breaker", piece: "other", brick: "brick", none: "untagged" };
+  return (
+    <div className="role-strip" role="img" aria-label={`${blocks.length} cards: ${legend.map((one) => `${one.n} ${names[one.tone]}`).join(", ")}`}>
+      <div className="role-blocks">
+        {blocks.map((tone, at) => (
+          <i key={at} className={tone} />
+        ))}
+      </div>
+      <div className="role-legend">
+        <b className="role-total">{blocks.length}</b>
+        {legend.map((one) => (
+          <span key={one.tone}>
+            <i className={one.tone} />
+            <b>{one.n}</b>
+            <small>{names[one.tone]}</small>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}

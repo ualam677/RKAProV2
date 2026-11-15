@@ -5,7 +5,7 @@ import { describeInterruption, describeNibiru, describeProtection } from "./inte
 import { hasRole, rolesOf, secondOnly } from "./optimiser";
 import type { TestResult } from "./decks";
 import { CardArt } from "./CardArt";
-import { RoleBadges, TraitGlyphs } from "./CardGlyphs";
+import { MiniCards, RoleBadges, RoleStrip, TraitGlyphs, type Mini } from "./CardGlyphs";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
@@ -308,6 +308,8 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
   // the card whose roles are open for changing (the rest show only the roles they have)
   const [editingRoles, setEditingRoles] = useState<number | null>(null);
   const [explained, setExplained] = useState<{ code: number; full: string } | null>(null);
+  // the odds row or warning whose words are showing (tapped)
+  const [said, setSaid] = useState<string | null>(null);
   const [tab, setTab] = useState<"odds" | "cards" | "lines">(() => {
     try {
       const saved = localStorage.getItem("rka.optTab");
@@ -327,11 +329,11 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
   // the hand traps to check against: the ones you tag as hand traps, then the common staples
   const trapChoices = [...new Set([...main.filter((card) => hasRole(card.tag, "handtrap") && !secondOnly(card.tag)).map((card) => card.code), ...CHOKE_TRAPS])];
   const warnings = [
-    untagged > 0 && { text: `${untagged} card${untagged === 1 ? "" : "s"} not tagged`, action: { label: "Tag as Other", run: tagRest } },
-    normalCount > normalLimit(total) && { text: `${normalCount} Normal Summon cards (two in hand: ${pct(first.normal2)})` },
-    !count("breaker") && { text: "No board breakers" },
-    count("handtrap") > 0 && secondOdds.handtrap < 0.75 && { text: `A hand trap going 2nd: only ${pct(secondOdds.handtrap)}` },
-  ].filter(Boolean) as { text: string; action?: { label: string; run: () => void } }[];
+    untagged > 0 && { text: `${untagged} card${untagged === 1 ? "" : "s"} not tagged`, glyphs: ["dead"], value: `${untagged} ?`, action: { label: "Tag as Other", run: tagRest } },
+    normalCount > normalLimit(total) && { text: `${normalCount} Normal Summon cards (two in hand: ${pct(first.normal2)})`, glyphs: ["n", "n"], value: pct(first.normal2) },
+    !count("breaker") && { text: "No board breakers", glyphs: ["nobreak"], value: "0" },
+    count("handtrap") > 0 && secondOdds.handtrap < 0.75 && { text: `A hand trap going 2nd: only ${pct(secondOdds.handtrap)}`, glyphs: ["hand"], value: `2ND ${pct(secondOdds.handtrap)}` },
+  ].filter(Boolean) as { text: string; glyphs: Mini[]; value: string; action?: { label: string; run: () => void } }[];
   const ROLE_CHIPS: { role: Role; label: string }[] = [
     { role: "starter", label: "Starter" },
     { role: "pair", label: "Needs a partner" },
@@ -359,22 +361,24 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
 
       {main.length > 0 && !only && tab === "odds" && (
         <>
-          <div className="segmented two">
-            <button className={`button small ${second ? "" : "on"}`} onClick={() => setSecond(false)}>
-              Going 1st
+          <div className="opt-turns">
+            <button className={second ? "" : "on"} onClick={() => setSecond(false)} aria-label="Going first, 5 cards">
+              1ST · 5
             </button>
-            <button className={`button small ${second ? "on" : ""}`} onClick={() => setSecond(true)}>
-              Going 2nd
+            <button className={second ? "on" : ""} onClick={() => setSecond(true)} aria-label="Going second, 6 cards">
+              2ND · 6
             </button>
           </div>
           <div className="opt-big">
-            <b>{pct(odds.combo)}</b>
+            <b>
+              {(odds.combo * 100).toFixed(1)}
+              <small>%</small>
+            </b>
             <span>
-              open a combo · <em className={`grade grade-${grade(odds.combo).toLowerCase()}`}>{grade(odds.combo)}</em>
-              <br />
+              <MiniCards kinds={["play"]} />
+              <em className={`grade grade-${grade(odds.combo).toLowerCase()}`}>{grade(odds.combo)}</em>
               <small className="muted" title="The engine played every card alone and with each other card">
-                Engine-checked {engineChecked ? pct(engineChecked.combo) : engineProgress?.total ? `${engineProgress.done}/${engineProgress.total}` : "…"} · proven{" "}
-                {pct(everyStartProven ? odds.combo : proven.combo)}
+                Engine-checked {engineChecked ? pct(engineChecked.combo) : engineProgress?.total ? `${engineProgress.done}/${engineProgress.total}` : "…"} · proven {pct(everyStartProven ? odds.combo : proven.combo)}
               </small>
             </span>
           </div>
@@ -385,24 +389,32 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
           )}
           <ul className="opt-odds">
             {rows.map(([label, value, note]) => (
-              <li key={label} title={note || undefined}>
-                <span>{label}</span>
-                <span className="opt-bar">
-                  <i style={{ width: `${value * 100}%` }} />
-                </span>
-                <b>{pct(value)}</b>
+              <li key={label}>
+                <button onClick={() => setSaid(said === label ? null : label)} aria-label={`${label}: ${pct(value)}`}>
+                  <MiniCards kinds={ROW_GLYPHS[label] ?? ["play"]} />
+                  <span className="opt-bar">
+                    <i style={{ width: `${value * 100}%` }} />
+                  </span>
+                  <b>{pct(value)}</b>
+                </button>
+                {said === label && (
+                  <p className="trait-said">
+                    {label}
+                    {note ? ` · ${note}` : ""}
+                  </p>
+                )}
               </li>
             ))}
           </ul>
-          <p className="opt-counts">
-            {total} cards · {count("starter", "pair")} start · {count("extender")} extend · {count("handtrap")} hand trap · {count("breaker")} breaker
-            {untagged ? <> · <b className="warn">{untagged} untagged</b></> : null}
-          </p>
+          <RoleStrip cards={main.map((card) => ({ count: card.count, role: rolesOf(card.tag)[0] ?? "none" }))} />
           {warnings.length > 0 && (
             <div className="opt-warnings">
               {warnings.map((warning) => (
                 <span key={warning.text} className="opt-warning">
-                  {warning.text}
+                  <button onClick={() => setSaid(said === warning.text ? null : warning.text)} aria-label={warning.text}>
+                    <MiniCards kinds={warning.glyphs} />
+                    <b>{warning.value}</b>
+                  </button>
                   {warning.action && (
                     <button className="opt-link" onClick={warning.action.run}>
                       {warning.action.label}
@@ -412,6 +424,7 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
               ))}
             </div>
           )}
+          {warnings.some((warning) => warning.text === said) && <p className="trait-said">{said}</p>}
           {(deck.results ?? []).length > 0 && <Measured results={deck.results ?? []} deck nameOf={nameOf} />}
           <DeckSize main={main} side={side} room={room} nameOf={nameOf} takenBy={takenBy} />
           <Clashes main={main} nameOf={nameOf} traits={traits} />
@@ -1010,3 +1023,16 @@ function CutTest({ main, lines, nameOf, result, onTest }: { main: DeckCard[]; li
 
 // a Main Deck card's frame colour, as the duel draws it
 const frameOf = (type: number) => (type & 0x2 ? "spell" : type & 0x4 ? "trap" : "monster");
+
+// each odds row as card symbols: what the hand holds
+const ROW_GLYPHS: Record<string, Mini[]> = {
+  "Open a combo": ["play"],
+  "Combo + hand trap": ["play", "hand"],
+  "Combo + 2 hand traps": ["play", "hand", "hand"],
+  "Combo + extender": ["play", "plus"],
+  "Hand trap in hand": ["hand"],
+  "Two or more hand traps": ["hand", "hand"],
+  "Board breaker in hand": ["break"],
+  "Two Normal Summon cards": ["n", "n"],
+  "Dead card in hand": ["dead"],
+};
