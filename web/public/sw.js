@@ -5,13 +5,13 @@
 // - The card database, strings and ban list (BabelCDB, Distribution, LFLists on GitHub): the same.
 // - Card scripts (CardScripts): kept once downloaded; a card's script only changes with an engine update.
 // Card pictures are not kept: their servers don't allow pages to keep them cheaply, and offline they show as names.
-const VERSION = "rka-2";
+const VERSION = "rka-3";
 const APP = `${VERSION}-app`;
 const DATA = `${VERSION}-data`;
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
-  event.waitUntil(caches.open(APP).then((cache) => cache.addAll(["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"])));
+  event.waitUntil(caches.open(APP).then((cache) => cache.addAll(["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-192.png", "./icon-maskable-512.png"])));
 });
 
 self.addEventListener("activate", (event) => {
