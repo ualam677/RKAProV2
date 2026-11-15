@@ -49,7 +49,7 @@ interface Props {
 const ATTRIBUTE_NAMES = ["EARTH", "WATER", "FIRE", "WIND", "LIGHT", "DARK", "DIVINE"];
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
-const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
+const ORDER: Role[] = ["none", "starter", "pair", "digger", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
 export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, requestTraits, deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
   const [second, setSecond] = useState(false);
@@ -80,7 +80,14 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
     return null;
   };
   // yours in this deck, then the engine's starts, then yours from other decks, then known cards
-  const baseTag = (key: number): Tag => deck.tags?.[key] ?? engineTag(key) ?? defaults[key] ?? guessTag(key) ?? { role: "none" };
+  // a Digger's depth, read from its text by the worker ("digs: sees 6 more cards")
+  const digOf = (key: number) => Number(/^digs: sees (\d+)/.exec((traits.get(key) ?? []).find((one) => one.startsWith("digs:")) ?? "")?.[1] ?? 0);
+  const baseTag = (key: number): Tag => {
+    const tag = deck.tags?.[key] ?? engineTag(key) ?? defaults[key] ?? guessTag(key);
+    if (tag) return tag;
+    const dig = digOf(key);
+    return dig ? { role: "digger", dig, guessed: true } : { role: "none" };
+  };
   // a working test that opened with exactly one start proves that start (the rest of the hand had none)
   const provenByTest = useMemo(() => {
     const proven = new Set<number>();
@@ -92,7 +99,9 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
     return proven;
   }, [deck.tests, deck.tags, evidence, defaults, cards]);
   const tagOf = (key: number): Tag => {
-    const tag = baseTag(key);
+    const found = baseTag(key);
+    // a Digger always carries its depth (tagged by hand too)
+    const tag = hasRole(found, "digger") && !found.dig ? { ...found, dig: digOf(key) || 1 } : found;
     return !tag.proven && provenByTest.has(key) ? { ...tag, proven: true, provenByTest: true } : tag;
   };
   // a card is known by its original code; its details may only be cached under the artwork the deck holds
@@ -122,7 +131,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
     };
     const sideCards = collect(deck.side.filter((code) => !((cards.get(code)?.type ?? 0) & EXTRA_TYPES)));
     return { main: collect(deck.main), side: sideCards, sideKeys: new Set(sideCards.map((card) => card.code)), total: deck.main.length };
-  }, [deck, cards, defaults, provenByTest]);
+  }, [deck, cards, defaults, provenByTest, traits]);
 
   useEffect(() => {
     const missing = main.flatMap((card) => card.tag.with?.codes ?? []).filter((code) => !infoOf(code));
@@ -264,7 +273,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   };
   // roles are multiple choice: a card can be a hand trap and a board breaker. Starter and "needs a partner" exclude each
   // other; Other means none of the rest.
-  const PRIMARY: Role[] = ["starter", "pair", "extender", "piece", "handtrap", "breaker", "brick", "other"];
+  const PRIMARY: Role[] = ["starter", "pair", "digger", "extender", "piece", "handtrap", "breaker", "brick", "other"];
   const toggleRole = (key: number, role: Role) => {
     const old = tagOf(key);
     let roles: Role[] = rolesOf(old).filter((one) => one !== "none" && one !== "handtrap2");
@@ -319,6 +328,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
         ...(count("extender") ? ([["Combo + extender", odds.comboExtender, "plays through a negate"]] as [string, number, string][]) : []),
         ...(normalCount > 1 ? ([["Two Normal Summon cards", odds.normal2, "one of them is dead"]] as [string, number, string][]) : []),
         ...(count("brick", "piece") || normalCount > 1 ? ([["Dead card in hand", odds.dead, `two or more: ${pct(odds.dead2)}`]] as [string, number, string][]) : []),
+        ...(count("digger") ? ([["Start from a dig", odds.dig, "no start in hand, and a Digger finds one (already in Open a combo)"]] as [string, number, string][]) : []),
       ];
 
   const sorted = [...main].sort((a, b) => ORDER.indexOf(a.tag.role) - ORDER.indexOf(b.tag.role) || nameOf(a.code).localeCompare(nameOf(b.code)));
@@ -370,6 +380,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
     { role: "handtrap", label: "Hand trap" },
     { role: "breaker", label: "Breaker" },
     { role: "brick", label: "Brick" },
+    { role: "digger", label: "Digger" },
     { role: "other", label: "Other" },
   ];
 
@@ -1210,6 +1221,7 @@ const ROW_GLYPHS: Record<string, Mini[]> = {
   "Board breaker in hand": ["break"],
   "Two Normal Summon cards": ["n", "n"],
   "Dead card in hand": ["dead"],
+  "Start from a dig": ["dig", "play"],
 };
 
 // − value + in one line

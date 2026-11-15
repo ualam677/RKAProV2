@@ -10,6 +10,7 @@ const ROLE_BADGE: Partial<Record<Role, { name: string; path: string; tone: strin
   piece: { name: "In-Deck piece", path: "M4 8h16v11H4zM7 5h10", tone: "piece" },
   handtrap: { name: "Hand trap", path: "M8 13V6a1.5 1.5 0 0 1 3 0v5M11 10V5a1.5 1.5 0 0 1 3 0v5M14 10V6a1.5 1.5 0 0 1 3 0v7a6 6 0 0 1-12 0v-2a1.5 1.5 0 0 1 3 0", tone: "trap" },
   breaker: { name: "Board breaker", path: "m14 4 6 6-3 3-6-6zM11 7l-7 7 3 3 7-7", tone: "break" },
+  digger: { name: "Digger", path: "M12 3v12M7 10l5 5 5-5M5 20h14", tone: "dig" },
   brick: { name: "Brick", path: "M4 6h16v5H4zM4 13h16v5H4zM10 6v5M14 13v5", tone: "brick" },
   other: { name: "Other", path: "M12 12h.01", tone: "piece" },
 };
@@ -104,7 +105,7 @@ export function TraitGlyphs({ traits, normal, open, onOpen }: { traits: string[]
 
 // tiny card-shaped symbols for the odds: a starter (▶), a hand trap (✋), an extender (+), a breaker (hammer),
 // a Normal Summon card (N), a dead card (✕), no breaker (crossed hammer)
-export type Mini = "play" | "hand" | "plus" | "break" | "n" | "dead" | "nobreak" | "piece";
+export type Mini = "play" | "hand" | "plus" | "break" | "n" | "dead" | "nobreak" | "piece" | "dig";
 const MINI: Record<Mini, { tone: string; path: string }> = {
   play: { tone: "start", path: "M8 5v14l11-7z" },
   hand: { tone: "trap", path: ROLE_BADGE.handtrap!.path },
@@ -114,6 +115,7 @@ const MINI: Record<Mini, { tone: string; path: string }> = {
   n: { tone: "start", path: "M7 19V5l10 14V5" },
   dead: { tone: "warn", path: "M5 5l14 14M19 5 5 19" },
   piece: { tone: "piece", path: ROLE_BADGE.piece!.path },
+  dig: { tone: "dig", path: "M12 3v12M7 10l5 5 5-5M5 20h14" },
 };
 export function MiniCards({ kinds }: { kinds: Mini[] }) {
   return (
@@ -129,15 +131,15 @@ export function MiniCards({ kinds }: { kinds: Mini[] }) {
   );
 }
 
-const STRIP_ORDER: Role[] = ["starter", "pair", "extender", "handtrap", "breaker", "piece", "brick", "other", "none"];
+const STRIP_ORDER: Role[] = ["starter", "pair", "digger", "extender", "handtrap", "breaker", "piece", "brick", "other", "none"];
 const STRIP_TONE = (role: Role) => (role === "none" ? "none" : role === "handtrap2" ? "trap" : (ROLE_BADGE[role]?.tone ?? "piece"));
 /** Every Main Deck card as a small block coloured by its first role, with a count per kind. */
 export function RoleStrip({ cards }: { cards: { count: number; role: Role }[] }) {
   const blocks = STRIP_ORDER.flatMap((role) => cards.filter((card) => card.role === role).flatMap((card) => Array.from({ length: card.count }, () => STRIP_TONE(role))));
-  const legend = (["start", "extend", "trap", "break", "piece", "brick", "none"] as const)
+  const legend = (["start", "dig", "extend", "trap", "break", "piece", "brick", "none"] as const)
     .map((tone) => ({ tone, n: blocks.filter((one) => one === tone).length }))
     .filter((one) => one.n > 0);
-  const names: Record<string, string> = { start: "start", extend: "extend", trap: "hand trap", break: "breaker", piece: "other", brick: "brick", none: "untagged" };
+  const names: Record<string, string> = { start: "start", dig: "dig", extend: "extend", trap: "hand trap", break: "breaker", piece: "other", brick: "brick", none: "untagged" };
   return (
     <div className="role-strip" role="img" aria-label={`${blocks.length} cards: ${legend.map((one) => `${one.n} ${names[one.tone]}`).join(", ")}`}>
       <div className="role-blocks">

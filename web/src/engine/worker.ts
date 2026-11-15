@@ -1503,6 +1503,18 @@ function traitsOf(code: number): string[] {
   if (/Normal Summon[^.]*in addition to your Normal Summon/i.test(text)) out.push("gives an extra Normal Summon");
   if (/Must (first )?be Special Summoned|Special Summon(ed)? (this card )?\(from your hand\)/i.test(text)) out.push("summons itself by its own rule: can't be negated");
   if (/You can only (use|activate) (each|this|1)[^.]*(once per turn|per turn)/i.test(text)) out.push("once per turn by name");
+  // a Digger: a Spell that draws or excavates, so you see more cards ("Banish 3 or 6 … excavate", "Draw 2 cards")
+  if (type & 2) {
+    const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+    const n = (word: string) => Number(word) || words[word.toLowerCase()] || 0;
+    const banishThenExcavate = /Banish (\d+) or (\d+) cards? [^.]*Extra Deck[^.]*;[^.]*excavate/i.exec(text);
+    const excavate = /excavate the top (\d+|one|two|three|four|five|six) cards?/i.exec(text);
+    const draw = /\bdraw (\d+|one|two|three) cards?\b/i.exec(text);
+    // "Banish 3 or 6 … draw 1 card for every 3 cards banished" (Pot of Extravagance)
+    const perBanished = /Banish (\d+) or (\d+)[^.]*draw 1 card for every (\d+) cards banished/i.exec(text);
+    const seen = banishThenExcavate ? n(banishThenExcavate[2]) : perBanished ? Math.floor(n(perBanished[2]) / n(perBanished[3])) : excavate ? n(excavate[1]) : draw ? n(draw[1]) : 0;
+    if (seen > 0) out.push(`digs: sees ${seen} more card${seen === 1 ? "" : "s"}`);
+  }
   const lock = /you cannot (Special Summon[^.]*?except [^.,]+)/i.exec(text)?.[1];
   if (lock) out.push(`locks you: cannot ${lock.replace(/ for the rest of this turn/i, "")}`);
   const weak: string[] = [];

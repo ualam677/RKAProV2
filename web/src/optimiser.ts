@@ -6,7 +6,7 @@ import { HAND_TRAPS, HAND_TRAPS_SECOND } from "./engine/handtraps.ts";
 // Every possible hand is counted with its exact probability: no sampling, no rounding until the screen.
 // Erasable TypeScript only, so Node can run it directly for the checks in tools/.
 
-export type Role = "none" | "starter" | "pair" | "extender" | "piece" | "handtrap" | "handtrap2" | "breaker" | "brick" | "other";
+export type Role = "none" | "starter" | "pair" | "extender" | "piece" | "handtrap" | "handtrap2" | "breaker" | "brick" | "digger" | "other";
 
 export const ROLES: { role: Role; name: string; help: string }[] = [
   { role: "starter", name: "Starter", help: "Starts your combo by itself." },
@@ -17,6 +17,7 @@ export const ROLES: { role: Role; name: string; help: string }[] = [
   { role: "breaker", name: "Board breaker", help: "Clears the opponent's board when you go second." },
   { role: "piece", name: "Combo piece in the Deck", help: "The combo needs it in the Deck (searched or summoned from there). Dead if you draw it, but never suggested as a cut." },
   { role: "brick", name: "Brick", help: "Dead in the opening hand." },
+  { role: "digger", name: "Digger", help: "Draws or excavates: sees more cards, so a hand without a start can still find one (Pot of Prosperity, Pot of Desires)." },
   { role: "other", name: "Other", help: "Anything else: combo pieces you search, staples, traps." },
 ];
 /** Every role a card has; older saves held one, and "handtrap2" was a hand trap for going second. */
@@ -51,6 +52,8 @@ export interface Tag {
   proven?: boolean;
   // ... shown by a saved test you marked as working, not ticked by hand
   provenByTest?: boolean;
+  // a Digger: how many cards it lets you see (excavate 6, draw 2)
+  dig?: number;
 }
 export interface CardFacts {
   type: number;
@@ -82,6 +85,7 @@ export interface Odds {
   dead: number; // at least one dead card: a Brick, a Combo piece, or a second Normal Summon card
   dead2: number;
   normal2: number; // two or more cards that need the Normal Summon
+  dig: number; // the part of `combo` that comes from a Digger finding a start (a hand with no start of its own)
 }
 
 // At most 5 cards that need the Normal Summon in a 40-card deck (one per 8 cards)
@@ -108,6 +112,7 @@ interface Group {
   second: boolean;
   normal: boolean;
   partnerOf: number[]; // indexes of the partnered starters this group can be the partner for
+  dig: number; // cards a Digger sees (0 for the rest)
 }
 function groupDeck(cards: DeckCard[]) {
   const pairs = cards.filter((card) => hasRole(card.tag, "pair") && card.count > 0);
@@ -122,10 +127,11 @@ function groupDeck(cards: DeckCard[]) {
     const normal = !!card.tag.normal;
     const roles = rolesOf(card.tag);
     const second = secondOnly(card.tag);
-    const signature = pairIndex >= 0 ? `pair:${pairIndex}` : `${roles.join("+")}:${second}:${normal}:${partnerOf.join(",")}`;
+    const dig = roles.includes("digger") ? Math.max(1, card.tag.dig ?? 1) : 0;
+    const signature = pairIndex >= 0 ? `pair:${pairIndex}` : `${roles.join("+")}:${second}:${normal}:${partnerOf.join(",")}:${dig}`;
     let at = bySignature.get(signature);
     if (at === undefined) {
-      at = groups.push({ count: 0, role: card.tag.role, roles, second, normal, partnerOf }) - 1;
+      at = groups.push({ count: 0, role: card.tag.role, roles, second, normal, partnerOf, dig }) - 1;
       bySignature.set(signature, at);
     }
     groups[at].count += card.count;
@@ -230,15 +236,28 @@ export function testHand(card: DeckCard, cards: DeckCard[], size = 5): number[] 
 export function computeOdds(cards: DeckCard[], hand: number): Odds {
   const goingSecond = hand >= 6;
   const deck = groupDeck(cards);
-  const odds: Odds = { hand, combo: 0, comboExtender: 0, comboHandtrap: 0, comboHandtrap2: 0, handtrap: 0, handtrap2: 0, handtrapAvg: 0, breaker: 0, dead: 0, dead2: 0, normal2: 0 };
+  const odds: Odds = { hand, combo: 0, comboExtender: 0, comboHandtrap: 0, comboHandtrap2: 0, handtrap: 0, handtrap2: 0, handtrapAvg: 0, breaker: 0, dead: 0, dead2: 0, normal2: 0, dig: 0 };
   if (!deck.groups.length) return odds;
+  const total = deck.groups.reduce((sum, group) => sum + group.count, 0);
   forEachHand(deck.groups, hand, (counts, p) => {
     const facts = evaluate(counts, deck, goingSecond);
-    if (facts.combo) {
-      odds.combo += p;
-      if (facts.extenders > 0) odds.comboExtender += p;
-      if (facts.handtraps >= 1) odds.comboHandtrap += p;
-      if (facts.handtraps >= 2) odds.comboHandtrap2 += p;
+    // no start in hand, but a Digger: the chance the cards it sees hold a starter (exact, from what is left in the Deck)
+    let found = facts.combo ? 1 : 0;
+    if (!facts.combo) {
+      const depth = Math.max(0, ...deck.groups.map((group, at) => (counts[at] > 0 ? group.dig : 0)));
+      if (depth > 0) {
+        const rest = total - hand;
+        const starts = deck.groups.reduce((sum, group, at) => sum + (group.roles.includes("starter") ? group.count - counts[at] : 0), 0);
+        found = rest > 0 ? 1 - choose(rest - starts, Math.min(depth, rest)) / choose(rest, Math.min(depth, rest)) : 0;
+        odds.dig += p * found;
+      }
+    }
+    if (found > 0) {
+      const q = p * found;
+      odds.combo += q;
+      if (facts.extenders > 0) odds.comboExtender += q;
+      if (facts.handtraps >= 1) odds.comboHandtrap += q;
+      if (facts.handtraps >= 2) odds.comboHandtrap2 += q;
     }
     // hand traps held at all: a hand trap you keep instead of starting still counts here
     const held = counts.reduce((sum, held, at) => {
