@@ -81,6 +81,11 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   };
   // yours in this deck, then the engine's starts, then yours from other decks, then known cards
   // a Digger's depth, read from its text by the worker ("digs: sees 6 more cards")
+  // its choices, deepest first: "sees 6 more cards (or 3)" → [6, 3]
+  const digChoices = (key: number) => {
+    const text = (traits.get(key) ?? []).find((one) => one.startsWith("draw power:")) ?? "";
+    return [/sees (\d+)/.exec(text)?.[1], /\(or (\d+)\)/.exec(text)?.[1]].filter(Boolean).map(Number);
+  };
   const digOf = (key: number) => Number(/^draw power: sees (\d+)/.exec((traits.get(key) ?? []).find((one) => one.startsWith("draw power:")) ?? "")?.[1] ?? 0);
   const baseTag = (key: number): Tag => {
     const tag = deck.tags?.[key] ?? engineTag(key) ?? defaults[key] ?? guessTag(key);
@@ -529,6 +534,14 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
                         2nd only
                       </button>
                     )}
+                    {editingRoles === card.code &&
+                      roles.includes("digger") &&
+                      digChoices(card.code).length > 1 &&
+                      digChoices(card.code).map((depth) => (
+                        <button key={depth} className={`opt-chip ${card.tag.dig === depth ? "on" : ""}`} onClick={() => setTag(card.code, { ...card.tag, dig: depth })} title="How many cards it sees: banishing fewer from the Extra Deck sees fewer">
+                          Sees {depth}
+                        </button>
+                      ))}
                     {editingRoles === card.code && start && (
                       <button className={`opt-chip ${card.tag.normal ? "on" : ""}`} onClick={() => setTag(card.code, { ...card.tag, normal: !card.tag.normal })} title="Its line uses the turn's Normal Summon">
                         Normal Summon
