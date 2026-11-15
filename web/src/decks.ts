@@ -121,10 +121,31 @@ export function scoredByCount(one: TestResult, goal: number): TestResult {
   return { ...one, kind, why };
 }
 
+/** Decks as stored or restored, made safe to use: anything that isn't a deck is dropped, and a bad field is reset
+ *  rather than allowed to break loading (which would lose every deck). */
+export function cleanDecks(value: unknown): SavedDeck[] {
+  if (!Array.isArray(value)) return [];
+  const codes = (list: unknown) => (Array.isArray(list) ? list.filter((code): code is number => typeof code === "number") : []);
+  const listOf = <T,>(list: unknown) => (Array.isArray(list) ? (list.filter((one) => one && typeof one === "object") as T[]) : undefined);
+  return value
+    .filter((deck): deck is SavedDeck => !!deck && typeof deck === "object" && typeof (deck as SavedDeck).id === "string")
+    .map((deck) => ({
+      ...deck,
+      name: typeof deck.name === "string" ? deck.name : "Deck",
+      updated: typeof deck.updated === "number" ? deck.updated : 0,
+      main: codes(deck.main),
+      extra: codes(deck.extra),
+      side: codes(deck.side),
+      tests: listOf<SavedTest>(deck.tests),
+      results: listOf<TestResult>(deck.results),
+      routes: deck.routes && typeof deck.routes === "object" && !Array.isArray(deck.routes) ? deck.routes : undefined,
+      tags: deck.tags && typeof deck.tags === "object" && !Array.isArray(deck.tags) ? deck.tags : undefined,
+    }));
+}
+
 export function loadDecks(): SavedDeck[] {
   try {
-    const decks = JSON.parse(localStorage.getItem(KEY) ?? "[]") as SavedDeck[];
-    if (!Array.isArray(decks)) return [];
+    const decks = cleanDecks(JSON.parse(localStorage.getItem(KEY) ?? "[]"));
     // results from when "working" counted as a full board are scored by their interruptions instead
     return decks.map((deck) => (deck.results?.some((one) => one.why === MARKED) ? { ...deck, results: deck.results.map((one) => scoredByCount(one, deck.fullAt ?? 3)) } : deck));
   } catch {

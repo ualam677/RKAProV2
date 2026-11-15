@@ -5,7 +5,7 @@
 // - The card database, strings and ban list (BabelCDB, Distribution, LFLists on GitHub): the same.
 // - Card scripts (CardScripts): kept once downloaded; a card's script only changes with an engine update.
 // Card pictures are not kept: their servers don't allow pages to keep them cheaply, and offline they show as names.
-const VERSION = "rka-5";
+const VERSION = "rka-1.0.0";
 const APP = `${VERSION}-app`;
 const DATA = `${VERSION}-data`;
 

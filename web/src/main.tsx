@@ -335,7 +335,7 @@ function App() {
             return;
           }
           // the start keeps its best worked line
-          if (before?.source === "replay" && before.testId !== test.id && (before.interruptions?.length ?? 0) > count) {
+          if (before?.source === "replay" && before.testId !== test.id && before.signature === deckSignature(owner) && (before.interruptions?.length ?? 0) > count) {
             setDecks((all) => all.map((one) => (one.id === owner.id ? { ...one, results } : one)));
             setWorkedNote({ testId: test.id, count, kind: "kept", start, best: before.interruptions?.length ?? 0 });
             return;
@@ -701,8 +701,20 @@ function App() {
       const latest = turns.includes(view.turn) ? view.turn : Math.max(0, ...turns.filter((one) => one < view.turn));
       at = Math.max(0, turns.findIndex((one) => one >= latest));
     }
-    // the same test carries on: it isn't scored or saved as a separate replay
-    const saved: SavedTest = { ...current, id: test.current?.id ?? newId(), date: Date.now(), testOf: test.current?.testOf };
+    // the same test carries on: it isn't scored or saved as a separate replay. Going back below where you took over a
+    // replay makes those choices yours; a line saved from this test no longer stands once you go back from it.
+    if (test.current) {
+      test.current.from = Math.min(test.current.from, at);
+      if (test.current.worked) {
+        const owner = decksRef.current.find((one) => one.id === test.current!.deckId);
+        if (owner) changeDeck(withoutWorked(owner, test.current.id));
+        test.current.worked = false;
+        test.current.board = undefined;
+        test.current.pieces = undefined;
+        setWorked(false);
+      }
+    }
+    const saved: SavedTest = { ...current, id: test.current?.id ?? newId(), date: Date.now(), testOf: test.current?.testOf, worked: false, board: undefined, pieces: undefined };
     if (at > 0) return watch(saved, at, true);
     // back to the very start: the same hand, the same order, no animations to sit through
     setRecord(null);
@@ -939,10 +951,10 @@ function App() {
       setVideo(null);
     }
   };
-  const watch = (saved: SavedTest, from = 0, same = false) => {
+  const watch = (saved: SavedTest, from = 0, same = false, play = false) => {
     setError("");
     if (same) setRecord(null);
-    else newTest(saved.testOf, from > 0 ? from : saved.picks.length);
+    else newTest(saved.testOf, from > 0 || play ? from : saved.picks.length);
     window.clearTimeout(timer.current);
     timer.current = 0;
     queue.current = [];
@@ -951,7 +963,7 @@ function App() {
     const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false };
     // "from": jump straight to that choice and carry on from there yourself; otherwise watch it play
     lastRecord.current = null;
-    if (from > 0) post({ ...options, picks: saved.picks.slice(0, from), type: "jump" });
+    if (from > 0 || play) post({ ...options, picks: saved.picks.slice(0, from), type: "jump" });
     else {
       setReplay({ picks: saved.picks, at: 0 });
       post({ ...options, type: "start" });
@@ -1493,7 +1505,7 @@ function App() {
             <h2>Replays</h2>
           </div>
           {deck.tests?.length ? (
-            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} onShare={shareReplay} onWorked={(saved) => void markTestWorked(saved)} video={video} onDelete={(id) => {
+            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from !== undefined ? watch(saved, from, false, true) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} onShare={shareReplay} onWorked={(saved) => void markTestWorked(saved)} video={video} onDelete={(id) => {
               const without = withoutWorked(deck, id);
               changeDeck({ ...without, tests: (without.tests ?? []).filter((one) => one.id !== id) });
             }} />

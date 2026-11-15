@@ -276,7 +276,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, traits, r
             <button className="button" onClick={async () => copy(await toOmega(deck), "YGO Omega code")}>
               Copy YGO Omega code
             </button>
-            <button className="button ghost" onClick={() => update({ main: [], extra: [], side: [] })}>
+            <button className="button ghost" onClick={() => confirm(`Clear every card from "${deck.name}"?`) && update({ main: [], extra: [], side: [] })}>
               Clear deck
             </button>
           </div>

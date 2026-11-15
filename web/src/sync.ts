@@ -1,3 +1,4 @@
+import { cleanDecks } from "./decks";
 // Keeping decks and everything learned about them outside this browser:
 // - a backup file with everything (decks with their tags, tests, lines and states; tag defaults; settings), restored
 //   on any device by merging (the newer copy of each deck wins);
@@ -41,11 +42,29 @@ export function downloadBackup() {
 export function mergeBackup(text: string, decks: SavedDeck[]): SavedDeck[] {
   const backup = JSON.parse(text) as Backup;
   if (backup?.app !== "rkapro") throw new Error("Not an RKAPro backup file");
-  const theirs = JSON.parse(backup.storage["rka.decks"] ?? "[]") as SavedDeck[];
+  if (!backup.storage || typeof backup.storage !== "object") throw new Error("Not an RKAPro backup file");
+  let theirs: SavedDeck[];
+  try {
+    theirs = cleanDecks(JSON.parse(backup.storage["rka.decks"] ?? "[]"));
+  } catch {
+    throw new Error("This backup's decks are damaged");
+  }
   const merged = new Map(decks.map((deck) => [deck.id, deck]));
+  const byId = <T extends { id: string }>(a: T[] = [], b: T[] = []) => [...new Map([...b, ...a].map((one) => [one.id, one])).values()];
   for (const deck of theirs) {
     const mine = merged.get(deck.id);
-    if (!mine || deck.updated > mine.updated) merged.set(deck.id, deck);
+    if (!mine) merged.set(deck.id, deck);
+    else {
+      // the newer deck list wins; tests, results and lines from either copy are all kept
+      const newer = deck.updated > mine.updated ? deck : mine;
+      const older = newer === deck ? mine : deck;
+      merged.set(deck.id, {
+        ...newer,
+        tests: byId(newer.tests, older.tests),
+        results: byId(newer.results, older.results).sort((x, y) => y.date - x.date),
+        routes: { ...older.routes, ...newer.routes },
+      });
+    }
   }
   // tag defaults: theirs fill in what is missing here; settings only if there are none here
   try {

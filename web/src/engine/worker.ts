@@ -934,13 +934,17 @@ function smartUse(trap: number, moment: string): boolean {
   const top = chain[chain.length - 1];
   switch (familyOf(trap)) {
     case "field":
-      return !!top && top.controller === 0 && (top.location & OcgLocation.MZONE) !== 0;
+      // a monster activating on the field that is still there (not one that Tributed itself as the cost)
+      return !!top && top.controller === 0 && (top.location & OcgLocation.MZONE) !== 0 && cardsIn(0, OcgLocation.MZONE)[top.sequence]?.code === top.code;
     case "grave":
       return !!top && top.controller === 0 && (top.location & OcgLocation.GRAVE) !== 0;
     case "chain":
       return !!top && top.controller === 0;
-    case "nibiru":
-      return cardsIn(0, OcgLocation.MZONE).filter(Boolean).length >= 3;
+    case "nibiru": {
+      // a board worth tributing: three face-up monsters, or a face-up Extra Deck boss
+      const up = cardsIn(0, OcgLocation.MZONE).filter((card) => card && card.code);
+      return up.length >= 3 || up.some((card) => (card!.type & (0x40 | 0x2000 | 0x800000 | 0x4000000)) !== 0);
+    }
     default:
       return true;
   }

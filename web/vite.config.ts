@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
@@ -30,10 +31,12 @@ function localData(): Plugin {
   };
 }
 
-// The version shown on the menu: one more for every deploy (GitHub's run number) and the commit it was built from
+// The version shown on the menu
 const run = process.env.GITHUB_RUN_NUMBER;
 const commit = (process.env.GITHUB_SHA ?? "").slice(0, 7);
-const version = run ? `v0.${run}${commit ? ` · ${commit}` : ""}` : "dev";
+// the release (package.json) and the commit it was built from; "dev" locally
+const release = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string }).version;
+const version = run ? `v${release}${commit ? ` · ${commit}` : ""}` : "dev";
 
 export default defineConfig({
   base: "./",

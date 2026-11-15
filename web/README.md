@@ -169,6 +169,26 @@ flat gold frame over a fan of three cards (no stars, no gradient on the border).
   Maestros format). "Kuriboh - Multiply!" isn't in the card database yet.
 - Open: a thin 30x62 Xyz card seen once in the replay viewer; a "bar" flash on Photon Orbital (neither reproduced).
 
+## 1.0.0 (15 Nov 2026)
+Released after advisor/checker reviews (developer, Yu-Gi-Oh! player, UI). In this release: the smart hand-trap
+opponent (SMART / FIRST CHANCE in Test: only on what a trap stops, on the card using its effect, waiting for the moment
+your saved line suffers most; tests saved earlier replay as before), safe loading and restore (a bad backup can't wipe
+decks; restore brings back tests, results and lines), undo / back a turn keep the test (and un-save a line saved from
+it), the "can use" glow fades on Xyz cards, Clear deck asks first.
+
+Known, for after 1.0 (from the checkers; confirmed):
+- Duel: nothing says turn 1 is over or points to ☰ › Save as a working line; the win/lose banner has no actions.
+- + New then back leaves an empty "New deck" in use; pasted decks are all named "Imported deck".
+- Optimise shows "0.0% Inconsistent" before anything is tagged or the engine check finishes; Optimise never points to
+  Test; Test's "Tag your starters" is plain text, not a link.
+- Back with the VS hand trap picker open goes to the Menu; errors sit above the header, never clear outside a duel, and
+  notes ("left out: …", "Replay link copied") use the red error style.
+- "Engine-checked" and the role strip explain themselves only on hover; editor header: name field cut at 162px, not the
+  gold title style, mode toggle names the other mode; some 36px buttons (header, install, Sync).
+- Changing FULL ≥ doesn't rescore stored results; a removed line isn't replaced by the next-best working test.
+- A test exited after undoing back to the very start isn't scored; a reload mid-test isn't scored.
+- Not yet play-tested in smart mode: Droll, Ogre, Crow, Nibiru, Belle, several traps together, timing from a saved line.
+
 ## Next (ask the owner)
 Not wanted: a Side Deck planner, WindBot Ignite. Maybe later: drill mode, custom odds conditions, OCG / Master Duel ban
 lists.
