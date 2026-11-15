@@ -1513,7 +1513,7 @@ function traitsOf(code: number): string[] {
     // "Banish 3 or 6 … draw 1 card for every 3 cards banished" (Pot of Extravagance)
     const perBanished = /Banish (\d+) or (\d+)[^.]*draw 1 card for every (\d+) cards banished/i.exec(text);
     const seen = banishThenExcavate ? n(banishThenExcavate[2]) : perBanished ? Math.floor(n(perBanished[2]) / n(perBanished[3])) : excavate ? n(excavate[1]) : draw ? n(draw[1]) : 0;
-    if (seen > 0) out.push(`digs: sees ${seen} more card${seen === 1 ? "" : "s"}`);
+    if (seen > 0) out.push(`draw power: sees ${seen} more card${seen === 1 ? "" : "s"}`);
   }
   const lock = /you cannot (Special Summon[^.]*?except [^.,]+)/i.exec(text)?.[1];
   if (lock) out.push(`locks you: cannot ${lock.replace(/ for the rest of this turn/i, "")}`);

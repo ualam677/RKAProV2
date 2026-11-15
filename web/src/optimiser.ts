@@ -17,7 +17,7 @@ export const ROLES: { role: Role; name: string; help: string }[] = [
   { role: "breaker", name: "Board breaker", help: "Clears the opponent's board when you go second." },
   { role: "piece", name: "Combo piece in the Deck", help: "The combo needs it in the Deck (searched or summoned from there). Dead if you draw it, but never suggested as a cut." },
   { role: "brick", name: "Brick", help: "Dead in the opening hand." },
-  { role: "digger", name: "Digger", help: "Draws or excavates: sees more cards, so a hand without a start can still find one (Pot of Prosperity, Pot of Desires)." },
+  { role: "digger", name: "Draw power", help: "Draws or excavates: sees more cards, so a hand without a start can still find one (Pot of Prosperity, Pot of Desires)." },
   { role: "other", name: "Other", help: "Anything else: combo pieces you search, staples, traps." },
 ];
 /** Every role a card has; older saves held one, and "handtrap2" was a hand trap for going second. */

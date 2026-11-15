@@ -81,7 +81,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   };
   // yours in this deck, then the engine's starts, then yours from other decks, then known cards
   // a Digger's depth, read from its text by the worker ("digs: sees 6 more cards")
-  const digOf = (key: number) => Number(/^digs: sees (\d+)/.exec((traits.get(key) ?? []).find((one) => one.startsWith("digs:")) ?? "")?.[1] ?? 0);
+  const digOf = (key: number) => Number(/^draw power: sees (\d+)/.exec((traits.get(key) ?? []).find((one) => one.startsWith("draw power:")) ?? "")?.[1] ?? 0);
   const baseTag = (key: number): Tag => {
     const tag = deck.tags?.[key] ?? engineTag(key) ?? defaults[key] ?? guessTag(key);
     if (tag) return tag;
@@ -328,7 +328,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
         ...(count("extender") ? ([["Combo + extender", odds.comboExtender, "plays through a negate"]] as [string, number, string][]) : []),
         ...(normalCount > 1 ? ([["Two Normal Summon cards", odds.normal2, "one of them is dead"]] as [string, number, string][]) : []),
         ...(count("brick", "piece") || normalCount > 1 ? ([["Dead card in hand", odds.dead, `two or more: ${pct(odds.dead2)}`]] as [string, number, string][]) : []),
-        ...(count("digger") ? ([["Start from a dig", odds.dig, "no start in hand, and a Digger finds one (already in Open a combo)"]] as [string, number, string][]) : []),
+        ...(count("digger") ? ([["Start from draw power", odds.dig, "no start in hand, and draw power finds one (already in Open a combo)"]] as [string, number, string][]) : []),
       ];
 
   const sorted = [...main].sort((a, b) => ORDER.indexOf(a.tag.role) - ORDER.indexOf(b.tag.role) || nameOf(a.code).localeCompare(nameOf(b.code)));
@@ -380,7 +380,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
     { role: "handtrap", label: "Hand trap" },
     { role: "breaker", label: "Breaker" },
     { role: "brick", label: "Brick" },
-    { role: "digger", label: "Digger" },
+    { role: "digger", label: "Draw power" },
     { role: "other", label: "Other" },
   ];
 
@@ -1221,7 +1221,7 @@ const ROW_GLYPHS: Record<string, Mini[]> = {
   "Board breaker in hand": ["break"],
   "Two Normal Summon cards": ["n", "n"],
   "Dead card in hand": ["dead"],
-  "Start from a dig": ["dig", "play"],
+  "Start from draw power": ["dig", "play"],
 };
 
 // − value + in one line

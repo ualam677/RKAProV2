@@ -10,7 +10,7 @@ const ROLE_BADGE: Partial<Record<Role, { name: string; path: string; tone: strin
   piece: { name: "In-Deck piece", path: "M4 8h16v11H4zM7 5h10", tone: "piece" },
   handtrap: { name: "Hand trap", path: "M8 13V6a1.5 1.5 0 0 1 3 0v5M11 10V5a1.5 1.5 0 0 1 3 0v5M14 10V6a1.5 1.5 0 0 1 3 0v7a6 6 0 0 1-12 0v-2a1.5 1.5 0 0 1 3 0", tone: "trap" },
   breaker: { name: "Board breaker", path: "m14 4 6 6-3 3-6-6zM11 7l-7 7 3 3 7-7", tone: "break" },
-  digger: { name: "Digger", path: "M12 3v12M7 10l5 5 5-5M5 20h14", tone: "dig" },
+  digger: { name: "Draw power", path: "M12 3v12M7 10l5 5 5-5M5 20h14", tone: "dig" },
   brick: { name: "Brick", path: "M4 6h16v5H4zM4 13h16v5H4zM10 6v5M14 13v5", tone: "brick" },
   other: { name: "Other", path: "M12 12h.01", tone: "piece" },
 };
@@ -139,7 +139,7 @@ export function RoleStrip({ cards }: { cards: { count: number; role: Role }[] })
   const legend = (["start", "dig", "extend", "trap", "break", "piece", "brick", "none"] as const)
     .map((tone) => ({ tone, n: blocks.filter((one) => one === tone).length }))
     .filter((one) => one.n > 0);
-  const names: Record<string, string> = { start: "start", dig: "dig", extend: "extend", trap: "hand trap", break: "breaker", piece: "other", brick: "brick", none: "untagged" };
+  const names: Record<string, string> = { start: "start", dig: "draw", extend: "extend", trap: "hand trap", break: "breaker", piece: "other", brick: "brick", none: "untagged" };
   return (
     <div className="role-strip" role="img" aria-label={`${blocks.length} cards: ${legend.map((one) => `${one.n} ${names[one.tone]}`).join(", ")}`}>
       <div className="role-blocks">
