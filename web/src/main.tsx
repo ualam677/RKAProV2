@@ -1,7 +1,7 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { parseYdk, shuffled } from "./deck";
-import { Duel, MuteButton, cueTime } from "./Duel";
+import { Duel, MuteButton, cueTime, duelOverlay } from "./Duel";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt, setArtworkOriginals } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
@@ -651,6 +651,10 @@ function App() {
     const current = test.current;
     if (!current || !record || !view) return;
     current.worked = !current.worked;
+    if (!current.worked) {
+      const owner = decksRef.current.find((one) => one.id === current.deckId);
+      if (owner) changeDeck(withoutWorked(owner, current.id));
+    }
     const mine = view.players[0];
     current.board = current.worked ? [...mine.monsters, ...mine.spells].flatMap((card) => (card?.code ? [card.code] : [])) : undefined;
     // everything that can matter on the opponent's turn, to count the board's interruptions
@@ -691,10 +695,11 @@ function App() {
       const latest = turns.includes(view.turn) ? view.turn : Math.max(0, ...turns.filter((one) => one < view.turn));
       at = Math.max(0, turns.findIndex((one) => one >= latest));
     }
-    const saved: SavedTest = { ...current, id: newId(), date: Date.now(), testOf: test.current?.testOf };
-    if (at > 0) return watch(saved, at);
+    // the same test carries on: it isn't scored or saved as a separate replay
+    const saved: SavedTest = { ...current, id: test.current?.id ?? newId(), date: Date.now(), testOf: test.current?.testOf };
+    if (at > 0) return watch(saved, at, true);
     // back to the very start: the same hand, the same order, no animations to sit through
-    newTest(saved.testOf);
+    setRecord(null);
     lastRecord.current = null;
     post({ ...saved.options, type: "start" });
   };
@@ -732,7 +737,9 @@ function App() {
   const goBack = useRef<() => boolean>(() => false);
   goBack.current = () => {
     if (viewing) return setViewing(null), true;
+    if (view && duelOverlay.close()) return true;
     if (view) return finishTest(), skip(), setReplay(null), setView(null), true;
+    if (screen === "test" && picking) return setPicking(false), true;
     if (editing) return setEditing(false), true;
     if (screen !== "menu") return setScreen("menu"), true;
     return false;
@@ -777,12 +784,24 @@ function App() {
   // the effects a test activated, for what they leave in place on the opponent's turn
   const usedIn = (steps: { text: string; idle: boolean; code?: number }[]) => steps.flatMap((step) => (step.idle && step.code && /^Activate/.test(step.text) ? [{ code: step.code }] : []));
   // mark a saved test as working (or not) after the fact: its end is the board it worked to
+  // a test no longer marked as working: its start's line goes, and its result is scored by its interruptions again
+  const withoutWorked = (target: SavedDeck, id: string): SavedDeck => {
+    const goal = target.fullAt ?? 3;
+    const routes = Object.fromEntries(Object.entries(target.routes ?? {}).filter(([, route]) => route.testId !== id));
+    const results = (target.results ?? []).map((one): TestResult => {
+      if (one.id !== id || one.why !== "Marked as working") return one;
+      const kind: TestResult["kind"] = one.interruptions >= goal ? "full" : one.start === undefined ? "brick" : "short";
+      const why = kind === "full" ? `Full board: ${one.interruptions} interruption${one.interruptions === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : `Fell short: ${one.interruptions} of ${goal} interruptions`;
+      return { ...one, kind, why };
+    });
+    return { ...target, routes, results };
+  };
   const markTestWorked = async (saved: SavedTest, views?: DuelView[]) => {
     const target = decks.find((one) => one.tests?.some((test) => test.id === saved.id)) ?? deck;
     if (!target) return;
     if (saved.worked) {
-      const routes = Object.fromEntries(Object.entries(target.routes ?? {}).filter(([, route]) => route.testId !== saved.id));
-      changeDeck({ ...target, routes, tests: (target.tests ?? []).map((test) => (test.id === saved.id ? { ...test, worked: false, board: undefined, pieces: undefined, interruptions: undefined } : test)) });
+      const without = withoutWorked(target, saved.id);
+      changeDeck({ ...without, tests: (without.tests ?? []).map((test) => (test.id === saved.id ? { ...test, worked: false, board: undefined, pieces: undefined, interruptions: undefined } : test)) });
       return;
     }
     const counted = await countBoard(saved, views);
@@ -919,9 +938,10 @@ function App() {
       setVideo(null);
     }
   };
-  const watch = (saved: SavedTest, from = 0) => {
+  const watch = (saved: SavedTest, from = 0, same = false) => {
     setError("");
-    newTest(saved.testOf, from > 0 ? from : saved.picks.length);
+    if (same) setRecord(null);
+    else newTest(saved.testOf, from > 0 ? from : saved.picks.length);
     window.clearTimeout(timer.current);
     timer.current = 0;
     queue.current = [];
@@ -948,16 +968,14 @@ function App() {
     return () => window.clearTimeout(wait);
   }, [view, replay]);
 
+  const startedWith = useRef<{ chosen: number[] } | undefined>(undefined);
   const start = useCallback((test?: { chosen: number[] }) => {
     if (!deck) return;
     setReplay(null);
     newTest(test ? test.chosen[0] : undefined);
+    // a start's ▶ deals its own hand (and New hand deals it again); the screen's own settings stay as you left them
+    startedWith.current = test;
     const use = test ? { hand: 5, chosen: test.chosen, ignoreHandTraps: true } : { hand, chosen, ignoreHandTraps };
-    if (test) {
-      setHand(5);
-      setChosen(test.chosen);
-      setIgnoreHandTraps(true);
-    }
     setError("");
     // a test started from the editor returns to it when you leave the duel
     // whatever was still being shown from the last hand is dropped
@@ -1100,7 +1118,7 @@ function App() {
             }
             post({ type: "answer", picks });
           }}
-          restart={() => start()}
+          restart={() => start(startedWith.current)}
           leave={() => (finishTest(), skip(), setReplay(null), setView(null))}
           skip={skip}
           worked={worked}
@@ -1474,7 +1492,10 @@ function App() {
             <h2>Replays</h2>
           </div>
           {deck.tests?.length ? (
-            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} onShare={shareReplay} onWorked={(saved) => void markTestWorked(saved)} video={video} onDelete={(id) => changeDeck({ ...deck, tests: deck.tests!.filter((one) => one.id !== id) })} />
+            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from ? watch(saved, from) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} onShare={shareReplay} onWorked={(saved) => void markTestWorked(saved)} video={video} onDelete={(id) => {
+              const without = withoutWorked(deck, id);
+              changeDeck({ ...without, tests: (without.tests ?? []).filter((one) => one.id !== id) });
+            }} />
           ) : (
             <p className="muted">No saved tests yet. Every hand you test is saved here as you play.</p>
           )}

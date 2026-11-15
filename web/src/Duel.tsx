@@ -198,6 +198,9 @@ function PileFace({ card }: { card?: CardView }) {
 }
 
 /** Sound on or off, remembered. */
+/** What the app's back button calls first while a duel is on screen: closes an open sheet or menu (true if it did). */
+export const duelOverlay = { close: (): boolean => false };
+
 export function MuteButton({ className = "icon-button" }: { className?: string }) {
   const [muted, set] = useState(isMuted());
   useEffect(() => {
@@ -398,6 +401,13 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   const [focus, setFocus] = useState<Focus>(null);
   const [phaseOpen, setPhaseOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // the phone's back button closes what's open over the duel first
+  useEffect(() => {
+    duelOverlay.close = () => (sheet ? (setSheet(null), true) : menuOpen ? (setMenuOpen(false), true) : false);
+    return () => {
+      duelOverlay.close = () => false;
+    };
+  }, [sheet, menuOpen]);
   const [promptHidden, setPromptHidden] = useState(false);
   const [picks, setPicks] = useState<number[]>([]);
   const prompt = view.prompt;
