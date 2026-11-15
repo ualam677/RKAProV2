@@ -38,76 +38,108 @@ const grouped = (codes: number[], nameOf: (code: number) => string) => {
 export function Tests({ tests, nameOf, onWatch, onDelete, onVideo, onShare, onWorked, video, loading }: Props) {
   const [onlyWorked, setOnlyWorked] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [more, setMore] = useState<string | null>(null);
+  const [about, setAbout] = useState(false);
   const shown = onlyWorked ? tests.filter((test) => test.worked) : tests;
   const working = tests.filter((test) => test.worked).length;
 
   return (
-    <section className="box tests">
-      <div className="box-head">
-        <h2>Saved tests</h2>
+    <section className="tests">
+      <div className="tests-head">
         <div className="segmented two tests-filter">
           <button className={`button small ${onlyWorked ? "" : "on"}`} onClick={() => setOnlyWorked(false)}>
             All {tests.length}
           </button>
           <button className={`button small ${onlyWorked ? "on" : ""}`} onClick={() => setOnlyWorked(true)}>
-            Worked {working}
+            ✓ {working}
           </button>
         </div>
+        <button className={`icon-button small ${about ? "on" : ""}`} onClick={() => setAbout(!about)} aria-label="What is kept" aria-expanded={about}>
+          ⓘ
+        </button>
       </div>
-      <p className="muted">Every hand test is saved as you play; the newest 5 are kept unless marked as working. Working tests are kept for good, with the board they ended on.</p>
+      {about && <p className="trait-said">Every test is saved as you play. The newest 5 are kept; working ones are kept for good, with the board they ended on.</p>}
       {shown.length === 0 && <p className="muted">No working tests yet.</p>}
       {shown.map((test) => {
         const expanded = open === test.id;
         const actions = test.steps.filter((step) => step.idle).length;
+        const stops = test.interruptions;
         return (
-          <div className={`test ${test.worked ? "worked" : ""}`} key={test.id}>
-            <button className="test-head" onClick={() => setOpen(expanded ? null : test.id)}>
-              <span className="test-hand">{grouped(test.startHand, nameOf) || "Hand"}</span>
-              <span className="muted">
-                {test.worked && <b className="test-badge">✓ Worked</b>} {when(test.date)} · {actions} action{actions === 1 ? "" : "s"}
+          <div className={`test ${test.worked ? "worked" : ""} ${expanded ? "open" : ""}`} key={test.id}>
+            <button className="test-head" onClick={() => (setOpen(expanded ? null : test.id), setMore(null))} aria-expanded={expanded} aria-label={`${grouped(test.startHand, nameOf) || "Hand"}, ${when(test.date)}`}>
+              <span className="test-hand-cards" aria-hidden="true">
+                {test.startHand.map((code, index) => (
+                  <span key={index} className="hand-mini">
+                    <CardArt code={code} />
+                    <i>{nameOf(code)}</i>
+                  </span>
+                ))}
               </span>
-              {test.worked && (
-                <span className={`test-count ${test.interruptions && !test.interruptions.length ? "warn" : ""}`}>
-                  {!test.interruptions ? "Counting interruptions…" : test.interruptions.length ? `${test.interruptions.length} interruption${test.interruptions.length > 1 ? "s" : ""}` : "No interruptions"}
-                </span>
-              )}
-              {test.worked && test.board && test.board.length > 0 && (
-                // the end board in small cards; the ones that interrupt are lit, with what they do
-                <EndBoard board={test.board} interruptions={test.interruptions ?? []} nameOf={nameOf} />
-              )}
-              {test.worked && test.interruptions && test.interruptions.length > 0 && (
-                <span className="test-board">{test.interruptions.map((one) => describeInterruption(one, nameOf)).join(" · ")}</span>
-              )}
-              {test.worked && test.nibiru && <span className={`test-board ${test.nibiru.proof ? "protect" : "warn"}`}>{describeNibiru(test.nibiru, nameOf)}</span>}
-              {test.worked && test.protection && test.protection.length > 0 && (
-                <span className="test-board protect">Protection on their turn: {test.protection.map((one) => describeProtection(one, nameOf)).join(" · ")}</span>
-              )}
+              <span className="test-meta">
+                {test.worked ? (
+                  <span className={`int-badge ${!stops ? "" : stops.length ? "good" : "warn"}`}>
+                    {stops ? stops.length : "…"}
+                    <small>INT</small> ✓
+                  </span>
+                ) : null}
+                {test.worked && test.nibiru && <span className={`route-mark ${test.nibiru.proof ? "good" : "warn"}`}>N {test.nibiru.proof ? "✓" : "✕"}</span>}
+                {test.worked && test.protection && test.protection.length > 0 && (
+                  <span className="route-mark good" aria-label="Protection on their turn">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z" />
+                    </svg>
+                  </span>
+                )}
+                <small className="muted">
+                  {when(test.date)} · {actions} move{actions === 1 ? "" : "s"}
+                </small>
+              </span>
+              {test.worked && test.board && test.board.length > 0 && <EndBoard board={test.board} interruptions={stops ?? []} nameOf={nameOf} />}
             </button>
             {expanded && (
               <div className="test-body">
+                {test.worked && (stops?.length || test.nibiru || test.protection?.length) ? (
+                  <p className="trait-said">
+                    {stops?.length ? stops.map((one) => describeInterruption(one, nameOf)).join(" · ") : "No interruptions"}
+                    {test.nibiru && <><br />{describeNibiru(test.nibiru, nameOf)}</>}
+                    {test.protection && test.protection.length > 0 && <><br />Protection: {test.protection.map((one) => describeProtection(one, nameOf)).join(" · ")}</>}
+                  </p>
+                ) : null}
                 <div className="test-actions">
-                  <button className="button small primary" disabled={loading} onClick={() => onWatch(test)}>
+                  <button className="button primary test-watch" disabled={loading} onClick={() => onWatch(test)}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M7 4v16l13-8z" />
+                    </svg>
                     {loading ? "Loading…" : "Watch"}
                   </button>
-                  <button className="button small" disabled={!!video} onClick={() => onVideo(test)}>
-                    {video?.id === test.id ? `Video ${Math.round(video.share * 100)}%` : "Save as video"}
+                  <button className={`button test-worked ${test.worked ? "on" : ""}`} onClick={() => onWorked(test)} aria-pressed={!!test.worked}>
+                    {test.worked ? "✓ Working" : "Working?"}
                   </button>
-                  <button className={`button small ${test.worked ? "on" : ""}`} onClick={() => onWorked(test)}>
-                    {test.worked ? "✓ Worked" : "Mark as working"}
-                  </button>
-                  <button className="button small" onClick={() => onShare(test)}>
-                    Share link
-                  </button>
-                  <button className="button small ghost" onClick={() => onDelete(test.id)}>
-                    Delete
+                  <button className="icon-button" onClick={() => setMore(more === test.id ? null : test.id)} aria-label="More" aria-expanded={more === test.id}>
+                    ⋯
                   </button>
                 </div>
+                {more === test.id && (
+                  <div className="test-more">
+                    <button className="button" disabled={!!video} onClick={() => onVideo(test)}>
+                      {video?.id === test.id ? `Video ${Math.round(video.share * 100)}%` : "Save as video"}
+                    </button>
+                    <button className="button" onClick={() => onShare(test)}>
+                      Share link
+                    </button>
+                    <button className="button danger" onClick={() => onDelete(test.id)}>
+                      Delete
+                    </button>
+                  </div>
+                )}
                 <ol className="test-steps">
                   {test.steps.map((step, index) => (
                     <li key={index} className={step.idle ? "idle" : ""}>
                       <span>{step.text}</span>
-                      <button className="opt-link" onClick={() => onWatch(test, index)} title="Jump to just before this choice and play on yourself">
-                        Play from here
+                      <button className="play-round small" onClick={() => onWatch(test, index)} aria-label={`Play on from before: ${step.text}`} title="Play on from just before this choice">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M7 4v16l13-8z" />
+                        </svg>
                       </button>
                     </li>
                   ))}

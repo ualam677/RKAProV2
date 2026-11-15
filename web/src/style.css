@@ -898,3 +898,32 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .pick-grid { max-height: none; overflow: visible; }
 .play-bar .button.ghost { min-width: 44px; min-height: 44px; }
 .headline-label { margin-bottom: -10px; }
+
+/* Replays: hands as small cards, the result as a badge, Watch first, the rest under ⋯, ▶ on each step */
+.tests { display: grid; gap: 10px; }
+.tests-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tests-filter .button { min-height: 40px; padding: 0 16px; font-family: var(--display); font-weight: 700; font-size: 16px; }
+.test { border: 1px solid #1c2536; border-radius: 14px; background: #0b1120; }
+.test.worked { border-color: #2f7a55; box-shadow: inset 0 0 14px rgba(111, 211, 155, 0.08); }
+.test-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px; }
+.test-hand-cards { display: flex; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.hand-mini { position: relative; width: 34px; aspect-ratio: 59 / 86; flex: none; padding: 2px; border: 1px solid #c9a85a; border-radius: 3px; background: #2a2f3a; overflow: hidden; }
+.hand-mini .art { position: static; width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 1px; }
+.hand-mini i { position: absolute; inset: 2px; font-style: normal; font-size: 6px; line-height: 1.1; color: var(--muted); overflow: hidden; overflow-wrap: anywhere; }
+.hand-mini:has(img.art) i { display: none; }
+.test-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.test-meta small { font-size: 12px; white-space: nowrap; }
+.test-head .test-cards { flex-basis: 100%; }
+.test-actions { display: flex; align-items: center; gap: 8px; }
+.test-watch { flex: 1; min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--display); font-weight: 700; font-size: 18px; letter-spacing: 0.04em; text-transform: uppercase; }
+.test-watch svg { width: 16px; height: 16px; fill: currentColor; }
+.test-worked { min-height: 48px; padding: 0 14px; white-space: nowrap; }
+.test-worked.on { border-color: #2f7a55; color: #6fd39b; background: rgba(111, 211, 155, 0.1); }
+.test-more { display: flex; flex-wrap: wrap; gap: 8px; }
+.test-more .button { flex: 1 1 30%; min-height: 44px; }
+.button.danger { border-color: rgba(255, 107, 120, 0.5); color: #ff6b78; }
+.test-steps { padding-left: 22px; gap: 2px; max-height: none; overflow: visible; }
+.test-steps li { align-items: center; min-height: 40px; }
+.play-round.small { width: 36px; height: 36px; position: relative; }
+.play-round.small::after { content: ""; position: absolute; inset: -4px; }
+.play-round.small svg { width: 13px; height: 13px; }
