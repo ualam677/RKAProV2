@@ -613,11 +613,14 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   const [floatPos, setFloatPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     if (!focus || !floatRef.current) return setFloatPos(null);
-    const box = floatRef.current.getBoundingClientRect();
+    // its size without the pop-in animation's scale
+    const box = { width: floatRef.current.offsetWidth, height: floatRef.current.offsetHeight };
     // a hand card lifts when it is picked, after its place was measured
     const margin = focus.card.location === LOCATION.HAND ? 30 : 8;
     const left = Math.min(Math.max(8, focus.rect.left + focus.rect.width / 2 - box.width / 2), window.innerWidth - box.width - 8);
-    const above = focus.rect.top - box.height - margin;
+    // a hand card on a phone: above the phase button and your LP plate too, so neither is covered
+    const clear = !wide && focus.card.location === LOCATION.HAND ? Math.min(...[...document.querySelectorAll(".duel .phase-dock, .duel .lifebar.mine")].map((el) => el.getBoundingClientRect().top)) : Infinity;
+    const above = Math.min(focus.rect.top - margin, clear - 8) - box.height;
     const top = above >= 8 ? above : Math.min(focus.rect.bottom + 8, window.innerHeight - box.height - 8);
     setFloatPos({ left, top });
   }, [focus]);
