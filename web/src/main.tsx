@@ -4,7 +4,7 @@ import { parseYdk, shuffled } from "./deck";
 import { Duel, MuteButton, cueTime, duelOverlay } from "./Duel";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt, setArtworkOriginals } from "./CardArt";
-import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
+import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, scoredByCount, storeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
 import type { Piece } from "./engine/interruptions";
 import { CHOKE_TRAPS } from "./engine/probe";
@@ -308,11 +308,10 @@ function App() {
             if (one.id !== pending.deckId || one.results?.some((result) => result.id === id)) return one;
             const goal = one.fullAt ?? 3;
             const count = message.list.length;
-            const marked = one.tests?.some((test) => test.id === id && test.worked);
-            const kind: TestResult["kind"] = marked || count >= goal ? "full" : pending.start === undefined ? "brick" : pending.trap ? "handtrap" : "short";
-            const why = marked
-              ? "Marked as working"
-              : kind === "full" ? `Full board: ${count} interruption${count === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : kind === "handtrap" ? `${pending.trap}: ended on ${count} of ${goal}` : `Fell short: ${count} of ${goal} interruptions`;
+            // scored by the board it reached; saving it as a working line only keeps the line
+            const kind: TestResult["kind"] = count >= goal ? "full" : pending.start === undefined ? "brick" : pending.trap ? "handtrap" : "short";
+            const why =
+              kind === "full" ? `Full board: ${count} interruption${count === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : kind === "handtrap" ? `${pending.trap}: ended on ${count} of ${goal}` : `Fell short: ${count} of ${goal} interruptions`;
             const result: TestResult = { id, date: pending.date, start: pending.start, hand: pending.hand, interruptions: count, kind, why, held: pending.held };
             return { ...one, results: [result, ...(one.results ?? [])].slice(0, 300) };
           }),
@@ -320,12 +319,12 @@ function App() {
       } else if (message.type === "interruptions") {
         // a working test's board, counted: kept with the test
         setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list, protection: message.protection, nibiru: message.nibiru, counted: COUNTING } : test)) } : one)));
-        // a test marked as working: counted as a full board in your record, and its start's line (checked against hand traps)
+        // a test saved as a working line: it becomes its start's line (checked against hand traps); its result stays what its board scored
         window.setTimeout(() => {
           const owner = decksRef.current.find((one) => one.tests?.some((test) => test.id === message.id));
           const test = owner?.tests?.find((one) => one.id === message.id);
           if (!owner || !test?.worked) return;
-          const results = (owner.results ?? []).map((one) => (one.id === test.id ? { ...one, kind: "full" as const, why: "Marked as working" } : one));
+          const results = owner.results ?? [];
           const start = startOf(owner, test.startHand, test.testOf);
           const before = start === undefined ? undefined : owner.routes?.[start];
           const count = message.list.length;
@@ -790,12 +789,7 @@ function App() {
   const withoutWorked = (target: SavedDeck, id: string): SavedDeck => {
     const goal = target.fullAt ?? 3;
     const routes = Object.fromEntries(Object.entries(target.routes ?? {}).filter(([, route]) => route.testId !== id));
-    const results = (target.results ?? []).map((one): TestResult => {
-      if (one.id !== id || one.why !== "Marked as working") return one;
-      const kind: TestResult["kind"] = one.interruptions >= goal ? "full" : one.start === undefined ? "brick" : "short";
-      const why = kind === "full" ? `Full board: ${one.interruptions} interruption${one.interruptions === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : `Fell short: ${one.interruptions} of ${goal} interruptions`;
-      return { ...one, kind, why };
-    });
+    const results = (target.results ?? []).map((one) => (one.id === id ? scoredByCount(one, goal) : one));
     return { ...target, routes, results };
   };
   const markTestWorked = async (saved: SavedTest, views?: DuelView[]) => {

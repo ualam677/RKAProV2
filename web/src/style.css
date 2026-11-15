@@ -982,17 +982,6 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .duel .menu { width: min(270px, calc(100vw - 16px)); }
 .icon-button.mute { flex: 0 0 44px; width: 44px; height: 44px; }
 
-/* flat colours, no decorative gradients: solid blue for actions and selections, solid red for the opponent */
-:root { --panel-raised: #0f2244; }
-.button.primary, .button.on, .float-action, .cue-chain, .phase-track.mine span.on, .cue-phase.mine { background: #2f7df6; border-color: #7ab4ff; }
-.phase-track.theirs span.on, .cue-phase.theirs { background: #c2453a; border-color: #ff9a8a; }
-.float-action.info { background: var(--panel-solid); }
-.lifebar-fill { background: var(--accent-strong); }
-.lifebar.theirs .lifebar-fill { background: #e0605c; }
-.opt-bar i { background: var(--accent-strong); }
-.overlay-unit { background: #241d0a; }
-.prompt-bar { background: #0c1528; }
-.menu-tile.primary, .start-test { background: #3d8bff; box-shadow: 0 0 18px rgba(61, 139, 255, 0.45); }
 /* screen and box titles in the display face, gold, as in the mockups */
 .screen-head h2, .box h2 { font-family: var(--display); font-weight: 700; font-size: 26px; letter-spacing: 0.06em; color: #f6e3a8; text-shadow: 0 0 10px rgba(230, 195, 106, 0.3); }
 .box h2 { font-size: 18px; }

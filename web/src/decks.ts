@@ -109,10 +109,22 @@ export const deckSignature = (deck: Deck) => `${[...deck.main].sort((a, b) => a 
 
 const KEY = "rka.decks";
 
+// A test's result is the board it reached: a full board is enough interruptions, whether or not the line was saved as
+// working (saving only keeps the line). Older results were "Marked as working" and counted as full.
+const MARKED = "Marked as working";
+export function scoredByCount(one: TestResult, goal: number): TestResult {
+  if (one.why !== MARKED) return one;
+  const kind: TestResult["kind"] = one.interruptions >= goal ? "full" : one.start === undefined ? "brick" : "short";
+  const why = kind === "full" ? `Full board: ${one.interruptions} interruption${one.interruptions === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : `Fell short: ${one.interruptions} of ${goal} interruptions`;
+  return { ...one, kind, why };
+}
+
 export function loadDecks(): SavedDeck[] {
   try {
     const decks = JSON.parse(localStorage.getItem(KEY) ?? "[]") as SavedDeck[];
-    return Array.isArray(decks) ? decks : [];
+    if (!Array.isArray(decks)) return [];
+    // results from when "working" counted as a full board are scored by their interruptions instead
+    return decks.map((deck) => (deck.results?.some((one) => one.why === MARKED) ? { ...deck, results: deck.results.map((one) => scoredByCount(one, deck.fullAt ?? 3)) } : deck));
   } catch {
     return [];
   }
