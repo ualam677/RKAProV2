@@ -104,7 +104,7 @@ export function TraitGlyphs({ traits, normal, open, onOpen }: { traits: string[]
 
 // tiny card-shaped symbols for the odds: a starter (▶), a hand trap (✋), an extender (+), a breaker (hammer),
 // a Normal Summon card (N), a dead card (✕), no breaker (crossed hammer)
-export type Mini = "play" | "hand" | "plus" | "break" | "n" | "dead" | "nobreak";
+export type Mini = "play" | "hand" | "plus" | "break" | "n" | "dead" | "nobreak" | "piece";
 const MINI: Record<Mini, { tone: string; path: string }> = {
   play: { tone: "start", path: "M8 5v14l11-7z" },
   hand: { tone: "trap", path: ROLE_BADGE.handtrap!.path },
@@ -113,6 +113,7 @@ const MINI: Record<Mini, { tone: string; path: string }> = {
   nobreak: { tone: "warn", path: `${ROLE_BADGE.breaker!.path}M3 3l18 18` },
   n: { tone: "start", path: "M7 19V5l10 14V5" },
   dead: { tone: "warn", path: "M5 5l14 14M19 5 5 19" },
+  piece: { tone: "piece", path: ROLE_BADGE.piece!.path },
 };
 export function MiniCards({ kinds }: { kinds: Mini[] }) {
   return (

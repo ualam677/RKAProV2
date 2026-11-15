@@ -514,8 +514,23 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
                     )}
                   </div>
                   {roles.includes("pair") && (
-                    <button className="opt-partners" onClick={() => setPartnerFor(card.code)}>
-                      with {card.tag.with && withAny(card.tag.with.codes) && !card.tag.with.attributes && !card.tag.with.levels.length ? "any other card" : describePartners(card.tag.with, nameOf)} <u>Edit</u>
+                    <button className="opt-partners" onClick={() => setPartnerFor(card.code)} aria-label={`Partners: ${card.tag.with && withAny(card.tag.with.codes) && !card.tag.with.attributes && !card.tag.with.levels.length ? "any other card" : describePartners(card.tag.with, nameOf)}. Edit`}>
+                      <span className="partners-with">+</span>
+                      {card.tag.with && withAny(card.tag.with.codes) && !card.tag.with.attributes && !card.tag.with.levels.length ? (
+                        <span className="partners-any">ANY</span>
+                      ) : card.tag.with && !card.tag.with.attributes && !card.tag.with.levels.length && card.tag.with.codes.length ? (
+                        <>
+                          {card.tag.with.codes.slice(0, 5).map((code) => (
+                            <span key={code} className="mini-card plain">
+                              <CardArt code={code} />
+                            </span>
+                          ))}
+                          {card.tag.with.codes.length > 5 && <b className="partners-more">+{card.tag.with.codes.length - 5}</b>}
+                        </>
+                      ) : (
+                        <span className="partners-text">{describePartners(card.tag.with, nameOf)}</span>
+                      )}
+                      <span className="partners-edit">✎</span>
                     </button>
                   )}
                 </div>
@@ -897,6 +912,7 @@ function DeckSize({ main, side, room, nameOf, takenBy }: { main: DeckCard[]; sid
   const auto = all.slice(0, 1);
   // your own choice of what goes: tap the cards you'd take out to reach 40
   const [out, setOut] = useState<number[]>([]);
+  const [sizeSaid, setSizeSaid] = useState(false);
   const mine = out.length ? withoutCards(main, out) : null;
   const rows = mine ? [...auto, mine] : auto;
   const now = rows[0];
@@ -924,9 +940,24 @@ function DeckSize({ main, side, room, nameOf, takenBy }: { main: DeckCard[]; sid
   const engine = total - nonEngine;
   return (
     <div className="opt-size">
-      <p className="opt-counts" title={`YCS top cut, ${TOP_CUT.decks} decks from ten 2025 YCS top 32s: decks above 40 used the room for non-engine`}>
-        Non-engine <b>{nonEngine}</b> ({Math.round((nonEngine / total) * 100)}%) · engine <b>{engine}</b> ({startCount} start, {pieceCount} in-Deck) · top cut at {near}: {theirs.toFixed(0)} / {(near - theirs).toFixed(0)}
-      </p>
+      <button className={`size-bar ${sizeSaid ? "on" : ""}`} onClick={() => setSizeSaid(!sizeSaid)} aria-label={`${total} cards: non-engine ${nonEngine}, engine ${engine}; YCS top cut at ${near} plays ${theirs.toFixed(0)} non-engine`}>
+        <b>{total}</b>
+        <span className="size-track">
+          <i style={{ width: `${(nonEngine / total) * 100}%` }} />
+          <em style={{ left: `${(theirs / near) * 100}%` }} />
+        </span>
+        <small>YCS</small>
+      </button>
+      <div className="size-chips" aria-hidden="true">
+        <span className="size-chip"><MiniCards kinds={["play"]} /><b>{startCount}</b></span>
+        <span className="size-chip"><MiniCards kinds={["piece"]} /><b>{pieceCount}</b></span>
+        <span className="size-chip"><MiniCards kinds={["hand"]} /><b>{nonEngine}</b></span>
+      </div>
+      {sizeSaid && (
+        <p className="trait-said">
+          {total} cards. Starts {startCount}, in-Deck pieces {pieceCount}, engine {engine} in all; non-engine {nonEngine} ({Math.round((nonEngine / total) * 100)}%, the pink bar). YCS top cut decks at {near} cards play {theirs.toFixed(0)} non-engine (the gold mark) and {(near - theirs).toFixed(0)} engine: {TOP_CUT.decks} decks from ten 2025 YCS top 32s.
+        </p>
+      )}
       <details className="opt-compare">
         <summary>Try changes: take out or add cards</summary>
         <div className="opt-try">
@@ -999,27 +1030,39 @@ function Clashes({ main, nameOf, traits }: { main: DeckCard[]; nameOf: (code: nu
   const atLeastTwo = (copies: number) => 1 - exactly(copies, 0) - exactly(copies, 1);
   const has = (code: number, trait: string) => (traits.get(code) ?? []).some((one) => one.startsWith(trait));
   const empty = main.filter((card) => has(card.code, "needs an empty field"));
-  const lines: string[] = [];
+  const lines: { codes: number[]; kind: "empty" | "opt"; chance: number; text: string }[] = [];
   for (let a = 0; a < empty.length; a++)
     for (let b = a + 1; b < empty.length; b++) {
       const [x, y] = [empty[a], empty[b]];
       const both = 1 - none(x.count) - none(y.count) + none(x.count + y.count);
-      lines.push(`${nameOf(x.code)} + ${nameOf(y.code)}: both need an empty field · ${(both * 100).toFixed(1)}%`);
+      lines.push({ codes: [x.code, y.code], kind: "empty", chance: both, text: `${nameOf(x.code)} + ${nameOf(y.code)}: both need an empty field` });
     }
   for (const card of main) {
     if (card.count < 2 || !has(card.code, "once per turn by name") || !["starter", "pair", "extender"].includes(card.tag.role)) continue;
     const two = atLeastTwo(card.count);
-    if (two >= 0.02) lines.push(`Two ${nameOf(card.code)} (once per turn) · ${(two * 100).toFixed(1)}%`);
+    if (two >= 0.02) lines.push({ codes: [card.code, card.code], kind: "opt", chance: two, text: `Two ${nameOf(card.code)}: once per turn, so the second is dead` });
   }
+  const [said, setSaid] = useState<string | null>(null);
   if (!lines.length) return null;
   return (
     <div className="opt-note">
-      <b title="Cards that hurt each other in the same opening hand, and how often you open them together">Clashes in hand</b>
-      <ul className="opt-clashes">
+      <h3 className="section-label">CLASHES IN HAND</h3>
+      <div className="clash-list">
         {lines.map((line) => (
-          <li key={line}>{line}</li>
+          <button key={line.text} className={`clash ${said === line.text ? "on" : ""}`} onClick={() => setSaid(said === line.text ? null : line.text)} aria-label={`${line.text}: ${(line.chance * 100).toFixed(1)}%`}>
+            <span className="clash-cards">
+              {line.codes.map((code, at) => (
+                <span key={at} className="mini-card plain">
+                  <CardArt code={code} />
+                </span>
+              ))}
+            </span>
+            <span className="clash-why">{line.kind === "empty" ? "□" : "↻1"}</span>
+            <b>{(line.chance * 100).toFixed(1)}%</b>
+          </button>
         ))}
-      </ul>
+      </div>
+      {said && <p className="trait-said">{said}</p>}
     </div>
   );
 }
@@ -1081,38 +1124,51 @@ function TwoStarts({ routes, nameOf }: { routes: Record<string, SavedRoute>; nam
 // What a card does for your lines: each worked line played as recorded, then without one copy of the card. Measured on
 // your own lines, so it means the same for any deck; with no worked lines there is nothing to measure.
 function CutTest({ main, lines, nameOf, result, onTest }: { main: DeckCard[]; lines: number; nameOf: (code: number) => string; result: { cut: number; lines?: { start: number; before: number; after: number; board: number[] }[] } | null; onTest: (code: number) => void }) {
-  const [pick, setPick] = useState(0);
+  const [open, setOpen] = useState(false);
   return (
-    <div className="opt-note">
-      <b title="Each worked line is replayed without one copy of the card">Cut test</b>{" "}
+    <div className="opt-note cut-test">
+      <h3 className="section-label">CUT TEST</h3>
       {lines === 0 ? (
-        "needs worked replays."
+        <p className="muted">Needs working lines.</p>
       ) : (
         <>
-          <select value={pick} onChange={(event) => setPick(Number(event.target.value))}>
-            <option value={0}>Pick a card</option>
-            {main.map((card) => (
-              <option key={card.code} value={card.code}>
-                {nameOf(card.code)} ×{card.count}
-              </option>
-            ))}
-          </select>{" "}
-          <button className="button small" disabled={!pick} onClick={() => onTest(pick)}>
-            Test without it
+          <button className="button cut-open" onClick={() => setOpen(!open)} aria-expanded={open}>
+            {open ? "Done" : "Pick a card to take out"}
           </button>
+          {open && (
+            <div className="pick-grid cut-grid">
+              {main.map((card) => (
+                <button key={card.code} className={`pick-card ${result?.cut === card.code ? "on" : ""}`} onClick={() => (onTest(card.code), setOpen(false))} aria-label={`Replay my lines without one ${nameOf(card.code)}`}>
+                  <span className="pick-art">
+                    <CardArt code={card.code} />
+                    <b>×{card.count}</b>
+                  </span>
+                  <span className="pick-name">{nameOf(card.code)}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {result && (
-            <ul className="opt-clashes">
+            <div className="cut-result">
+              <span className="cut-without" aria-label={`Without one ${nameOf(result.cut)}`}>
+                <span className="mini-card plain cut">
+                  <CardArt code={result.cut} />
+                </span>
+                −1
+              </span>
               {!result.lines ? (
-                <li>Replaying your lines without {nameOf(result.cut)}…</li>
+                <span className="muted">Replaying your lines…</span>
               ) : (
                 result.lines.map((line) => (
-                  <li key={line.start}>
-                    {nameOf(line.start)} line: {line.before} → <b>{line.after}</b> interruption{line.after === 1 ? "" : "s"}
-                    {line.after < line.before ? ` (loses ${line.before - line.after})` : line.after === line.before ? " (no loss)" : ""}
-                  </li>
+                  <span key={line.start} className={`cut-line ${line.after < line.before ? "loss" : ""}`} aria-label={`${nameOf(line.start)} line: ${line.before} to ${line.after} interruptions`}>
+                    <span className="mini-card plain">
+                      <CardArt code={line.start} />
+                    </span>
+                    {line.before} → <b>{line.after}</b>
+                  </span>
                 ))
               )}
-            </ul>
+            </div>
           )}
         </>
       )}

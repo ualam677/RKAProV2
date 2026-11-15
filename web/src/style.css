@@ -942,3 +942,39 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .deck-current { font-style: normal; color: var(--gold, #e6c36a); }
 .deck-more { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 .deck-more .button { min-height: 44px; padding: 0 20px; }
+
+/* Optimise lower half: deck size as a bar with the YCS mark, clashes and the cut test as cards, partners as cards */
+.size-bar { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0; border: 0; background: none; color: var(--text); cursor: pointer; }
+.size-bar > b { font-family: var(--display); font-weight: 700; font-size: 24px; }
+.size-track { position: relative; flex: 1; height: 8px; border-radius: 4px; background: #121a2a; }
+.size-track i { position: absolute; left: 0; top: 0; height: 8px; border-radius: 4px; background: var(--frame-trap); box-shadow: 0 0 8px rgba(181, 66, 126, 0.7); }
+.size-track em { position: absolute; top: -5px; width: 2px; height: 18px; margin-left: -1px; background: var(--gold, #e6c36a); box-shadow: 0 0 6px var(--gold, #e6c36a); }
+.size-bar small { font-size: 12px; font-weight: 600; color: var(--gold, #e6c36a); }
+.size-bar.on { outline: 2px solid var(--accent-strong); outline-offset: 2px; border-radius: 6px; }
+.size-chips { display: flex; flex-wrap: wrap; gap: 14px; }
+.size-chip { display: inline-flex; align-items: center; gap: 6px; }
+.size-chip b { font-family: var(--display); font-weight: 700; font-size: 20px; }
+.mini-glyph.piece { background: #4a3c1e; border-color: #c9a85a; }
+.mini-card.plain { width: 22px; height: 32px; border-color: #c9a85a; }
+.clash-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.clash { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 4px 10px 4px 6px; border: 1px solid rgba(242, 181, 68, 0.35); border-radius: 10px; background: rgba(242, 181, 68, 0.08); color: #f2b544; cursor: pointer; }
+.clash.on { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.clash-cards { display: inline-flex; }
+.clash-cards .mini-card + .mini-card { margin-left: -8px; }
+.clash-why { font-family: var(--display); font-weight: 700; font-size: 15px; }
+.clash b { font-family: var(--display); font-weight: 700; font-size: 17px; }
+.cut-test { display: grid; gap: 8px; }
+.cut-open { min-height: 44px; }
+.cut-grid { max-height: none; }
+.pick-card.on .pick-art { box-shadow: 0 0 0 2px var(--accent-strong), 0 0 10px var(--accent-strong); }
+.cut-result { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.cut-without { display: inline-flex; align-items: center; gap: 4px; font-family: var(--display); font-weight: 700; font-size: 18px; color: #ff6b78; }
+.mini-card.cut { border-color: #ff6b78; }
+.cut-line { display: inline-flex; align-items: center; gap: 6px; font-family: var(--display); font-weight: 600; font-size: 17px; color: #6fd39b; }
+.cut-line.loss { color: #f2b544; }
+.opt-partners { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 40px; margin-top: 6px; padding: 2px 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.partners-with { font-family: var(--display); font-weight: 700; font-size: 18px; color: #f0c27a; margin-right: 2px; }
+.partners-any { font-family: var(--display); font-weight: 700; font-size: 15px; color: #f0c27a; }
+.partners-more { font-family: var(--display); font-weight: 700; font-size: 15px; color: #8a96ad; margin-left: 2px; }
+.partners-text { font-size: 12px; color: #8a96ad; overflow-wrap: anywhere; }
+.partners-edit { margin-left: 6px; color: var(--accent-strong); }
