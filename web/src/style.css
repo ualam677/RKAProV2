@@ -862,3 +862,6 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .play-bar .start-test { flex: 1; min-width: 0; margin: 0; }
 .opt-from-lines { display: grid; gap: 8px; margin-top: 8px; }
 .hand-picker .slot-name { font-size: 8px; line-height: 1.1; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+/* card pictures stay inside their frame: the frame is the positioned box, the picture sits in its padding */
+.deck-cover, .trap-pick-art, .pick-art, .mini-card, .opt-thumb { position: relative; }
+.deck-cover .art, .trap-pick-art .art, .pick-art .art, .mini-card .art, .opt-thumb.framed .art { position: static; }
