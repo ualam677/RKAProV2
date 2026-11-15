@@ -7,6 +7,7 @@ import type { TestResult } from "./decks";
 import { CardArt } from "./CardArt";
 import { EndBoard } from "./Tests";
 import { MiniCards, RoleBadges, RoleStrip, TraitGlyphs, type Mini } from "./CardGlyphs";
+import { rescored } from "./decks";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
 import type { CardInfo, TestRecord } from "./engine/protocol";
@@ -14,6 +15,9 @@ import {
   deckSizes, withoutCards, changed, tryChanges, TOP_CUT, type SizeRow, GOALS, ROLES, allProven, normalLimit, throughMany, throughOdds, bestCuts, bestSwaps, computeOdds, describePartners, grade, guessTag, matchesPartner, provenOnly, testHand,
   type DeckCard, type Goal, type Partners, type Role, type Score, type Swap, type Tag,
 } from "./optimiser";
+
+/** What the app's back button calls first on the Test screen: closes the hand trap picker (true if it did). */
+export const testOverlay = { close: (): boolean => false };
 
 interface Props {
   deck: SavedDeck;
@@ -327,6 +331,13 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   const [said, setSaid] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [explain, setExplain] = useState(false);
+  // the phone's back button closes the hand trap picker first
+  useEffect(() => {
+    testOverlay.close = () => (picking ? (setPicking(false), true) : false);
+    return () => {
+      testOverlay.close = () => false;
+    };
+  }, [picking]);
   const [tab, setTab] = useState<"odds" | "cards" | "lines">(() => {
     try {
       const saved = localStorage.getItem("rka.optTab");
@@ -587,7 +598,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
               <button className={`icon-button small setup-info ${explain ? "on" : ""}`} onClick={() => setExplain(!explain)} aria-label="What these settings mean" aria-expanded={explain}>
                 ⓘ
               </button>
-              <Stepper label="FULL ≥" value={fullAt} min={1} max={8} suffix="INT" title="A full board: at least this many interruptions (effects usable on the opponent's turn that negate or remove)" onChange={(value) => onChange({ ...deck, fullAt: value, updated: Date.now() })} />
+              <Stepper label="FULL ≥" value={fullAt} min={1} max={8} suffix="INT" title="A full board: at least this many interruptions (effects usable on the opponent's turn that negate or remove)" onChange={(value) => onChange({ ...deck, fullAt: value, results: rescored(deck.results, value), updated: Date.now() })} />
               {setup}
             </div>
           </section>

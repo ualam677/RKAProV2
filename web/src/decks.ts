@@ -143,6 +143,16 @@ export function cleanDecks(value: unknown): SavedDeck[] {
     }));
 }
 
+/** Results scored again against a new FULL ≥ (a result keeps its interruption count; a brick stays a brick). */
+export function rescored(results: TestResult[] | undefined, goal: number): TestResult[] | undefined {
+  return results?.map((one) => {
+    if (one.kind === "brick") return one;
+    if (one.interruptions >= goal) return { ...one, kind: "full", why: `Full board: ${one.interruptions} interruption${one.interruptions === 1 ? "" : "s"}` };
+    if (one.kind === "handtrap") return { ...one, why: one.why.replace(/ended on \d+ of \d+/, `ended on ${one.interruptions} of ${goal}`) };
+    return { ...one, kind: "short", why: `Fell short: ${one.interruptions} of ${goal} interruptions` };
+  });
+}
+
 export function loadDecks(): SavedDeck[] {
   try {
     const decks = cleanDecks(JSON.parse(localStorage.getItem(KEY) ?? "[]"));

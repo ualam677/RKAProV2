@@ -9,7 +9,7 @@ import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, 
 import type { Piece } from "./engine/interruptions";
 import { CHOKE_TRAPS } from "./engine/probe";
 import { hasRole, secondOnly } from "./optimiser";
-import { Optimiser, Stepper } from "./Optimiser";
+import { Optimiser, Stepper, testOverlay } from "./Optimiser";
 import { Tests } from "./Tests";
 import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
 import { readReplayLink, replayLink, toYdk } from "./decks";
@@ -113,6 +113,12 @@ function App() {
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
   // the Test screen's hand picker, open or not
   const [picking, setPicking] = useState(false);
+  // leaving the editor: a "+ New" deck left untouched isn't kept (it would become the deck in use, empty)
+  const closeEditor = () => {
+    setEditing(false);
+    if (deck && deck.name === "New deck" && !deck.main.length && !deck.extra.length && !deck.side.length && !deck.tests?.length)
+      setDecks((all) => all.filter((one) => one.id !== deck.id));
+  };
   // the deck whose ⋯ is open on the Decks screen
   const [deckMenu, setDeckMenu] = useState<string | null>(null);
   const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
@@ -758,7 +764,8 @@ function App() {
     if (view && duelOverlay.close()) return true;
     if (view) return finishTest(), skip(), setReplay(null), setView(null), true;
     if (screen === "test" && picking) return setPicking(false), true;
-    if (editing) return setEditing(false), true;
+    if (screen === "test" && testOverlay.close()) return true;
+    if (editing) return closeEditor(), true;
     if (screen !== "menu") return setScreen("menu"), true;
     return false;
   };
@@ -1168,7 +1175,7 @@ function App() {
         requestText={requestText}
         search={search}
         onChange={changeDeck}
-        onClose={() => setEditing(false)}
+        onClose={closeEditor}
         onTest={(chosen) => start(chosen ? { chosen } : undefined)}
         engineProgress={probe && probe.deckId === deck.id ? probe : null}
         routing={routing && routing.deckId === deck.id ? { code: routing.code, tried: routing.tried, waiting: routing.queue.map((one) => one.code) } : null}
