@@ -113,6 +113,8 @@ function App() {
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
   // the Test screen's hand picker, open or not
   const [picking, setPicking] = useState(false);
+  // the deck whose ⋯ is open on the Decks screen
+  const [deckMenu, setDeckMenu] = useState<string | null>(null);
   const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
   const [opponentHandTraps, setOpponentHandTraps] = useState(saved.opponentHandTraps ?? false);
   const [fixedTraps, setFixedTraps] = useState(saved.fixedTraps ?? true);
@@ -1263,61 +1265,61 @@ function App() {
       )}
 
       {screen === "decks" && (
-        <>
+        <div className="decks-screen">
           <div className="screen-head">
             <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
               ‹
             </button>
             <h2>Decks</h2>
           </div>
-      <section className="box">
-        <div className="box-head">
-          <h2>Decks</h2>
-          <div className="row">
-            <button className="button small" onClick={() => (addDeck({ name: "New deck", main: [], extra: [], side: [] }), setEditing(true))} disabled={!ready}>
-              New
+          <div className="deck-actions">
+            <button className="button" onClick={() => (addDeck({ name: "New deck", main: [], extra: [], side: [] }), setEditing(true))} disabled={!ready}>
+              + New
             </button>
-            <label className="button small">
+            <label className="button">
               Open file
               <input type="file" accept=".ydk,.txt" hidden onChange={async (event) => { const file = event.target.files?.[0]; if (file) await importText(await file.text(), file.name); event.target.value = ""; }} />
             </label>
-            <button className="button small" onClick={() => setPasting(!pasting)}>
+            <button className={`button ${pasting ? "on" : ""}`} onClick={() => setPasting(!pasting)}>
               Paste
             </button>
           </div>
-        </div>
-        {pasting && (
-          <div className="paste">
-            <textarea value={paste} onChange={(event) => setPaste(event.target.value)} placeholder={"A card list (\"Main: 3 Mulcharmy Fuwalos\", \"3x Ash Blossom\"), a ydke:// link, a YGO Omega deck code, or the text of a .ydk file"} rows={3} />
-            <button className="button primary small" disabled={!paste.trim() || !ready} onClick={async () => { await importText(paste); setPaste(""); setPasting(false); }}>
-              Import
-            </button>
+          {pasting && (
+            <div className="paste">
+              <textarea value={paste} onChange={(event) => setPaste(event.target.value)} placeholder={"A card list (\"Main: 3 Mulcharmy Fuwalos\", \"3x Ash Blossom\"), a ydke:// link, a YGO Omega deck code, or the text of a .ydk file"} rows={3} />
+              <button className="button primary" disabled={!paste.trim() || !ready} onClick={async () => { await importText(paste); setPaste(""); setPasting(false); }}>
+                Import
+              </button>
+            </div>
+          )}
+          {!decks.length && !pasting && <p className="muted">No decks yet: + New, open a .ydk file, or paste a ydke:// link or YGO Omega code.</p>}
+          <div className="deck-list-cards">
+            {decks.map((one) => (
+              <div key={one.id} className={`deck-item ${one.id === deck?.id ? "on" : ""}`}>
+                <button className="deck-card" onClick={() => (pickDeck(one.id), setScreen("menu"))} aria-label={`Use "${one.name}"`}>
+                  <span className="deck-cover">{(one.extra[0] ?? one.main[0]) ? <CardArt code={one.extra[0] ?? one.main[0]} /> : null}</span>
+                  <span className="deck-card-text">
+                    <b>{one.name}</b>
+                    <span className="deck-counts">
+                      {one.main.length} · {one.extra.length} · {one.side.length}
+                      {one.id === deck?.id && <em className="deck-current"> · in use</em>}
+                    </span>
+                  </span>
+                </button>
+                <button className="icon-button" onClick={() => setDeckMenu(deckMenu === one.id ? null : one.id)} aria-label={`More for ${one.name}`} aria-expanded={deckMenu === one.id}>
+                  ⋯
+                </button>
+                {deckMenu === one.id && (
+                  <div className="deck-more">
+                    <button className="button danger" onClick={() => { if (confirm(`Delete "${one.name}"?`)) { setDecks((all) => all.filter((other) => other.id !== one.id)); setDeckMenu(null); } }}>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        )}
-        <div className="deck-picker">
-          {decks.map((one) => (
-            <button key={one.id} className={`deck-row ${one.id === deck?.id ? "on" : ""}`} onClick={() => pickDeck(one.id)}>
-              <span>{one.name}</span>
-              <span className="muted">
-                {one.main.length} + {one.extra.length}
-                {one.side.length ? ` + ${one.side.length}` : ""}
-              </span>
-            </button>
-          ))}
-          {!decks.length && <p className="muted">No decks yet: make one, or open a .ydk file, or paste a ydke:// link or YGO Omega code.</p>}
         </div>
-        {deck && (
-          <div className="row">
-            <button className="button primary" onClick={() => setScreen("menu")}>
-              Use "{deck.name}"
-            </button>
-            <button className="button ghost" onClick={() => { if (confirm(`Delete "${deck.name}"?`)) setDecks((all) => all.filter((one) => one.id !== deck.id)); }}>
-              Delete
-            </button>
-          </div>
-        )}
-      </section>
-        </>
       )}
 
       {screen === "sync" && (
