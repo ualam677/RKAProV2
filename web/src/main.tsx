@@ -1,7 +1,7 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { parseYdk, shuffled } from "./deck";
-import { Duel, cueTime } from "./Duel";
+import { Duel, MuteButton, cueTime } from "./Duel";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt, setArtworkOriginals } from "./CardArt";
 import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, storeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
@@ -1149,11 +1149,24 @@ function App() {
   }
 
   const nameOf = (code: number) => texts.get(code)?.name ?? `#${code}`;
+  // the first-turn combo odds the Optimiser last worked out for this deck
+  const menuOdds = (() => {
+    if (!deck || screen !== "menu") return null;
+    try {
+      const value = localStorage.getItem(`rka.odds.${deck.id}`);
+      return value === null ? null : Number(value);
+    } catch {
+      return null;
+    }
+  })();
   return (
     <main className="start">
       <header>
-        <h1>RKAPro</h1>
+        <h1 className="logo">
+          RKA<em>PRO</em>
+        </h1>
         <p className="status">{status}</p>
+        {screen === "menu" && <MuteButton className="icon-button mute" />}
       </header>
       {error && (
         <p className="error" onClick={() => setError("")}>
@@ -1164,13 +1177,15 @@ function App() {
       {screen === "menu" && <span className="version">{__APP_VERSION__}</span>}
       {screen === "menu" && (
         <nav className="main-menu">
-          <button className="deck-card" onClick={() => setScreen("decks")}>
+          <button className="deck-card" onClick={() => setScreen("decks")} aria-label={deck ? `${deck.name}: change deck` : "Choose or import a deck"}>
             {deck ? (
               <>
-                <b>{deck.name}</b>
-                <span className="muted">
-                  {deck.main.length} + {deck.extra.length}
-                  {deck.side.length ? ` + ${deck.side.length}` : ""} · change deck
+                <span className="deck-cover">{(deck.extra[0] ?? deck.main[0]) ? <CardArt code={deck.extra[0] ?? deck.main[0]} /> : null}</span>
+                <span className="deck-card-text">
+                  <b>{deck.name}</b>
+                  <span className="deck-counts" aria-label={`${deck.main.length} Main, ${deck.extra.length} Extra, ${deck.side.length} Side`}>
+                    {deck.main.length} · {deck.extra.length} · {deck.side.length}
+                  </span>
                 </span>
               </>
             ) : (
@@ -1189,30 +1204,39 @@ function App() {
               Install RKAPro as an app (works offline)
             </button>
           )}
+          <button className="menu-tile primary" disabled={!ready || !deck?.main.length} onClick={() => setScreen("test")}>
+            <b>Test</b>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 4v16l13-8z" />
+            </svg>
+          </button>
           <div className="menu-grid">
-            <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(false)}>
-              <b>Edit deck</b>
-              <span>Search, build, ban list</span>
-            </button>
             <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(true)}>
               <b>Optimise</b>
-              <span>Odds, lines, choke points</span>
-            </button>
-            <button className="menu-tile primary" disabled={!ready || !deck?.main.length} onClick={() => setScreen("test")}>
-              <b>Test</b>
-              <span>Hands, opponent, going first or second</span>
+              <span className="tile-number">{menuOdds !== null ? <>{(menuOdds * 100).toFixed(1)}<small>%</small></> : "—"}</span>
             </button>
             <button className="menu-tile" disabled={!deck} onClick={() => setScreen("replays")}>
               <b>Replays</b>
-              <span>{deck?.tests?.length ? `${deck.tests.length} saved test${deck.tests.length === 1 ? "" : "s"}` : "Saved tests"}</span>
+              <span className="tile-number">
+                {deck?.tests?.length ?? 0}
+                {Object.keys(deck?.routes ?? {}).length > 0 && <small className="good">{Object.keys(deck?.routes ?? {}).length} working</small>}
+              </span>
+            </button>
+            <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(false)}>
+              <b>Edit deck</b>
+              <svg className="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" />
+              </svg>
             </button>
             <button className="menu-tile" onClick={() => setScreen("decks")}>
               <b>Decks</b>
-              <span>New, import, delete</span>
+              <span className="tile-number">{decks.length}</span>
             </button>
             <button className="menu-tile" onClick={() => setScreen("sync")}>
               <b>Sync</b>
-              <span>Backup, deck folder, Drive</span>
+              <svg className="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12a8 8 0 0 1 14-5.3M20 4v5h-5M20 12a8 8 0 0 1-14 5.3M4 20v-5h5" />
+              </svg>
             </button>
           </div>
         </nav>

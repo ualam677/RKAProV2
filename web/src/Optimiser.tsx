@@ -123,6 +123,14 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
 
   const first = useMemo(() => computeOdds(main, 5), [main]);
   const secondOdds = useMemo(() => computeOdds(main, 6), [main]);
+  // remembered for the menu's Optimise tile
+  useEffect(() => {
+    try {
+      localStorage.setItem(`rka.odds.${deck.id}`, String(first.combo));
+    } catch {
+      // the tile just shows no number
+    }
+  }, [deck.id, first.combo]);
   const odds = second ? secondOdds : first;
   const everyStartProven = useMemo(() => allProven(main), [main]);
   const proven = useMemo(() => computeOdds(provenOnly(main), second ? 6 : 5), [main, second]);
