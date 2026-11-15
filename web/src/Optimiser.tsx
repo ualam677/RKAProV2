@@ -326,6 +326,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   // the odds row or warning whose words are showing (tapped)
   const [said, setSaid] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [explain, setExplain] = useState(false);
   const [tab, setTab] = useState<"odds" | "cards" | "lines">(() => {
     try {
       const saved = localStorage.getItem("rka.optTab");
@@ -394,7 +395,8 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
               <MiniCards kinds={["play"]} />
               <em className={`grade grade-${grade(odds.combo).toLowerCase()}`}>{grade(odds.combo)}</em>
               <small className="muted" title="The engine played every card alone and with each other card">
-                Engine-checked {engineChecked ? pct(engineChecked.combo) : engineProgress?.total ? `${engineProgress.done}/${engineProgress.total}` : "…"} · proven {pct(everyStartProven ? odds.combo : proven.combo)}
+                Engine-checked {engineChecked ? pct(engineChecked.combo) : engineProgress?.total ? `${engineProgress.done}/${engineProgress.total}` : "…"}
+                {(everyStartProven || proven.combo > 0) && ` · proven ${pct(everyStartProven ? odds.combo : proven.combo)}`}
               </small>
             </span>
           </div>
@@ -552,18 +554,26 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
                 ))}
               </div>
             )}
+            {explain && (
+              <p className="trait-said setup-said">
+                <b>VS</b> the hand traps the opponent holds (a dud deck) · <b>FULL ≥</b> interruptions that count as a full board · <b>HAND</b> cards in a random hand · <b>MY ✋</b> whether your own hand traps can chain on your turn
+              </p>
+            )}
             <div className="setup-row">
+              <button className={`icon-button small setup-info ${explain ? "on" : ""}`} onClick={() => setExplain(!explain)} aria-label="What these settings mean" aria-expanded={explain}>
+                ⓘ
+              </button>
               <Stepper label="FULL ≥" value={fullAt} min={1} max={8} suffix="INT" title="A full board: at least this many interruptions (effects usable on the opponent's turn that negate or remove)" onChange={(value) => onChange({ ...deck, fullAt: value, updated: Date.now() })} />
               {setup}
             </div>
           </section>
 
           {/* 2. the one number: how often your hand reaches a full board against what the opponent holds */}
+          <span className="headline-label">FULL BOARD</span>
           <div className="test-headline">
-            <span className="headline-label">FULL BOARD</span>
-            <b>{headline === null ? "—" : pct(headline)}</b>
+            <b className={headline === null ? "empty" : ""}>{headline === null ? "–%" : pct(headline)}</b>
             <span className="headline-note">
-              {headline === null && lined > 0 ? "tap ↻ to check your lines against these hand traps" : `${lined}/${startCards.length} starts have a line`}
+              {lined === 0 ? "Play a start ▶, then save it as a working line" : headline === null ? "↻ to check vs these hand traps" : `${lined}/${startCards.length} starts have a line`}
             </span>
             {Object.keys(routes).length > 0 && (
               <button className="icon-button small" disabled={!!routing || !!choking} onClick={checkAgain} aria-label="Check the lines against hand traps again" title="Check the lines against hand traps again">
@@ -655,13 +665,13 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
     <div className={`route-line ${full ? "full" : ""}`}>
       {route.board.length > 0 && <EndBoard board={route.board} interruptions={stops} nameOf={nameOf} />}
       <div className="route-marks">
-        <button className={`int-badge ${tone(stops.length)}`} onClick={() => say(stopsText)} aria-label={stopsText}>
+        <button className={`int-badge ${tone(stops.length)} ${said === stopsText ? "on" : ""}`} onClick={() => say(stopsText)} aria-label={stopsText}>
           {stops.length}
           <small>INT</small>
           {full && <span aria-hidden="true">✓</span>}
         </button>
         {route.nibiru && (
-          <button className={`route-mark ${route.nibiru.proof ? "good" : "warn"}`} onClick={() => say(nibiruText)} aria-label={nibiruText}>
+          <button className={`route-mark ${route.nibiru.proof ? "good" : "warn"} ${said === nibiruText ? "on" : ""}`} onClick={() => say(nibiruText)} aria-label={nibiruText}>
             <span className="mini-card">
               <CardArt code={27204311} />
             </span>
@@ -669,14 +679,14 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
           </button>
         )}
         {protectText && (
-          <button className="route-mark good" onClick={() => say(protectText)} aria-label={protectText}>
+          <button className={`route-mark good ${said === protectText ? "on" : ""}`} onClick={() => say(protectText)} aria-label={protectText}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z" />
             </svg>
           </button>
         )}
         {combo && !checking && (
-          <button className={`route-mark ${tone(combo.steps.length ? combo.interruptions : fullAt)}`} onClick={() => say(comboText)} aria-label={comboText}>
+          <button className={`route-mark ${tone(combo.steps.length ? combo.interruptions : fullAt)} ${said === comboText ? "on" : ""}`} onClick={() => say(comboText)} aria-label={comboText}>
             {combo.traps.map((trap) => (
               <span key={trap} className="mini-card">
                 <CardArt code={trap} />

@@ -1402,7 +1402,7 @@ function App() {
               <>
                 <Stepper label="HAND" value={hand} min={1} max={6} onChange={pickHand} />
                 <button className={`setup-toggle ${ignoreHandTraps ? "" : "on"}`} onClick={() => setIgnoreHandTraps(!ignoreHandTraps)} title="Off: on your turn, hand traps in your own hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos. On the opponent's turn they always can." aria-pressed={!ignoreHandTraps}>
-                  MY ✋ {ignoreHandTraps ? "OFF" : "ON"}
+                  MY ✋ {ignoreHandTraps ? "SKIP" : "CHAIN"}
                 </button>
               </>
             }

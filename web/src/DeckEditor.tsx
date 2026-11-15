@@ -91,6 +91,12 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, traits, r
   const [detail, setDetail] = useState<{ code: number; from?: Section } | null>(null);
   const [notice, setNotice] = useState("");
   const [menu, setMenu] = useState(false);
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setMenu(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menu]);
   // remembered for this visit, so coming back from a test or a watched line returns to the optimiser
   const [optimising, setOptimisingState] = useState(() => {
     try {
@@ -255,6 +261,7 @@ export function DeckEditor({ deck, cards, texts, banlist, requestInfo, traits, r
         <button className="icon-button" onClick={() => setMenu(!menu)} aria-label="More">
           ⋯
         </button>
+        {menu && <div className="scrim under" onClick={() => setMenu(false)} />}
         {menu && (
           <div className="menu editor-menu" onClick={() => setMenu(false)}>
             <button className="button" onClick={() => onTest()}>
