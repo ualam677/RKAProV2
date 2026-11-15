@@ -1235,7 +1235,7 @@ function App() {
           <div className="menu-grid">
             <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(true)}>
               <b>Optimise</b>
-              <span className="tile-number">{menuOdds !== null ? <>{(menuOdds * 100).toFixed(1)}<small>%</small></> : "—"}</span>
+              <span className="tile-number">{menuOdds !== null ? <>{(menuOdds * 100).toFixed(1)}<small>%</small></> : <small className="tile-hint">Open to work out</small>}</span>
             </button>
             <button className="menu-tile" disabled={!deck} onClick={() => setScreen("replays")}>
               <b>Replays</b>

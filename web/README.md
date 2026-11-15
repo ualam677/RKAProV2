@@ -141,27 +141,37 @@ Develop: `RKA_DATA_DIR=<folder with cdb/, scripts/, dist/> npm run dev` with a `
 - Hand test options on the start screen: hand size 1-6 and chosen opening cards (empty slots are random). The last deck,
   hand size and chosen cards are remembered on the device.
 
-## Where things stand (14 Nov 2026)
+## Where things stand (15 Nov 2026)
 Read `docs/DECKBUILDING.md` first: the deckbuilding and combo principles the owner taught (dilution against dead cards,
 roles, clashes, hand trap resilience, which start to lead with). Judge the owner's choices; never just justify them.
-- Optimise has two tabs: Odds (odds, deck size and top cut on one line, "Try changes" to take out or add any card at any
-  size, clashes) and Cards (multiple-choice roles: a card can be a hand trap and a breaker; "2nd only" on hand traps;
-  traits read from card text; nothing card-specific hard-coded).
-- Test is the one place to test: every test faces a dud opponent (40 Marshmallon) holding only the hand traps picked
-  (up to 3, or none), the only ones it uses on your turn. Its Starts section has each start's Test button, its line,
-  its record (split by the hand traps held), which start to lead with, and the cut test (each worked line replayed
-  without a card).
-- "Save as a working line" (duel menu, or Mark as working in Replays) counts the test as a full board and makes it the
-  start's line; the hand trap check (tagged hand traps + common staples) and Nibiru / protection run on it.
+
+The UI was redesigned ("Ink & Signal, Yu-Gi-Oh! edition"; mockups in the session's design artifact): ink background,
+gold trim and display titles (Barlow Condensed), blue for actions, card-type frames, flat colours (the owner dislikes
+decorative gradients). The owner dislikes text blocks: show cards, symbols and numbers, with the words on tap.
+- Menu: deck card, one big TEST button, tiles with numbers (the Optimise tile shows the odds the Optimiser last worked
+  out, kept in localStorage `rka.odds.<deck id>`).
+- Test: setup card (VS = the dud opponent's hand traps, up to 3 or none; FULL ≥; HAND; MY ✋ chain/skip; ⓘ explains),
+  the FULL BOARD headline against exactly the hand traps picked, each start (▶, record badge, its saved line as an end
+  board plus marks), a sticky play bar with a card-art hand picker. A start's ▶ never changes these settings.
+- "Save as a working line" (duel menu, or Working? in Replays) counts the test as a full board and makes it the start's
+  line (unless the start has a better one); a hand trap check runs on it. Un-marking or deleting removes the line and
+  rescores the result. Undo / back a turn continue the same test (scored once, when you leave).
+- Optimise: Odds (big %, odds rows as card symbols, role strip, warning chips, deck size bar against the YCS top cut,
+  Try changes, clashes as card pairs, From your lines: per-hand-trap odds, two-start order, cut test) and Cards (framed
+  cards with role badges, trait icons, stopping hand traps as tiny cards, partners as small cards).
+- Replays and Decks: cards, badges, one main action, the rest under ⋯.
+- Checks used after every UI change (scratchpad scripts, not in the repo): a text overflow scan of every screen at
+  phone and desktop size, and a check that every card picture stays inside its frame with stand-in images (the
+  sandbox can't load card art).
 - Removed at the owner's request: suggestions of any kind, the engine's own line finder (its code stays: the computer
-  opponent plans with it), the real-deck opponent, going second in tests.
+  opponent plans with it), the real-deck opponent, going second in tests, stars on the icon.
 - Hand traps: `src/engine/handtraps.ts`, checked against a current TCG tier list and the card database (Magnificent
   Maestros format). "Kuriboh - Multiply!" isn't in the card database yet.
-- Open: a thin 30x62 Xyz card seen at the end of the Galaxy Wizard line in the replay viewer (not looked into); the owner
-  saw a "bar" flash when activating Photon Orbital (not reproduced in the viewer).
+- Open question for the owner: a test marked as working counts as a full board even when fewer interruptions were
+  counted (shown as e.g. 1/1 next to 0 INT); the alternative is scoring it by the count.
+- Open: a thin 30x62 Xyz card seen once in the replay viewer; a "bar" flash on Photon Orbital (neither reproduced).
 
 ## Next (ask the owner)
-3. A full UI overhaul so the site looks less busy and less generated (later; ask the owner first).
 Not wanted: a Side Deck planner, WindBot Ignite. Maybe later: drill mode, custom odds conditions, OCG / Master Duel ban
 lists.
 
