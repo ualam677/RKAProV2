@@ -9,7 +9,7 @@ import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, 
 import type { Piece } from "./engine/interruptions";
 import { CHOKE_TRAPS } from "./engine/probe";
 import { hasRole, secondOnly } from "./optimiser";
-import { Optimiser } from "./Optimiser";
+import { Optimiser, Stepper } from "./Optimiser";
 import { Tests } from "./Tests";
 import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
 import { readReplayLink, replayLink, toYdk } from "./decks";
@@ -111,6 +111,8 @@ function App() {
   const [hand, setHand] = useState(saved.hand ?? 5);
   const [chosen, setChosen] = useState<number[]>(saved.chosen ?? []);
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
+  // the Test screen's hand picker, open or not
+  const [picking, setPicking] = useState(false);
   const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
   const [opponentHandTraps, setOpponentHandTraps] = useState(saved.opponentHandTraps ?? false);
   const [fixedTraps, setFixedTraps] = useState(saved.fixedTraps ?? true);
@@ -1369,107 +1371,98 @@ function App() {
       )}
 
       {screen === "test" && deck && (
-        <>
+        <div className="test-screen">
           <div className="screen-head">
             <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
               ‹
             </button>
             <h2>Test</h2>
           </div>
-          <section className="box">
-            <h2>Hand size</h2>
-            <div className="segmented">
-              {[1, 2, 3, 4, 5, 6].map((size) => (
-                <button key={size} className={`button ${size === hand ? "on" : ""}`} onClick={() => pickHand(size)}>
-                  {size}
+          <Optimiser
+            only="lines"
+            setup={
+              <>
+                <Stepper label="HAND" value={hand} min={1} max={6} onChange={pickHand} />
+                <button className={`setup-toggle ${ignoreHandTraps ? "" : "on"}`} onClick={() => setIgnoreHandTraps(!ignoreHandTraps)} title="Off: on your turn, hand traps in your own hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos. On the opponent's turn they always can." aria-pressed={!ignoreHandTraps}>
+                  MY ✋ {ignoreHandTraps ? "OFF" : "ON"}
                 </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="box">
-            <div className="segmented two" title="Ignore: on your turn, hand traps in your hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos. On the opponent's turn they always can.">
-              <button className={`button ${!ignoreHandTraps ? "on" : ""}`} onClick={() => setIgnoreHandTraps(false)}>
-                My hand traps: ask
+              </>
+            }
+            play={
+              picking ? (
+                <section className="hand-picker">
+                  <div className="slots">
+                    {Array.from({ length: hand }, (_, slot) => {
+                      const code = chosen[slot];
+                      return code ? (
+                        <button key={slot} className="slot filled" onClick={() => unchoose(slot)} aria-label={`Remove ${nameOf(code)}`}>
+                          <CardArt code={code} />
+                          <span className="slot-name">{nameOf(code)}</span>
+                        </button>
+                      ) : (
+                        <span key={slot} className="slot">
+                          ?
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <div className="pick-grid">
+                    {unique.map((code) => {
+                      const left = copies(code) - picked(code);
+                      return (
+                        <button key={code} className="pick-card" disabled={left === 0 || chosen.length >= hand} onClick={() => choose(code)} aria-label={`${nameOf(code)}, ${left} left`}>
+                          <span className="pick-art">
+                            <CardArt code={code} />
+                            <b>×{left}</b>
+                          </span>
+                          <span className="pick-name">{nameOf(code)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null
+            }
+            deck={deck}
+            cards={cards}
+            nameKey={(code) => {
+              const card = cards.get(code);
+              return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
+            }}
+            room={() => 0}
+            onChange={changeDeck}
+            onShow={() => {}}
+            requestInfo={(codes) => void info(codes)}
+            traits={traits}
+            requestTraits={(codes) => post({ type: "traits", codes })}
+            cutResult={cutResult && cutResult.deckId === deck.id ? cutResult : null}
+            onCutTest={(code) => cutTest(deck, code)}
+            onTest={(picked) => start(picked ? { chosen: picked } : undefined)}
+            engineProgress={probe && probe.deckId === deck.id ? probe : null}
+            routing={null}
+            choking={choking && choking.deckId === deck.id ? { code: choking.code, waiting: choking.queue.map((one) => one.code) } : null}
+            onFindLines={() => {}}
+            onCheckChokes={(starts) => checkChokes(deck, starts)}
+            onWatchLine={(line, code) => openViewer({ ...line, id: newId(), date: Date.now(), testOf: code })}
+            onCheck={() => checkDeck(deck)}
+          />
+          <div className="play-bar">
+            <button className={`button pick-toggle ${picking || chosen.length ? "on" : ""}`} onClick={() => setPicking(!picking)} aria-expanded={picking}>
+              {picking ? "Done" : chosen.length ? `Hand ${chosen.length}/${hand}` : "Pick hand"}
+            </button>
+            {chosen.length > 0 && (
+              <button className="button ghost small" onClick={() => setChosen([])} aria-label="Clear the picked cards">
+                ✕
               </button>
-              <button className={`button ${ignoreHandTraps ? "on" : ""}`} onClick={() => setIgnoreHandTraps(true)}>
-                My hand traps: ignore
-              </button>
-            </div>
-          </section>
-
-          <section className="box">
-            <h2>Starts</h2>
-            <Optimiser
-              only="lines"
-              deck={deck}
-              cards={cards}
-              nameKey={(code) => {
-                const card = cards.get(code);
-                return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
-              }}
-              room={() => 0}
-              onChange={changeDeck}
-              onShow={() => {}}
-              requestInfo={(codes) => void info(codes)}
-              traits={traits}
-              requestTraits={(codes) => post({ type: "traits", codes })}
-              cutResult={cutResult && cutResult.deckId === deck.id ? cutResult : null}
-              onCutTest={(code) => cutTest(deck, code)}
-              onTest={(picked) => start(picked ? { chosen: picked } : undefined)}
-              engineProgress={probe && probe.deckId === deck.id ? probe : null}
-              routing={null}
-              choking={choking && choking.deckId === deck.id ? { code: choking.code, waiting: choking.queue.map((one) => one.code) } : null}
-              onFindLines={() => {}}
-              onCheckChokes={(starts) => checkChokes(deck, starts)}
-              onWatchLine={(line, code) => openViewer({ ...line, id: newId(), date: Date.now(), testOf: code })}
-              onCheck={() => checkDeck(deck)}
-            />
-          </section>
-
-          <section className="box">
-            <div className="box-head">
-              <h2>Opening hand</h2>
-              {chosen.length > 0 && (
-                <button className="button ghost small" onClick={() => setChosen([])}>
-                  Clear
-                </button>
-              )}
-            </div>
-            <div className="slots">
-              {Array.from({ length: hand }, (_, slot) => {
-                const code = chosen[slot];
-                return code ? (
-                  <button key={slot} className="slot filled" onClick={() => unchoose(slot)} aria-label={`Remove ${nameOf(code)}`}>
-                    <CardArt code={code} />
-                    <span className="slot-name">{nameOf(code)}</span>
-                  </button>
-                ) : (
-                  <span key={slot} className="slot">
-                    Random
-                  </span>
-                );
-              })}
-            </div>
-            <div className="deck-list">
-              {unique.map((code) => {
-                const left = copies(code) - picked(code);
-                return (
-                  <button key={code} className="deck-row" disabled={left === 0 || chosen.length >= hand} onClick={() => choose(code)}>
-                    <span>{nameOf(code)}</span>
-                    <b>×{left}</b>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-          <button className="button primary start-test" disabled={!ready || deck.main.length === 0} onClick={() => start()}>
-            {chosen.length === 0 ? "Random hand" : chosen.length < hand ? `${chosen.length} chosen + random` : "Chosen hand"}
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M7 4v16l13-8z" />
-            </svg>
-          </button>
-        </>
+            )}
+            <button className="button primary start-test" disabled={!ready || deck.main.length === 0} onClick={() => start()}>
+              {chosen.length === 0 ? "Random hand" : chosen.length < hand ? "Fill + play" : "Play hand"}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 4v16l13-8z" />
+              </svg>
+            </button>
+          </div>
+        </div>
       )}
 
       {screen === "replays" && deck && (

@@ -33,6 +33,9 @@ interface Props {
   requestTraits: (codes: number[]) => void;
   // "lines": only the starts, their lines and records (the Test screen shows this part)
   only?: "lines";
+  // the Test screen's own settings (hand size, your hand traps) and its hand picker, placed in the layout
+  setup?: React.ReactNode;
+  play?: React.ReactNode;
   cutResult: { cut: number; lines?: { start: number; before: number; after: number; board: number[] }[] } | null;
   onCutTest: (code: number) => void;
   onCheckChokes: (starts: { code: number; hand: number[] }[]) => void;
@@ -44,7 +47,7 @@ const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const oneIn = (value: number) => (value <= 0 ? "never" : `about 1 hand in ${Math.max(1, Math.round(1 / value))}`);
 const ORDER: Role[] = ["none", "starter", "pair", "extender", "piece", "handtrap", "handtrap2", "breaker", "brick", "other"];
 
-export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
+export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, requestTraits, deck, cards, nameKey, room, onChange, onShow, requestInfo, onTest, engineProgress, onCheck, routing, choking, onFindLines, onCheckChokes, onWatchLine }: Props) {
   const [second, setSecond] = useState(false);
   const [goal, setGoal] = useState<Goal>(() => (localStorage.getItem("rka.goal") as Goal) || "comboHandtrap");
   const [partnerFor, setPartnerFor] = useState<number | null>(null);
@@ -201,6 +204,9 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
     [trapCodes, main, second, deck.routes, fullAt],
   );
 
+  // the Test headline: a full board against exactly what the opponent holds (none, one, or several together)
+  const lined = startCards.filter((card) => routes[card.code]).length;
+  const headline = !reached ? null : holding.length === 0 ? reached.combo : holding.length === 1 ? (through.find((one) => one.trap === holding[0])?.odds ?? null) : together;
   const handFor = (card: DeckCard) => testHand(card, main)?.map((code) => held.get(code) ?? code) ?? null;
   const findAll = () => onFindLines(startCards.flatMap((card) => { const hand = handFor(card); return hand ? [{ code: card.code, hand }] : []; }));
 
@@ -319,6 +325,7 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
   const [explained, setExplained] = useState<{ code: number; full: string } | null>(null);
   // the odds row or warning whose words are showing (tapped)
   const [said, setSaid] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
   const [tab, setTab] = useState<"odds" | "cards" | "lines">(() => {
     try {
       const saved = localStorage.getItem("rka.optTab");
@@ -437,6 +444,31 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
           {(deck.results ?? []).length > 0 && <Measured results={deck.results ?? []} deck nameOf={nameOf} />}
           <DeckSize main={main} side={side} room={room} nameOf={nameOf} takenBy={takenBy} />
           <Clashes main={main} nameOf={nameOf} traits={traits} />
+          {Object.keys(routes).length > 0 && (
+            <div className="opt-from-lines">
+              <h3 className="section-label">FROM YOUR LINES</h3>
+              {reached && (
+                <span className="opt-through-row" aria-label="Full board, no hand traps">
+                  <MiniCards kinds={["play"]} />
+                  <b>{pct(reached.combo)}</b>
+                </span>
+              )}
+              {through.length > 0 && reached && (
+                <div className="opt-through-list">
+                  {through.map(({ trap, odds: value }) => (
+                    <span key={trap} className="opt-through-row" aria-label={`Full board through ${nameOf(trap)}`} title={`Full board through ${nameOf(trap)}`}>
+                      <span className="mini-card">
+                        <CardArt code={trap} />
+                      </span>
+                      <b>{pct(value)}</b>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <TwoStarts routes={routes} nameOf={nameOf} />
+              <CutTest main={main} lines={Object.keys(routes).length} nameOf={nameOf} result={cutResult} onTest={onCutTest} />
+            </div>
+          )}
         </>
       )}
 
@@ -493,62 +525,59 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
 
       {main.length > 0 && only === "lines" && (
         <>
-          <div className="opt-find">
-            <span className="opt-fullat" title="Full board: at least this many interruptions (effects usable on the opponent's turn that negate or remove)">
-              FULL ≥
-              <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.max(1, fullAt - 1), updated: Date.now() })} aria-label="Fewer">
-                −
-              </button>
-              <b>{fullAt}</b>
-              <button className="button small" onClick={() => onChange({ ...deck, fullAt: Math.min(8, fullAt + 1), updated: Date.now() })} aria-label="More">
-                +
-              </button>
-              <small>INT</small>
-            </span>
-          </div>
-          <div className="opt-through">
-            <span className="opt-holds" title="The opponent is a dud deck (Marshmallon) holding the hand traps you pick: up to 3, or none">
-              Opponent holds <b>{holding.length}/3</b>
-            </span>
-            <div className="trap-picks">
-              {trapChoices.map((trap) => (
-                <button key={trap} className={`trap-pick ${holding.includes(trap) ? "on" : ""}`} onClick={() => toggleHeld(trap)} aria-pressed={holding.includes(trap)}>
-                  <span className="trap-pick-art">
+          {/* 1. the setup: who you play against, what counts as a full board, and your own settings */}
+          <section className="test-setup">
+            <button className="setup-holds" onClick={() => setPicking(!picking)} aria-expanded={picking}>
+              <span className="setup-label">VS</span>
+              {holding.length ? (
+                holding.map((trap) => (
+                  <span key={trap} className="mini-card held" title={nameOf(trap)}>
                     <CardArt code={trap} />
                   </span>
-                  <span className="trap-pick-name">{nameOf(trap)}</span>
-                </button>
-              ))}
-            </div>
-            {reached && together !== null && holding.length > 1 && (
-              <span className="opt-through-row" aria-label={`Full board through ${holding.map(nameOf).join(" + ")}`}>
-                {holding.map((trap) => (
-                  <span key={trap} className="mini-card">
-                    <CardArt code={trap} />
-                  </span>
-                ))}
-                <b>{pct(together)}</b>
-              </span>
-            )}
-            {through.length > 0 && reached && (
-              <div className="opt-through-list">
-                {through.map(({ trap, odds: value }) => (
-                  <span key={trap} className="opt-through-row" aria-label={`Full board through ${nameOf(trap)}`}>
-                    <span className="mini-card">
+                ))
+              ) : (
+                <span className="setup-none">no hand traps</span>
+              )}
+              <span className="setup-change">{picking ? "Done" : "Change"}</span>
+            </button>
+            {picking && (
+              <div className="trap-picks">
+                {trapChoices.map((trap) => (
+                  <button key={trap} className={`trap-pick ${holding.includes(trap) ? "on" : ""}`} onClick={() => toggleHeld(trap)} aria-pressed={holding.includes(trap)}>
+                    <span className="trap-pick-art">
                       <CardArt code={trap} />
                     </span>
-                    <b>{pct(value)}</b>
-                  </span>
+                    <span className="trap-pick-name">{nameOf(trap)}</span>
+                  </button>
                 ))}
               </div>
             )}
-            {reached && (
-              <button className="button small" disabled={!!routing || !!choking} onClick={checkAgain}>
-                {choking ? "Checking…" : "Check again"}
+            <div className="setup-row">
+              <Stepper label="FULL ≥" value={fullAt} min={1} max={8} suffix="INT" title="A full board: at least this many interruptions (effects usable on the opponent's turn that negate or remove)" onChange={(value) => onChange({ ...deck, fullAt: value, updated: Date.now() })} />
+              {setup}
+            </div>
+          </section>
+
+          {/* 2. the one number: how often your hand reaches a full board against what the opponent holds */}
+          <div className="test-headline">
+            <span className="headline-label">FULL BOARD</span>
+            <b>{headline === null ? "—" : pct(headline)}</b>
+            <span className="headline-note">
+              {headline === null && lined > 0 ? "tap ↻ to check your lines against these hand traps" : `${lined}/${startCards.length} starts have a line`}
+            </span>
+            {Object.keys(routes).length > 0 && (
+              <button className="icon-button small" disabled={!!routing || !!choking} onClick={checkAgain} aria-label="Check the lines against hand traps again" title="Check the lines against hand traps again">
+                ↻
               </button>
             )}
           </div>
-          {startCards.length === 0 && <p className="muted">Tag your starters in Cards first.</p>}
+          {choking && <span className="opt-chokes">Checking hand traps against your lines…</span>}
+
+          {play}
+
+          {/* 3. each start: test it, and the line you saved for it */}
+          <h3 className="section-label">STARTS</h3>
+          {startCards.length === 0 && <p className="muted">Tag your starters in Optimise › Cards.</p>}
           {startCards.map((card) => (
             <div key={card.code} className="opt-line">
               <div className="opt-line-head">
@@ -556,6 +585,7 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
                   <CardArt code={card.code} />
                 </span>
                 <b>{nameOf(card.code)}</b>
+                <StartRecord results={(deck.results ?? []).filter((one) => one.start === card.code)} nameOf={nameOf} />
                 <button
                   className="play-round"
                   aria-label={`Test ${nameOf(card.code)}`}
@@ -570,7 +600,7 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
                   </svg>
                 </button>
               </div>
-              {routes[card.code] ? (
+              {routes[card.code] && (
                 <RouteLine
                   route={routes[card.code]}
                   fullAt={fullAt}
@@ -582,14 +612,9 @@ export function Optimiser({ only, cutResult, onCutTest, traits, requestTraits, d
                   nameOf={nameOf}
                   onWatch={() => routes[card.code] && onWatchLine(routes[card.code].record, card.code)}
                 />
-              ) : (
-                <span className="muted opt-engine">No line yet</span>
               )}
-              <Measured results={(deck.results ?? []).filter((one) => one.start === card.code)} nameOf={nameOf} />
             </div>
           ))}
-          <TwoStarts routes={routes} nameOf={nameOf} />
-          <CutTest main={main} lines={Object.keys(routes).length} nameOf={nameOf} result={cutResult} onTest={onCutTest} />
         </>
       )}
 
@@ -1100,3 +1125,41 @@ const ROW_GLYPHS: Record<string, Mini[]> = {
   "Two Normal Summon cards": ["n", "n"],
   "Dead card in hand": ["dead"],
 };
+
+// − value + in one line
+function Stepper({ label, value, min, max, suffix, title, onChange }: { label: string; value: number; min: number; max: number; suffix?: string; title?: string; onChange: (value: number) => void }) {
+  return (
+    <span className="stepper" title={title}>
+      <span className="stepper-label">{label}</span>
+      <button className="button small" onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min} aria-label={`${label} fewer`}>
+        −
+      </button>
+      <b>{value}</b>
+      <button className="button small" onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max} aria-label={`${label} more`}>
+        +
+      </button>
+      {suffix && <small>{suffix}</small>}
+    </span>
+  );
+}
+export { Stepper };
+
+// a start's tests: full boards out of all, tap for how they went by the hand traps held and what the misses were
+function StartRecord({ results, nameOf }: { results: TestResult[]; nameOf: (code: number) => string }) {
+  const [open, setOpen] = useState(false);
+  if (!results.length) return null;
+  const full = results.filter((one) => one.kind === "full").length;
+  const rate = full / results.length;
+  return (
+    <span className="start-record">
+      <button className={`int-badge ${rate >= 0.75 ? "good" : rate >= 0.4 ? "warn" : "bad"}`} onClick={() => setOpen(!open)} aria-label={`${full} of ${results.length} tests reached a full board`}>
+        {full}/{results.length}
+      </button>
+      {open && (
+        <span className="start-record-detail">
+          <Measured results={results} nameOf={nameOf} />
+        </span>
+      )}
+    </span>
+  );
+}
