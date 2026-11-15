@@ -152,8 +152,21 @@ export interface StartOptions {
   opponentHandTraps?: boolean;
   // the only hand traps it may use on your turn (the ones you picked); others it draws stay in its hand
   opponentTraps?: number[];
+  // how it uses them: at the first legal chance, or as a strong player would ("smart"; tests saved before this setting
+  // existed replay as "instant")
+  trapTiming?: "instant" | "smart";
+  // from your saved lines' hand trap checks: for each start and hand trap, the moments in order and the interruptions
+  // left after using it there (smart uses it at the moment nothing later in the line beats)
+  trapPlans?: TrapPlan[];
   // the opponent takes the first turn: yours passes at once, it opens with 4 and draws to 5
   goSecond?: boolean;
+}
+
+export interface TrapPlan {
+  start: number;
+  trap: number;
+  clean: number;
+  windows: { at: string; interruptions: number }[];
 }
 
 // A card as the deck editor needs it.

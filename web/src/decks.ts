@@ -65,6 +65,8 @@ export interface SavedDeck extends Deck {
   fullAt?: number;
   // the hand traps the opponent holds together when lines are checked (default Ash Blossom and Infinite Impermanence)
   opponentTraps?: number[];
+  // how the opponent uses them on your turn: "smart" (the default) or at the first legal chance
+  trapTiming?: "instant" | "smart";
   // save states from the duel menu: the duel's start and every choice up to that moment
   saves?: SavedState[];
   // the file it is kept as in a linked deck folder, and when the two were last the same

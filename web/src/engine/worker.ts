@@ -24,6 +24,7 @@ import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { CHOKE_TRAPS, autoAnswer, chokeCombo, chokePoints, isFollow, isNeed, isProbes, play, playAgainst, probe, probeDeck, routeSearch, type CardEvidence } from "./probe";
+import type { TrapPlan } from "./protocol";
 import type { FromHelper, ToHelper } from "./helper";
 import { isHandTrap } from "./handtraps";
 import { interruptionsOf, nibiruStopper, readEffects, readSetConstants, type NibiruCheck, type Protection, type QuickEffect } from "./interruptions";
@@ -337,6 +338,13 @@ let opponentOn = false;
 let opponentHandTraps = false;
 // on your turn, only these hand traps (empty: any it holds)
 let opponentTraps: number[] = [];
+let trapTiming: "instant" | "smart" = "instant";
+let trapPlans: TrapPlan[] = [];
+// how far into each plan's moments the live duel has got: "start:trap" -> next window
+const planAt = new Map<string, number>();
+// the card your last action used ("after X" moments), and the card a hand trap just used should target
+let lastActed = 0;
+let aiTarget: (CardRef & { code: number }) | null = null;
 let goSecond = false;
 const aiUsed = new Set<string>();
 let aiBattled = false;
@@ -564,7 +572,7 @@ function buildPrompt(message: OcgMessage): boolean {
         choices.push({ label: "End Turn", phase: true });
         actions.push([SelectIdleCMDAction.TO_EP, null]);
       }
-      return one("", choices, null, (index) => ({ type: OcgResponseType.SELECT_IDLECMD, action: actions[index!][0], index: actions[index!][1] }), true);
+      return one("", choices, null, (index) => ((lastActed = choices[index!]?.card?.code ?? lastActed), { type: OcgResponseType.SELECT_IDLECMD, action: actions[index!][0], index: actions[index!][1] }), true);
     }
     case OcgMessageType.SELECT_BATTLECMD: {
       if (message.player !== 0) return answer({ type: OcgResponseType.SELECT_BATTLECMD, action: SelectBattleCMDAction.TO_EP, index: null });
@@ -872,6 +880,72 @@ function aiFollow(kind: "idle" | "pick", options: { code: number; tag?: string }
   return at;
 }
 
+// ---- the opponent's hand traps on your turn, used as a strong player would ("smart") ----
+// What a hand trap answers now, named as the hand trap check names its moments, so your saved lines' checks line up:
+// the effect on top of the chain, a summon, or the open moment after your last action.
+const momentNow = () => (chain.length ? nameOf(chain[chain.length - 1].code) : lastSummon ? `the summon of ${nameOf(lastSummon)}` : lastActed ? `after ${nameOf(lastActed)}` : "the start of the turn");
+// How a hand trap is used, from its own text:
+// chain: answers an activation ("When a card or effect is activated…": Ash, Ogre, Belle, Skull Meister, Dominus)
+// field: negates a monster you control (Veiler, Imperm): only on a monster activating its effect on the field
+// grave: hits a card in your GY (D.D. Crow, the Bystials): only on a card activating there
+// nibiru: after 5 summons, worth it once there is a board to tribute
+// event: used when it comes up (Droll after a search, Maxx "C", Mulcharmy, Mourner)
+type Family = "field" | "chain" | "grave" | "nibiru" | "event";
+const FAMILY_ORDER: Family[] = ["field", "chain", "grave", "nibiru", "event"];
+const families = new Map<number, Family>();
+function familyOf(code: number): Family {
+  if (!families.has(code)) {
+    const text = (texts.get(code) ?? "").replace(/\s+/g, " ");
+    const family: Family = /5 or more monsters/i.test(text) && /Tribute/i.test(text)
+      ? "nibiru"
+      : /\bWhen\b[^.]*activat|\bactivates\b[^.]*\(Quick Effect\)/i.test(text)
+        ? "chain"
+        : /target 1 [^;.]*(monster|card)s? your opponent controls/i.test(text)
+          ? "field"
+          : /target 1 [^;.]*in (your opponent's|either) GY/i.test(text)
+            ? "grave"
+            : "event";
+    families.set(code, family);
+  }
+  return families.get(code)!;
+}
+// alternate artworks are the same card
+const canonicalOf = (code: number) => {
+  const card = cards.get(code);
+  return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
+};
+/** Whether the opponent uses this hand trap now, playing smart. */
+function smartUse(trap: number, moment: string): boolean {
+  // a saved line for a start in your hand, whose check reached this moment: use it here only if it hurts and no later
+  // moment in that line hurts more
+  const hand = (record?.startHand ?? []).map(canonicalOf);
+  for (const plan of trapPlans) {
+    if (canonicalOf(plan.trap) !== canonicalOf(trap) || !hand.includes(canonicalOf(plan.start))) continue;
+    const key = `${plan.start}:${plan.trap}`;
+    const from = planAt.get(key) ?? 0;
+    const at = plan.windows.findIndex((window, index) => index >= from && window.at === moment);
+    if (at < 0) continue;
+    planAt.set(key, at + 1);
+    const here = plan.windows[at].interruptions;
+    const later = Math.min(...plan.windows.slice(at + 1).map((window) => window.interruptions));
+    return here < plan.clean && here <= later;
+  }
+  // otherwise by what the card does
+  const top = chain[chain.length - 1];
+  switch (familyOf(trap)) {
+    case "field":
+      return !!top && top.controller === 0 && (top.location & OcgLocation.MZONE) !== 0;
+    case "grave":
+      return !!top && top.controller === 0 && (top.location & OcgLocation.GRAVE) !== 0;
+    case "chain":
+      return !!top && top.controller === 0;
+    case "nibiru":
+      return cardsIn(0, OcgLocation.MZONE).filter(Boolean).length >= 3;
+    default:
+      return true;
+  }
+}
+
 function aiAnswer(message: OcgMessage): OcgResponse | null {
   switch (message.type) {
     case OcgMessageType.SELECT_IDLECMD: {
@@ -917,9 +991,20 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
       const usable = message.selects
         .map((card, index) => ({ card, index }))
         .filter(({ card }) => (turnPlayer === 1 ? !aiUsed.has(`c:${card.code}:${String(card.description)}`) : opponentHandTraps && card.location === OcgLocation.HAND && (!opponentTraps.length || opponentTraps.includes(knownCode(card.code)))));
-      const pick = usable[0];
+      let pick = usable[0];
+      if (turnPlayer !== 1 && trapTiming === "smart") {
+        // every hand trap on offer is weighed (each one's place in your saved line moves on), then the best is used
+        const moment = momentNow();
+        const ready = usable.filter(({ card }) => smartUse(knownCode(card.code), moment));
+        pick = ready.sort((a, b) => FAMILY_ORDER.indexOf(familyOf(knownCode(a.card.code))) - FAMILY_ORDER.indexOf(familyOf(knownCode(b.card.code))))[0];
+      }
       if (!pick) return { type: OcgResponseType.SELECT_CHAIN, index: null };
       aiUsed.add(`c:${pick.card.code}:${String(pick.card.description)}`);
+      // on your turn its target is the card it answers: your last chain link, or else the monster just summoned
+      if (turnPlayer !== 1) {
+        const mine = [...chain].reverse().find((link) => link.controller === 0);
+        aiTarget = mine ?? (lastSummon && lastSummonRef ? { ...lastSummonRef } : null);
+      }
       return { type: OcgResponseType.SELECT_CHAIN, index: pick.index };
     }
     case OcgMessageType.SELECT_EFFECTYN:
@@ -930,6 +1015,16 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
     case OcgMessageType.SELECT_UNSELECT_CARD: {
       // the plan's pick (what to search, what to send), if it is among the cards offered
       const list = message.type === OcgMessageType.SELECT_CARD ? message.selects : message.select_cards;
+      // a hand trap's target on your turn: the card it answers
+      if (aiTarget && turnPlayer !== 1 && message.type === OcgMessageType.SELECT_CARD && message.min === 1) {
+        const want = aiTarget;
+        const at = list.findIndex((card) => card.controller === want.controller && card.location === want.location && card.sequence === want.sequence);
+        const byCode = at >= 0 ? at : list.findIndex((card) => card.controller === want.controller && card.code === want.code);
+        if (byCode >= 0) {
+          aiTarget = null;
+          return { type: OcgResponseType.SELECT_CARD, indicies: [byCode] };
+        }
+      }
       const single = message.type === OcgMessageType.SELECT_UNSELECT_CARD || (message.min === 1 && message.max === 1);
       if (single && aiPlan.length && aiPlan[aiStep]?.startsWith("pick:")) {
         const at = aiFollow("pick", list.map((card) => ({ code: card.code })));
@@ -956,6 +1051,7 @@ let record: TestRecord | null = null;
 const phaseTitle = (name: string) => (name.startsWith("Main") ? `Main Phase ${name.slice(5)}` : name ? `${name} Phase` : "turn");
 // the monster summoned last, until the next action: a chance to respond right after it is about that summon
 let lastSummon = 0;
+let lastSummonRef: (CardRef & { code: number }) | null = null;
 // "Xyz Summon: 3 Level 8 monsters", "Xyz Summon using a "Galaxy-Eyes" Xyz Monster you control"
 // Whether the card's usual materials ("3 Level 8 monsters") are face-up on your field now. Xyz and Link Monsters have
 // no Level, so they never count. Materials the text puts some other way are taken as possible.
@@ -1058,6 +1154,7 @@ function advance() {
         case OcgMessageType.SPSUMMONING:
         case OcgMessageType.FLIPSUMMONING:
           lastSummon = message.code;
+          lastSummonRef = { controller: message.controller, location: message.location, sequence: message.sequence, code: message.code };
           events.push({ kind: "summon", code: message.code, name: nameOf(message.code), controller: message.controller, location: message.location, sequence: message.sequence });
           break;
         case OcgMessageType.CHAINING: {
@@ -1131,6 +1228,7 @@ function advance() {
           break;
         case OcgMessageType.CHAIN_END:
           chain = [];
+          aiTarget = null;
           solvingCode = 0;
           lastPicked = [];
           lastSummon = 0;
@@ -1184,6 +1282,11 @@ async function start(options: StartOptions) {
   opponentOn = !!options.opponent?.main.length;
   opponentHandTraps = !!options.opponentHandTraps;
   opponentTraps = (options.opponentTraps ?? []).map(knownCode);
+  trapTiming = options.trapTiming ?? "instant";
+  trapPlans = (options.trapPlans ?? []).map((plan) => ({ ...plan, start: knownCode(plan.start), trap: knownCode(plan.trap) }));
+  planAt.clear();
+  lastActed = 0;
+  aiTarget = null;
   goSecond = opponentOn && !!options.goSecond;
   aiUsed.clear();
   aiBattled = false;

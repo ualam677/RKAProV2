@@ -557,6 +557,15 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
               )}
               <span className="setup-change">{picking ? "Done" : "Change"}</span>
             </button>
+            {holding.length > 0 && (
+              <div className="segmented two trap-timing" role="group" aria-label="How the opponent uses its hand traps">
+                {(["smart", "instant"] as const).map((timing) => (
+                  <button key={timing} className={`button small ${(deck.trapTiming ?? "smart") === timing ? "on" : ""}`} onClick={() => onChange({ ...deck, trapTiming: timing, updated: Date.now() })}>
+                    {timing === "smart" ? "SMART" : "FIRST CHANCE"}
+                  </button>
+                ))}
+              </div>
+            )}
             {picking && (
               <div className="trap-picks">
                 {trapChoices.map((trap) => (
@@ -571,7 +580,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
             )}
             {explain && (
               <p className="trait-said setup-said">
-                <b>VS</b> the hand traps the opponent holds (a dud deck) · <b>FULL ≥</b> interruptions that count as a full board · <b>HAND</b> cards in a random hand · <b>MY ✋</b> whether your own hand traps can chain on your turn
+                <b>VS</b> the hand traps the opponent holds (a dud deck) · <b>SMART</b> it uses each one as a strong player would: only on what it stops, at the moment your saved line suffers most · <b>FIRST CHANCE</b> at the first legal moment · <b>FULL ≥</b> interruptions that count as a full board · <b>HAND</b> cards in a random hand · <b>MY ✋</b> whether your own hand traps can chain on your turn
               </p>
             )}
             <div className="setup-row">

@@ -389,6 +389,11 @@ function App() {
       opponent: { main: [...traps, ...Array.from({ length: 40 - traps.length }, () => 31305911)], extra: [] as number[] },
       opponentHandTraps: traps.length > 0,
       opponentTraps: traps,
+      trapTiming: deck?.trapTiming ?? ("smart" as const),
+      // your saved lines' hand trap checks, so the smart opponent waits for the moment that hurts each line most
+      trapPlans: Object.entries(deck?.routes ?? {}).flatMap(([start, route]) =>
+        route.source === "replay" ? (route.chokes ?? []).map((choke) => ({ start: Number(start), trap: choke.trap, clean: choke.clean, windows: choke.windows.map((window) => ({ at: window.at, interruptions: window.interruptions })) })) : [],
+      ),
       goSecond: false,
     };
   };

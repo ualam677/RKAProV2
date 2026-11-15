@@ -992,3 +992,4 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .mini-card b { font-size: 10px; line-height: 12px; }
 .pick-name, .trap-pick-name { font-size: 11px; }
 .tile-hint { font-family: Inter, system-ui, sans-serif; font-size: 13px !important; font-weight: 500 !important; color: #8a96ad !important; margin-left: 0 !important; }
+.trap-timing .button { min-height: 40px; font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: 0.04em; }
