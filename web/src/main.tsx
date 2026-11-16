@@ -129,6 +129,13 @@ function App() {
   useEffect(() => {
     if (screen === "sync") preloadGoogle();
   }, [screen]);
+  // every screen opens at its top; a reload doesn't carry the last screen's scroll onto the menu
+  useEffect(() => {
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+  }, []);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [screen]);
   // the deck whose ⋯ is open on the Decks screen
   const [deckMenu, setDeckMenu] = useState<string | null>(null);
   const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
