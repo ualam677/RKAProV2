@@ -1011,3 +1011,13 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .route-needs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .route-needs small { font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: 0.06em; color: #8a96ad; margin-right: 4px; }
 .needs-any { font-family: var(--display); font-weight: 700; font-size: 16px; color: #8a96ad; margin-left: 2px; }
+/* the replay caption never moves the board: always room for two caption lines and the step line */
+.viewer-strip { box-sizing: border-box; height: 74px; align-content: center; overflow: hidden; }
+.viewer-strip .viewer-caption { line-height: 1.3; }
+
+/* numbers in the Duel Links style: heavy italic, outlined where they sit on card art */
+:root { --num: "Exo 2", var(--display); }
+.lifebar-lp, .pile-count, .zone-stats, .zone-level, .opt-big > b, .tile-number, .test-headline > b, .int-badge, .opt-odds li > button b, .stepper b, .role-total, .size-bar > b, .clash b, .cut-line, .phase-button { font-family: var(--num); font-style: italic; font-weight: 800; }
+.zone-stats, .zone-level, .pile-count { -webkit-text-stroke: 0; text-shadow: -1px -1px 0 #04060b, 1px -1px 0 #04060b, -1px 1px 0 #04060b, 1px 1px 0 #04060b, 0 0 4px rgba(0, 0, 0, 0.8); }
+.lifebar-lp { letter-spacing: 0.02em; }
+.duel .lifebar-lp { font-family: var(--num); font-style: italic; font-weight: 800; font-size: 24px; }

@@ -169,6 +169,18 @@ flat gold frame over a fan of three cards (no stars, no gradient on the border).
   Maestros format). "Kuriboh - Multiply!" isn't in the card database yet.
 - Open: a thin 30x62 Xyz card seen once in the replay viewer; a "bar" flash on Photon Orbital (neither reproduced).
 
+## How RKAPro knows what it knows (16 Nov 2026)
+- From the engine (any deck): whether a card takes a card from the Deck alone or with a partner (the "starter" check:
+  it does not mean a full board); interruptions, read from card scripts; traits from card text; and every replay of a
+  saved line: its hand trap check (each hand trap at each moment), and its NEEDS (the line replayed without each
+  opening-hand card: the cards whose absence lowers the board, plus how many other cards it uses).
+- From you: saved working lines, marked choke points (duel ☰ › Mark choke point here; the smart opponent hand-traps
+  there), FULL ≥, role tags.
+- Built in: the hand trap list (handtraps.ts) and CHOKE_TRAPS. Lines are filed under a card they need (re-filed once
+  measured), and a start's ▶ deals exactly what it needs (its line's cards, else the card alone or with its partner).
+- Replays of saved lines had been failing silently past any Xyz/Link summon, on alternate-art codes, and when a
+  skipped prompt's pick stood in for a search; all three fixed (16 Nov), so hand trap checks of older lines are now right.
+
 ## 1.0.0 (15 Nov 2026)
 Released after advisor/checker reviews (developer, Yu-Gi-Oh! player, UI). In this release: the smart hand-trap
 opponent (SMART / FIRST CHANCE in Test: only on what a trap stops, on the card using its effect, waiting for the moment
