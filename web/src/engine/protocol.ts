@@ -166,6 +166,8 @@ export interface TrapPlan {
   start: number;
   // the hand cards the line needs (all of them in your hand for the plan to apply); without it, the start card
   needs?: number[];
+  // choke points you marked on the line, in order: the smart opponent uses its hand trap there
+  marks?: string[];
   trap: number;
   clean: number;
   windows: { at: string; interruptions: number }[];
@@ -202,6 +204,8 @@ export type ToWorker =
   | { type: "init" }
   | ({ type: "start" } & StartOptions)
   | { type: "answer"; picks: number[] | null }
+  // where the duel is now, named as the hand trap check names moments (to mark a choke point)
+  | { type: "moment"; id: number }
   // start a recorded test and make its first `picks` choices at once, showing only where that leaves the duel
   | ({ type: "jump"; picks: (number[] | null)[] } & StartOptions)
   // replay a recorded test and send back every moment of it (for a video), without showing it
@@ -250,6 +254,7 @@ export type FromWorker =
   | { type: "cut"; id: number; cut: number; lines: { start: number; before: number; after: number; board: number[] }[] }
   // needs: cards whose absence lowers the line's board; any: how many more of the hand's other cards it still uses
   | { type: "needs"; id: number; lines: { key: string; before: number; needs: number[]; any: number }[] }
+  | { type: "moment"; id: number; at: string; step: number }
   | { type: "traits"; traits: [number, string[]][] }
   | { type: "error"; text: string };
 

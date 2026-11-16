@@ -19,6 +19,9 @@ interface Props {
   // "This worked": keeps the test and the board it ended on; undefined while nothing has been played yet
   worked: boolean;
   onWorked?: () => void;
+  // marks this moment as a choke point (where a hand trap should land); how many are marked
+  onMark?: () => void;
+  marks?: number;
   // what saving it did, in words ("Galaxy Wizard's line · 3 interruptions")
   workedText?: string;
   // a saved test playing back: where it is, and stopping it to play on yourself
@@ -376,7 +379,7 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
   );
 }
 
-export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, workedText, replaying, states, onSaveState, onLoadState, onRewind, viewer, viewerMenu }: Props) {
+export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, onMark, marks, workedText, replaying, states, onSaveState, onLoadState, onRewind, viewer, viewerMenu }: Props) {
   const [stateList, setStateList] = useState(false);
   // Xyz Materials drawn under their monster, like EDOPro (an option, remembered)
   const [showMaterials, setShowMaterials] = useState(() => {
@@ -942,6 +945,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
             ⏮ Back a turn
           </button>
         </>
+      )}
+      {onMark && (
+        <button className="button" onClick={() => (setMenuOpen(false), onMark())}>
+          ✋ Mark choke point here{marks ? ` (${marks})` : ""}
+        </button>
       )}
       {onWorked && (
         <button className={`button ${worked ? "on" : ""}`} onClick={onWorked}>

@@ -737,6 +737,7 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
           : "never usable against this line"
       }`
     : "";
+  const marksText = route.marks?.length ? `Choke points you marked (the smart opponent hand-traps here): ${route.marks.map((mark) => mark.at).join(" · ")}` : "";
   const tone = (count: number) => (count >= fullAt ? "good" : count === 0 ? "bad" : "warn");
   return (
     <div className={`route-line ${full ? "full" : ""}`}>
@@ -785,6 +786,11 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
               </span>
             ))}
             → {combo.steps.length ? combo.interruptions : "–"}
+          </button>
+        )}
+        {route.marks && route.marks.length > 0 && (
+          <button className={`route-mark warn ${said === marksText ? "on" : ""}`} onClick={() => say(marksText)} aria-label={marksText}>
+            ✋ {route.marks.length}
           </button>
         )}
         {!fresh && (

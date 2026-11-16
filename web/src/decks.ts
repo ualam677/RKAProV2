@@ -16,6 +16,8 @@ export interface SavedTest extends TestRecord {
   board?: number[];
   // the start the optimiser's Test button was testing
   testOf?: number;
+  // choke points you marked while playing it: the moment (as the hand trap check names it) and the choice it came at
+  marks?: { at: string; step: number }[];
   // what you had when you said it worked (field with Xyz Materials, hand, GY), and the interruptions it holds
   pieces?: Piece[];
   interruptions?: Interruption[];
@@ -106,6 +108,8 @@ export interface SavedRoute {
   // ("any card": a cost or a discard), and the deck it was measured for
   needs?: number[];
   any?: number;
+  // your marked choke points (copied from the test it was saved from)
+  marks?: { at: string; step: number }[];
   needsFor?: string;
   // the worked replay it came from
   testId?: string;

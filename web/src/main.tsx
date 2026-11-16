@@ -111,6 +111,9 @@ function App() {
   const [hand, setHand] = useState(saved.hand ?? 5);
   const [chosen, setChosen] = useState<number[]>(saved.chosen ?? []);
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
+  // choke points marked in the test on screen
+  const [marks, setMarks] = useState(0);
+  const markWaiting = useRef(0);
   // the Test screen's hand picker, open or not
   const [picking, setPicking] = useState(false);
   // leaving the editor: a "+ New" deck left untouched isn't kept (it would become the deck in use, empty)
@@ -152,7 +155,7 @@ function App() {
   probeRef.current = probe;
   // the hand test on screen, saved with its deck as it is played (not while a saved one is being watched)
   // `from`: choices replayed from a saved test, not saved again until you make one of your own
-  const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; pieces?: Piece[]; from: number } | null>(null);
+  const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; pieces?: Piece[]; from: number; marks?: { at: string; step: number }[] } | null>(null);
   const [record, setRecord] = useState<TestRecord | null>(null);
   const lastRecord = useRef<TestRecord | null>(null);
   const [worked, setWorked] = useState(false);
@@ -311,6 +314,14 @@ function App() {
         // every line found: now where hand traps hurt each of them
         const done = decksRef.current.find((one) => one.id === job.deckId);
         if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "moment") {
+        const current = test.current;
+        if (!current || markWaiting.current !== message.id) return;
+        markWaiting.current = 0;
+        current.marks = [...(current.marks ?? []).filter((mark) => mark.step !== message.step), { at: message.at, step: message.step }];
+        setMarks(current.marks.length);
+        const played = lastRecord.current;
+        if (played) keep(current.deckId, { ...played, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces, marks: current.marks });
       } else if (message.type === "needs") {
         // each line filed under a card it needs (the start you pressed ▶ on, or the first starter in the hand, may not be)
         const deckId = needsJobs.current.get(message.id);
@@ -391,7 +402,7 @@ function App() {
           }
           const keys = test.steps.flatMap((step) => (!step.code ? [] : step.idle ? [`${step.text.split(/[ :]/)[0]}:${step.code}`] : [`pick:${step.hint ?? 0}:${step.code}`]));
           const line = {
-            keys, board: test.board ?? [], interruptions: message.list, protection: message.protection, nibiru: message.nibiru, coverage: 1, full: count >= (owner.fullAt ?? 3),
+            keys, marks: test.marks, board: test.board ?? [], interruptions: message.list, protection: message.protection, nibiru: message.nibiru, coverage: 1, full: count >= (owner.fullAt ?? 3),
             aimed: true, tried: 0, date: Date.now(), signature: deckSignature(owner), record: { options: test.options, picks: test.picks, steps: test.steps, startHand: test.startHand }, source: "replay" as const, testId: test.id,
           };
           const updated = { ...owner, results, routes: { ...owner.routes, [start]: line } };
@@ -441,7 +452,7 @@ function App() {
       trapTiming: deck?.trapTiming ?? ("smart" as const),
       // your saved lines' hand trap checks, so the smart opponent waits for the moment that hurts each line most
       trapPlans: Object.entries(deck?.routes ?? {}).flatMap(([start, route]) =>
-        route.source === "replay" ? (route.chokes ?? []).map((choke) => ({ start: Number(start), needs: route.needs, trap: choke.trap, clean: choke.clean, windows: choke.windows.map((window) => ({ at: window.at, interruptions: window.interruptions })) })) : [],
+        route.source === "replay" ? (route.chokes ?? []).map((choke) => ({ start: Number(start), needs: route.needs, marks: route.marks?.map((mark) => mark.at), trap: choke.trap, clean: choke.clean, windows: choke.windows.map((window) => ({ at: window.at, interruptions: window.interruptions })) })) : [],
       ),
       goSecond: false,
     };
@@ -665,7 +676,7 @@ function App() {
   useEffect(() => {
     const current = test.current;
     if (!record || !current || record.picks.length <= current.from) return;
-    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
+    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces, marks: current.marks });
   }, [record]);
   // a test you played (made choices of your own in), counted once you move on from it
   const outcomes = useRef(new Map<string, { deckId: string; date: number; start?: number; hand: number[]; trap?: string; held: number[] }>());
@@ -699,6 +710,7 @@ function App() {
   const newTest = (testOf?: number, from = 0) => {
     finishTest();
     test.current = deck ? { id: newId(), deckId: deck.id, date: Date.now(), testOf, from } : null;
+    setMarks(0);
     setRecord(null);
     setWorked(false);
   };
@@ -728,7 +740,7 @@ function App() {
       const owner = decksRef.current.find((one) => one.id === current.deckId);
       if (owner) changeDeck({ ...owner, routes: Object.fromEntries(Object.entries(owner.routes ?? {}).filter(([, route]) => route.testId !== current.id)) });
     }
-    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces });
+    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces, marks: current.marks });
     if (current.pieces) void countBoard({ ...record, id: current.id, date: current.date }).then((counted) => counted?.send());
   };
   // going back: the duel is rebuilt from your choices up to the point asked for
@@ -754,6 +766,8 @@ function App() {
     // replay makes those choices yours; a line saved from this test no longer stands once you go back from it.
     if (test.current) {
       test.current.from = Math.min(test.current.from, at);
+      // choke points marked after the point you went back to no longer happened
+      if (test.current.marks) test.current.marks = test.current.marks.filter((mark) => mark.step <= at);
       if (test.current.worked) {
         const owner = decksRef.current.find((one) => one.id === test.current!.deckId);
         if (owner) changeDeck(withoutWorked(owner, test.current.id));
@@ -1187,6 +1201,8 @@ function App() {
           skip={skip}
           worked={worked}
           onWorked={record && !replay ? markWorked : undefined}
+          onMark={record && !replay ? () => { markWaiting.current = Date.now(); post({ type: "moment", id: markWaiting.current }); } : undefined}
+          marks={marks}
           workedText={(() => {
             const note = workedNote && workedNote.testId === test.current?.id ? workedNote : null;
             if (!note) return "Saved, counting…";

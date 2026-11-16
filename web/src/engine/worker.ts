@@ -345,6 +345,8 @@ const planAt = new Map<string, number>();
 // the card your last action used ("after X" moments), and the card a hand trap just used should target
 let lastActed = 0;
 let aiTarget: (CardRef & { code: number }) | null = null;
+// the moment of the opponent's latest chance to respond on your turn
+let lastWindow = "";
 let goSecond = false;
 const aiUsed = new Set<string>();
 let aiBattled = false;
@@ -922,6 +924,15 @@ function smartUse(trap: number, moment: string): boolean {
   for (const plan of trapPlans) {
     if (canonicalOf(plan.trap) !== canonicalOf(trap) || !(plan.needs?.length ? plan.needs : [plan.start]).every((need) => hand.includes(canonicalOf(need)))) continue;
     const key = `${plan.start}:${plan.trap}`;
+    // your marked choke points come first: the hand trap waits for the next one and is used there
+    if (plan.marks?.length) {
+      const next = planAt.get(`${key}:mark`) ?? 0;
+      if (next < plan.marks.length) {
+        if (plan.marks[next] !== moment) return false;
+        planAt.set(`${key}:mark`, next + 1);
+        return true;
+      }
+    }
     const from = planAt.get(key) ?? 0;
     const at = plan.windows.findIndex((window, index) => index >= from && window.at === moment);
     if (at < 0) continue;
@@ -996,6 +1007,7 @@ function aiAnswer(message: OcgMessage): OcgResponse | null {
         .map((card, index) => ({ card, index }))
         .filter(({ card }) => (turnPlayer === 1 ? !aiUsed.has(`c:${card.code}:${String(card.description)}`) : opponentHandTraps && card.location === OcgLocation.HAND && (!opponentTraps.length || opponentTraps.includes(knownCode(card.code)))));
       let pick = usable[0];
+      if (turnPlayer !== 1) lastWindow = momentNow();
       if (turnPlayer !== 1 && trapTiming === "smart") {
         // every hand trap on offer is weighed (each one's place in your saved line moves on), then the best is used
         const moment = momentNow();
@@ -1291,6 +1303,7 @@ async function start(options: StartOptions) {
   planAt.clear();
   lastActed = 0;
   aiTarget = null;
+  lastWindow = "";
   goSecond = opponentOn && !!options.goSecond;
   aiUsed.clear();
   aiBattled = false;
@@ -1721,6 +1734,9 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
         return { start: line.start, before: before.interruptions, after: after.interruptions, board: after.board };
       });
       send({ type: "cut", id: message.id, cut: message.cut, lines });
+    } else if (message.type === "moment") {
+      // the opponent's latest chance to respond (what "a hand trap should have hit this" means), else where it is now
+      send({ type: "moment", id: message.id, at: lastWindow || momentNow(), step: record?.picks.length ?? 0 });
     } else if (message.type === "needs") {
       // each line from its own hand, then without each card (left in the Deck): the cards whose absence lowers the
       // board are the ones it needs; the rest stand in for "any card" (a cost or a discard), counted until it matches
