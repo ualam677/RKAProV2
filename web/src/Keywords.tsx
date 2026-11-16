@@ -29,7 +29,10 @@ const pattern = new RegExp(`\\b(${DOES.join("|")})\\b|\\b(${WHERE.join("|")})\\b
 export function Keywords({ text }: { text: string }) {
   const out: ReactNode[] = [];
   let last = 0;
+  // words inside a quoted card name ("Summon Sorceress") stay as they are
+  const quoted = [...text.matchAll(/"[^"]*"/g)].map((one) => [one.index ?? 0, (one.index ?? 0) + one[0].length]);
   for (const match of text.matchAll(pattern)) {
+    if (quoted.some(([from, to]) => (match.index ?? 0) >= from && (match.index ?? 0) < to)) continue;
     const at = match.index ?? 0;
     if (at > last) out.push(text.slice(last, at));
     out.push(

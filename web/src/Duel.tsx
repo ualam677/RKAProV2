@@ -1162,7 +1162,9 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
             {focusActions.map(({ choice, index }) => {
               // two actions with the same words (a pile of cards): say which card each is for
               const twin = focusActions.some((other) => other.index !== index && other.choice.label === choice.label);
-              return pickButton(twin && choice.card ? { ...choice, label: `${choice.label}: ${choice.card.name}` } : choice, index, "float-action");
+              // a chain window's effect with no description of its own is labelled with just the card's name
+              const bare = !!choice.card && !choice.pick && choice.label === choice.card.name;
+              return pickButton(twin && choice.card ? { ...choice, label: `${choice.label}: ${choice.card.name}` } : bare ? { ...choice, label: "Activate" } : choice, index, "float-action");
             })}
             {materialsButton(focus.card, "float-action info")}
           </div>

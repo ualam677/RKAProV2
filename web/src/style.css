@@ -1182,3 +1182,12 @@ main.menu-screen .main-menu { flex: 1; min-height: 0; }
 .deck-name { font-family: var(--display); font-weight: 600; font-size: 21px; letter-spacing: 0.02em; }
 .deck-section h3 { font-family: var(--display); font-weight: 700; font-size: 16px; letter-spacing: 0.08em; color: var(--sub); }
 .deck-section h3 b { font-family: var(--num); font-style: italic; font-weight: 800; letter-spacing: 0; }
+
+/* buttons with a look of their own keep it over the shared button style */
+.button.start-test { border-color: #7ab4ff; border-radius: 12px; background: linear-gradient(180deg, #5aa2ff, #3d8bff 60%, #2563d9); color: #04070d; font-weight: 700; font-size: 22px; letter-spacing: 0.04em; }
+.button.test-watch { font-weight: 700; font-size: 18px; letter-spacing: 0.04em; }
+.button.test-worked.on { border-color: #2f7a55; color: #6fd39b; background: rgba(111, 211, 155, 0.1); }
+.button.danger { border-color: rgba(255, 107, 120, 0.5); color: #ff6b78; }
+.button.state-row, .menu .button.state-row { font-size: 14px; }
+.role-counts .role-legend b { color: var(--text); }
+.deck-card .muted, .deck-card-text small, .decks-strip-deck { color: var(--sub); }
