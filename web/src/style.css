@@ -1092,3 +1092,8 @@ main.menu-screen .main-menu { flex: 1; min-height: 0; }
 .action-verb { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: 0.06em; text-transform: uppercase; color: #cfe2ff; line-height: 1.1; }
 .action-what { font-size: 12px; line-height: 1.3; color: #9fb0cc; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .float-action.info { border-left-color: #c9a85a; }
+/* a card's actions: the rest of the screen darkens, the card stays lit, the box sits right above it at one width */
+.scrim.card-focus { background: rgba(2, 4, 10, 0.55); animation: pop var(--fast) ease-out; }
+.hand-card.focused, .zone .tile.focused { z-index: 36; }
+.float-actions { width: min(320px, calc(100vw - 16px)); }
+.action-what { display: block; -webkit-line-clamp: unset; overflow: visible; }

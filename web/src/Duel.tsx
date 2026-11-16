@@ -632,11 +632,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     // its size without the pop-in animation's scale
     const box = { width: floatRef.current.offsetWidth, height: floatRef.current.offsetHeight };
     // a hand card lifts when it is picked, after its place was measured
-    const margin = focus.card.location === LOCATION.HAND ? 30 : 8;
+    const margin = focus.card.location === LOCATION.HAND ? 16 : 8;
     const left = Math.min(Math.max(8, focus.rect.left + focus.rect.width / 2 - box.width / 2), window.innerWidth - box.width - 8);
     // a hand card on a phone: above the phase button and your LP plate too, so neither is covered
-    const clear = !wide && focus.card.location === LOCATION.HAND ? Math.min(...[...document.querySelectorAll(".duel .phase-dock, .duel .lifebar.mine")].map((el) => el.getBoundingClientRect().top)) : Infinity;
-    const above = Math.min(focus.rect.top - margin, clear - 8) - box.height;
+    // right above the card (the rest of the screen is darkened behind it)
+    const above = focus.rect.top - margin - box.height;
     const top = above >= 8 ? above : Math.min(focus.rect.bottom + 8, window.innerHeight - box.height - 8);
     setFloatPos({ left, top });
   }, [focus]);
@@ -1133,7 +1133,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
 
       {focus && focusActions.length > 0 && (
         <>
-          <div className="scrim" onClick={(event) => (event.stopPropagation(), setFocus(null))} />
+          <div className="scrim dim card-focus" onClick={(event) => (event.stopPropagation(), setFocus(null))} />
           <div className="float-actions" ref={floatRef} style={floatPos ? { left: floatPos.left, top: floatPos.top } : { visibility: "hidden" }}>
             {focusActions.map(({ choice, index }) => {
               // two actions with the same words (a pile of cards): say which card each is for
