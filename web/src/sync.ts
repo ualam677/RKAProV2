@@ -182,7 +182,10 @@ function signIn(): Promise<string> {
 }
 async function drive(path: string, init: RequestInit = {}) {
   const response = await fetch(`https://www.googleapis.com/${path}`, { ...init, headers: { ...init.headers, Authorization: `Bearer ${await signIn()}` } });
-  if (response.status === 401) token = "";
+  if (response.status === 401) {
+    token = "";
+    throw new Error("Google sign-in expired: sign in again");
+  }
   if (!response.ok) throw new Error(`Google Drive: ${response.status} ${response.statusText}`);
   return response;
 }

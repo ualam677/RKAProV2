@@ -575,7 +575,7 @@ function buildPrompt(message: OcgMessage): boolean {
         choices.push({ label: "End Turn", phase: true });
         actions.push([SelectIdleCMDAction.TO_EP, null]);
       }
-      return one("", choices, null, (index) => ((lastActed = choices[index!]?.card?.code ?? lastActed), { type: OcgResponseType.SELECT_IDLECMD, action: actions[index!][0], index: actions[index!][1] }), true);
+      return one("", choices, null, (index) => ((lastActed = choices[index!]?.card?.code ?? lastActed), (lastWindow = ""), { type: OcgResponseType.SELECT_IDLECMD, action: actions[index!][0], index: actions[index!][1] }), true);
     }
     case OcgMessageType.SELECT_BATTLECMD: {
       if (message.player !== 0) return answer({ type: OcgResponseType.SELECT_BATTLECMD, action: SelectBattleCMDAction.TO_EP, index: null });

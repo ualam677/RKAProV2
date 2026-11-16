@@ -113,6 +113,7 @@ function App() {
   const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
   // choke points marked in the test on screen
   const [marks, setMarks] = useState(0);
+  const [markNote, setMarkNote] = useState("");
   const markWaiting = useRef(0);
   // the Test screen's hand picker, open or not
   const [picking, setPicking] = useState(false);
@@ -325,6 +326,7 @@ function App() {
         markWaiting.current = 0;
         current.marks = [...(current.marks ?? []).filter((mark) => mark.step !== message.step), { at: message.at, step: message.step, traps: message.traps }];
         setMarks(current.marks.length);
+        setMarkNote(message.traps.length ? `Marked: ${message.at}` : `Marked: ${message.at} (no hand trap held could answer here)`);
         const played = lastRecord.current;
         if (played) keep(current.deckId, { ...played, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces, marks: current.marks });
       } else if (message.type === "needs") {
@@ -722,6 +724,7 @@ function App() {
     finishTest();
     test.current = deck ? { id: newId(), deckId: deck.id, date: Date.now(), testOf, from } : null;
     setMarks(0);
+    setMarkNote("");
     setRecord(null);
     setWorked(false);
   };
@@ -1229,6 +1232,7 @@ function App() {
           onWorked={record && !replay ? markWorked : undefined}
           onMark={record && !replay ? () => { markWaiting.current = Date.now(); post({ type: "moment", id: markWaiting.current }); } : undefined}
           marks={marks}
+          markNote={markNote}
           workedText={(() => {
             const note = workedNote && workedNote.testId === test.current?.id ? workedNote : null;
             if (!note) return "Saved, counting…";
@@ -1496,10 +1500,10 @@ function App() {
           ) : (
             <div className="row wrap">
               <span className="drive-on">✓ Signed in</span>
-              <button className="button" onClick={async () => { try { await driveUpload(JSON.stringify(makeBackup())); note("Saved to Google Drive"); } catch (problem) { failed(problem); } }}>
+              <button className="button" onClick={async () => { try { await driveUpload(JSON.stringify(makeBackup())); note("Saved to Google Drive"); } catch (problem) { failed(problem); setDriveIn(driveSignedIn()); } }}>
                 Save to Drive
               </button>
-              <button className="button" onClick={async () => { try { const text = await driveDownload(); if (text) restore(text); else note("Nothing saved in Google Drive yet"); } catch (problem) { failed(problem); } }}>
+              <button className="button" onClick={async () => { try { const text = await driveDownload(); if (text) restore(text); else note("Nothing saved in Google Drive yet"); } catch (problem) { failed(problem); setDriveIn(driveSignedIn()); } }}>
                 Load from Drive
               </button>
             </div>

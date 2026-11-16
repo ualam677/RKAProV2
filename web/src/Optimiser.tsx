@@ -781,7 +781,7 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
             </svg>
           </button>
         )}
-        {combo && !checking && (
+        {combo && !checking && !route.unreplayable && (
           <button className={`route-mark ${tone(combo.steps.length ? combo.interruptions : fullAt)} ${said === comboText ? "on" : ""}`} onClick={() => say(comboText)} aria-label={comboText}>
             {combo.traps.map((trap) => (
               <span key={trap} className="mini-card">
@@ -809,9 +809,9 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
         </button>
       </div>
       {said && <p className="trait-said">{said}</p>}
-      {checking === "now" && <span className="opt-chokes">Checking hand traps against this line…</span>}
+      {!route.unreplayable && checking === "now" && <span className="opt-chokes">Checking hand traps against this line…</span>}
       {checking === "waiting" && <span className="opt-chokes">Hand traps next</span>}
-      {!checking && route.chokes && route.chokes.length > 0 && <Chokes chokes={route.chokes} fullAt={fullAt} nameOf={nameOf} />}
+      {!route.unreplayable && !checking && route.chokes && route.chokes.length > 0 && <Chokes chokes={route.chokes} fullAt={fullAt} nameOf={nameOf} />}
     </div>
   );
 }

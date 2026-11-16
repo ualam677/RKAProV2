@@ -1024,7 +1024,7 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .route-warn { font-size: 12px; color: #f2b544; }
 /* LP plates: the same space on both sides (the italic numbers lean right, so they get a little more) */
 .duel .lifebar { padding: 4px 10px; }
-.duel .lifebar-lp { padding-right: 0; }
+.duel .lifebar-lp { padding-right: 6px; }
 
 /* the menu logo, matching the icon: RKA in glowing light blue with an ink outline over a faint fan of gold cards, PRO in gold */
 h1.logo { position: relative; isolation: isolate; color: #8ec2ff; text-shadow: -1px -1px 0 #04060b, 1px -1px 0 #04060b, -1px 1px 0 #04060b, 1px 1px 0 #04060b, 0 0 12px rgba(90, 162, 255, 0.75); }
@@ -1033,7 +1033,7 @@ h1.logo::before { content: ""; position: absolute; z-index: -1; left: -6px; top:
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 40'%3E%3Cg fill='%231c1608' stroke='%23c9a85a' stroke-width='1.6'%3E%3Crect x='17' y='4' width='18' height='26' rx='2' transform='rotate(-22 26 38)'/%3E%3Crect x='17' y='4' width='18' height='26' rx='2' transform='rotate(22 26 38)'/%3E%3Crect x='17' y='4' width='18' height='26' rx='2'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat; }
 /* the phase button's italic text, centred by its ink (the slant pushes it right and down) */
 .phase-button { padding: 0 3px 2px 0; }
-.duel .lifebar.theirs .lifebar-lp { margin-right: 3px; }
+.duel .lifebar.theirs .lifebar-lp { margin-right: 4px; }
 /* Sync › Google Drive */
 .drive { display: grid; gap: 8px; margin-top: 8px; }
 .drive-sign-in { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; font-weight: 600; }
@@ -1042,3 +1042,4 @@ h1.logo::before { content: ""; position: absolute; z-index: -1; left: -6px; top:
 .drive .button { min-height: 44px; }
 .drive-setup summary { min-height: 40px; display: flex; align-items: center; color: #f2b544; cursor: pointer; }
 .drive-setup ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 4px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.mark-note { display: block; padding: 0 6px; font-size: 12px; color: #f2b544; overflow-wrap: anywhere; }
