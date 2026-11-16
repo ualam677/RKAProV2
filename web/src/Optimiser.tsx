@@ -760,7 +760,8 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
   const protectText = protectParts.length ? `Protection on their turn (✓ seen by the engine on this board): ${protectParts.join(" · ")}` : "";
   // every effect that can matter on their turn: the ones the engine offered first, then the ones read from the scripts
   const WHERE: Record<number, string> = { 2: "hand", 4: "field", 8: "field", 16: "GY", 32: "banished" };
-  const effectsList = [...(audit?.effects ?? [])].sort((a, b) => Number(b.confirmed !== false) - Number(a.confirmed !== false));
+  // only what the engine saw work on this board
+  const effectsList = (audit?.effects ?? []).filter((one) => one.confirmed !== false);
   const effectsText = effectsList.length
     ? `On their turn (✓ offered by the engine on this board, the rest read from the card scripts): ${effectsList
         .map((one) => {
@@ -1413,7 +1414,6 @@ function EffectRow({ one, nameOf }: { one: AuditEffect; nameOf: (code: number) =
 }
 function BoardEffects({ effects, nameOf }: { effects: AuditEffect[]; nameOf: (code: number) => string }) {
   const sure = effects.filter((one) => one.confirmed !== false);
-  const read = effects.filter((one) => one.confirmed === false);
   return (
     <div className="audit-panel">
       <p className="audit-title">On their turn</p>
@@ -1423,16 +1423,6 @@ function BoardEffects({ effects, nameOf }: { effects: AuditEffect[]; nameOf: (co
             <EffectRow key={`s${at}`} one={one} nameOf={nameOf} />
           ))}
         </ul>
-      )}
-      {read.length > 0 && (
-        <>
-          <p className="audit-divider">From the card scripts · not seen by the engine on this board</p>
-          <ul className="audit-list">
-            {read.map((one, at) => (
-              <EffectRow key={`r${at}`} one={one} nameOf={nameOf} />
-            ))}
-          </ul>
-        </>
       )}
     </div>
   );
