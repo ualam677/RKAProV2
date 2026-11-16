@@ -11,7 +11,7 @@ import { CHOKE_TRAPS } from "./engine/probe";
 import { hasRole, secondOnly } from "./optimiser";
 import { Optimiser, Stepper, testOverlay } from "./Optimiser";
 import { Tests } from "./Tests";
-import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveUpload, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
+import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveSignIn, driveSignedIn, driveUpload, preloadGoogle, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
 import { readReplayLink, replayLink, toYdk } from "./decks";
 import { recordVideo } from "./video";
 import "./style.css";
@@ -122,6 +122,11 @@ function App() {
     if (deck && deck.name === "New deck" && !deck.main.length && !deck.extra.length && !deck.side.length && !deck.tests?.length)
       setDecks((all) => all.filter((one) => one.id !== deck.id));
   };
+  // signed in to Google Drive this session (the sign-in itself stays in memory)
+  const [driveIn, setDriveIn] = useState(driveSignedIn());
+  useEffect(() => {
+    if (screen === "sync") preloadGoogle();
+  }, [screen]);
   // the deck whose ⋯ is open on the Decks screen
   const [deckMenu, setDeckMenu] = useState<string | null>(null);
   const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
@@ -1471,19 +1476,35 @@ function App() {
             <p className="muted">Linking a whole deck folder works in Chrome or Edge on a computer. Here, pick several .ydk files at once.</p>
           </>
         )}
-        <div className="row wrap">
-          <button className="button small" disabled={!driveReady()} onClick={async () => { try { await driveUpload(JSON.stringify(makeBackup())); note("Saved to Google Drive"); } catch (problem) { failed(problem); } }}>
-            Save to Google Drive
-          </button>
-          <button className="button small" disabled={!driveReady()} onClick={async () => { try { const text = await driveDownload(); if (text) restore(text); else note("Nothing saved in Google Drive yet"); } catch (problem) { failed(problem); } }}>
-            Load from Google Drive
-          </button>
+        <div className="drive">
+          <h3 className="section-label">GOOGLE DRIVE</h3>
+          {!driveReady() ? (
+            <details className="drive-setup">
+              <summary>Needs a one-time setup for this site</summary>
+              <ol>
+                <li>Google Cloud console › APIs &amp; Services: enable the Google Drive API.</li>
+                <li>OAuth consent screen: External, scope drive.appdata, add yourself as a test user.</li>
+                <li>Credentials › Create OAuth client ID › Web application, authorised JavaScript origin https://ualam677.github.io</li>
+                <li>GitHub repository › Settings › Secrets and variables › Actions › Variables: add VITE_GOOGLE_CLIENT_ID with that ID, then re-run the Web build.</li>
+              </ol>
+            </details>
+          ) : !driveIn ? (
+            <button className="button drive-sign-in" onClick={async () => { try { await driveSignIn(); setDriveIn(true); note("Signed in to Google Drive"); } catch (problem) { failed(problem); } }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.7 3h8.6l5.2 9-4.3 7.5H6.8L2.5 12zM7.7 3l8.6 15M16.3 3 7.7 18M2.5 12h19" /></svg>
+              Sign in with Google
+            </button>
+          ) : (
+            <div className="row wrap">
+              <span className="drive-on">✓ Signed in</span>
+              <button className="button" onClick={async () => { try { await driveUpload(JSON.stringify(makeBackup())); note("Saved to Google Drive"); } catch (problem) { failed(problem); } }}>
+                Save to Drive
+              </button>
+              <button className="button" onClick={async () => { try { const text = await driveDownload(); if (text) restore(text); else note("Nothing saved in Google Drive yet"); } catch (problem) { failed(problem); } }}>
+                Load from Drive
+              </button>
+            </div>
+          )}
         </div>
-        <p className="muted">
-          {driveReady()
-            ? "Kept in this app's own hidden folder in your Drive, so your other files stay private to it."
-            : "Google Drive needs a one-time setup for this site (a Google sign-in ID, see the README). Until then, back up to a file and keep it in Drive yourself."}
-        </p>
       </details>
         </>
       )}

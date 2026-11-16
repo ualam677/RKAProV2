@@ -152,7 +152,16 @@ declare global {
     google?: { accounts: { oauth2: { initTokenClient(config: { client_id: string; scope: string; callback: (response: { access_token?: string; error?: string }) => void }): TokenClient } } };
   }
 }
+// the sign-in is kept in memory only (never in storage, so it can't end up in a backup file)
 let token = "";
+export const driveSignedIn = () => !!token;
+/** Loads Google's sign-in script ahead of the tap, so the tap can open the sign-in window at once (phones block a
+ *  window opened after a delay). */
+export function preloadGoogle() {
+  if (!CLIENT_ID || window.google || document.querySelector('script[src="https://accounts.google.com/gsi/client"]')) return;
+  document.head.appendChild(Object.assign(document.createElement("script"), { src: "https://accounts.google.com/gsi/client", async: true }));
+}
+export const driveSignIn = () => signIn();
 function signIn(): Promise<string> {
   if (token) return Promise.resolve(token);
   return new Promise((resolve, reject) => {

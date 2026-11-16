@@ -169,6 +169,12 @@ flat gold frame over a fan of three cards (no stars, no gradient on the border).
   Maestros format). "Kuriboh - Multiply!" isn't in the card database yet.
 - Open: a thin 30x62 Xyz card seen once in the replay viewer; a "bar" flash on Photon Orbital (neither reproduced).
 
+## 1.1.0 (16 Nov 2026)
+Lines belong to the cards they need (measured by the engine; ▶ deals exactly those), saved lines replay correctly
+(Xyz/Link summons, alternate arts, skipped picks), manual choke points, draw power in the odds, Google Drive sign-in on
+Sync (needs the one-time VITE_GOOGLE_CLIENT_ID setup; tested only against stand-ins, not real Google), menu without the
+Decks / Edit deck tiles, a clearer icon and a matching menu logo, Duel Links-style numbers, ink-centred LP and phase text.
+
 ## How RKAPro knows what it knows (16 Nov 2026)
 - From the engine (any deck): whether a card takes a card from the Deck alone or with a partner (the "starter" check:
   it does not mean a full board); interruptions, read from card scripts; traits from card text; and every replay of a
