@@ -160,3 +160,32 @@ export function RoleStrip({ cards }: { cards: { count: number; role: Role }[] })
     </div>
   );
 }
+
+const TALLY_ORDER = ["start", "dig", "extend", "trap", "break", "piece", "brick", "none"] as const;
+const TALLY_NAMES: Record<string, string> = { start: "start", dig: "draw", extend: "extend", trap: "hand trap", break: "breaker", piece: "other", brick: "brick", none: "untagged" };
+/** How many cards of each kind (by first role), as the role strip counts them. */
+export function roleTally(cards: { count: number; role: Role }[]): Record<string, number> {
+  const tally: Record<string, number> = {};
+  for (const card of cards) {
+    const tone = STRIP_TONE(card.role);
+    tally[tone] = (tally[tone] ?? 0) + card.count;
+  }
+  return tally;
+}
+/** A card glyph and a count per kind: the role strip's legend on its own. */
+export function RoleCounts({ tally }: { tally: Record<string, number> }) {
+  const shown = TALLY_ORDER.filter((tone) => tally[tone] > 0);
+  return (
+    <div className="role-strip role-counts" role="img" aria-label={shown.map((tone) => `${tally[tone]} ${TALLY_NAMES[tone]}`).join(", ")}>
+      <div className="role-legend">
+        {shown.map((tone) => (
+          <span key={tone}>
+            <i className={tone} />
+            <b>{tally[tone]}</b>
+            <small>{TALLY_NAMES[tone]}</small>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}

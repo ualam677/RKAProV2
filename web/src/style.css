@@ -1045,3 +1045,39 @@ h1.logo::after { content: ""; flex: none; width: 35px; height: 26px; margin-left
 .drive-setup summary { min-height: 40px; display: flex; align-items: center; color: #f2b544; cursor: pointer; }
 .drive-setup ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 4px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .mark-note { display: block; padding: 0 6px; font-size: 12px; color: #f2b544; overflow-wrap: anywhere; }
+
+/* menu: the deck (tap to edit), the other decks, Optimise with its make-up, and the action dock at the bottom */
+.main-menu { display: flex; flex-direction: column; gap: 12px; min-height: calc(100dvh - 92px); }
+.main-menu > .deck-card { position: relative; }
+.deck-card-edit { width: 22px; height: 22px; margin-left: auto; flex: none; fill: none; stroke: var(--gold, #e6c36a); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.decks-strip { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 8px 12px; border: 1px solid #1c2536; border-radius: 14px; background: #0d121c; cursor: pointer; }
+.decks-strip-label { font-family: var(--display); font-weight: 700; font-size: 14px; letter-spacing: 0.08em; color: #c9a85a; flex: none; }
+.decks-strip-cards { display: flex; gap: 10px; flex: 1; min-width: 0; overflow: hidden; }
+.decks-strip-deck { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 64px; min-height: 44px; padding: 0; border: 0; background: none; color: #b9c6de; font: inherit; cursor: pointer; }
+.decks-strip-deck .hand-mini { width: 30px; }
+.decks-strip-deck small { width: 100%; font-size: 10px; line-height: 1.15; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.decks-strip-none { color: #8a96ad; font-size: 13px; align-self: center; }
+.decks-strip-more { color: #5e6a82; font-size: 22px; flex: none; }
+.optimise-tile { display: grid !important; gap: 10px; min-height: 0 !important; padding: 14px; text-align: left; }
+.optimise-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.optimise-head > span:first-child { display: grid; gap: 4px; }
+.optimise-sub { font-size: 12px; color: #8a96ad; }
+.engine-split { display: flex; gap: 14px; text-align: right; }
+.engine-split > span { display: grid; }
+.engine-split b { font-family: var(--num); font-style: italic; font-weight: 800; font-size: 26px; line-height: 1; color: var(--text); }
+.engine-split small { font-size: 11px; color: #8a96ad; }
+.role-counts { margin: 0; padding: 0; border: 0; }
+.role-counts .role-legend { margin: 0; }
+.menu-dock { margin-top: auto; display: grid; gap: 10px; }
+.dock-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 10px; }
+.dock-tile { min-height: 56px !important; flex-direction: row !important; align-items: center !important; justify-content: space-between !important; padding: 0 14px !important; }
+.dock-tile .tile-number { font-size: 22px !important; }
+.dock-tile .tile-icon { width: 24px; height: 24px; }
+.dock-row .version { position: static; font-size: 11px; color: #5e6a82; white-space: nowrap; }
+.optimise-tile .tile-number { display: flex; align-items: baseline; gap: 2px; font-size: 38px; line-height: 1; color: var(--text); }
+.optimise-tile .tile-number small { font-family: Inter, system-ui, sans-serif; font-size: 18px; font-weight: 600; color: #8a96ad; margin-left: 0; }
+.optimise-tile b, .dock-tile b { font-size: 13px; font-weight: 500; color: #8a96ad; }
+.dock-tile { display: flex !important; }
+.dock-tile .tile-number { font-family: var(--num); font-style: italic; font-weight: 800; color: var(--text); }
+.optimise-tile .engine-split b { font-family: var(--num); font-style: italic; font-weight: 800; font-size: 26px; line-height: 1; color: var(--text); }
+.menu-dock { padding-bottom: 18px; }

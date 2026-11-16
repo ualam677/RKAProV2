@@ -4,6 +4,7 @@ import { parseYdk, shuffled } from "./deck";
 import { Duel, MuteButton, cueTime, duelOverlay } from "./Duel";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt, setArtworkOriginals } from "./CardArt";
+import { RoleCounts } from "./CardGlyphs";
 import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, scoredByCount, storeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
 import type { Piece } from "./engine/interruptions";
@@ -1280,6 +1281,15 @@ function App() {
 
   const nameOf = (code: number) => texts.get(code)?.name ?? `#${code}`;
   // the first-turn combo odds the Optimiser last worked out for this deck
+  const menuSummary = (() => {
+    if (!deck || screen !== "menu") return null;
+    try {
+      const value = localStorage.getItem(`rka.summary.${deck.id}`);
+      return value ? (JSON.parse(value) as { first: number; total: number; nonEngine: number; tally: Record<string, number> }) : null;
+    } catch {
+      return null;
+    }
+  })();
   const menuOdds = (() => {
     if (!deck || screen !== "menu") return null;
     try {
@@ -1307,30 +1317,43 @@ function App() {
       {screen === "menu" && <span className="version">{__APP_VERSION__}</span>}
       {screen === "menu" && (
         <nav className="main-menu">
-          <div className="deck-card-row">
-          <button className="deck-card" onClick={() => setScreen("decks")} aria-label={deck ? `${deck.name}: change deck` : "Choose or import a deck"}>
-            {deck ? (
-              <>
-                <span className="deck-cover">{(deck.extra[0] ?? deck.main[0]) ? <CardArt code={deck.extra[0] ?? deck.main[0]} /> : null}</span>
-                <span className="deck-card-text">
-                  <b>{deck.name}</b>
-                  <span className="deck-counts" aria-label={`${deck.main.length} Main, ${deck.extra.length} Extra, ${deck.side.length} Side`}>
-                    {deck.main.length} · {deck.extra.length} · {deck.side.length}
-                  </span>
+          {deck ? (
+            <button className="deck-card" disabled={!ready} onClick={() => openEditor(false)} aria-label={`Edit "${deck.name}"`}>
+              <span className="deck-cover">{(deck.extra[0] ?? deck.main[0]) ? <CardArt code={deck.extra[0] ?? deck.main[0]} /> : null}</span>
+              <span className="deck-card-text">
+                <b>{deck.name}</b>
+                <span className="deck-counts" aria-label={`${deck.main.length} Main, ${deck.extra.length} Extra, ${deck.side.length} Side`}>
+                  {deck.main.length} · {deck.extra.length} · {deck.side.length}
                 </span>
-              </>
-            ) : (
-              <b>Choose or import a deck</b>
-            )}
-          </button>
-          {deck && (
-            <button className="icon-button deck-edit" disabled={!ready} onClick={() => openEditor(false)} aria-label={`Edit "${deck.name}"`}>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
+              </span>
+              <svg className="deck-card-edit" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" />
               </svg>
             </button>
+          ) : (
+            <button className="deck-card" onClick={() => setScreen("decks")}>
+              <b>Choose or import a deck</b>
+            </button>
           )}
-          </div>
+          {/* the other decks: tap one to switch to it, anywhere else for the full list */}
+          {deck && (
+            <div className="decks-strip" role="button" tabIndex={0} onClick={() => setScreen("decks")} onKeyDown={(event) => event.key === "Enter" && setScreen("decks")} aria-label="All decks">
+              <span className="decks-strip-label">DECKS</span>
+              <span className="decks-strip-cards">
+                {decks
+                  .filter((one) => one.id !== deck.id)
+                  .slice(0, 4)
+                  .map((one) => (
+                    <button key={one.id} className="decks-strip-deck" onClick={(event) => (event.stopPropagation(), pickDeck(one.id))} aria-label={`Switch to "${one.name}"`}>
+                      <span className="hand-mini">{(one.extra[0] ?? one.main[0]) ? <CardArt code={one.extra[0] ?? one.main[0]} /> : null}</span>
+                      <small>{one.name}</small>
+                    </button>
+                  ))}
+                {decks.length < 2 && <small className="decks-strip-none">New or import</small>}
+              </span>
+              <span className="decks-strip-more" aria-hidden="true">›</span>
+            </div>
+          )}
           {canInstall && (
             <button
               className="button small"
@@ -1343,17 +1366,23 @@ function App() {
               Install RKAPro as an app (works offline)
             </button>
           )}
-          <button className="menu-tile primary" disabled={!ready || !deck?.main.length} onClick={() => setScreen("test")}>
-            <b>Test</b>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M7 4v16l13-8z" />
-            </svg>
+          <button className="menu-tile optimise-tile" disabled={!ready || !deck} onClick={() => openEditor(true)}>
+            <span className="optimise-head">
+              <span>
+                <b>Optimise</b>
+                <span className="tile-number">{menuSummary ? <>{(menuSummary.first * 100).toFixed(1)}<small>%</small></> : <small className="tile-hint">Open to work out</small>}</span>
+                {menuSummary && <small className="optimise-sub">going first, opens a combo</small>}
+              </span>
+              {menuSummary && (
+                <span className="engine-split" aria-label={`Engine ${menuSummary.total - menuSummary.nonEngine}, non-engine ${menuSummary.nonEngine}`}>
+                  <span><b>{menuSummary.total - menuSummary.nonEngine}</b><small>engine</small></span>
+                  <span><b>{menuSummary.nonEngine}</b><small>non-engine</small></span>
+                </span>
+              )}
+            </span>
+            {menuSummary && <RoleCounts tally={menuSummary.tally} />}
           </button>
           <div className="menu-grid">
-            <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(true)}>
-              <b>Optimise</b>
-              <span className="tile-number">{menuOdds !== null ? <>{(menuOdds * 100).toFixed(1)}<small>%</small></> : <small className="tile-hint">Open to work out</small>}</span>
-            </button>
             <button className="menu-tile" disabled={!deck} onClick={() => setScreen("replays")}>
               <b>Replays</b>
               <span className="tile-number">
@@ -1365,6 +1394,14 @@ function App() {
               <b>Sync</b>
               <svg className="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M4 12a8 8 0 0 1 14-5.3M20 4v5h-5M20 12a8 8 0 0 1-14 5.3M4 20v-5h5" />
+              </svg>
+            </button>
+          </div>
+          <div className="menu-dock">
+            <button className="menu-tile primary" disabled={!ready || !deck?.main.length} onClick={() => setScreen("test")}>
+              <b>Test</b>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 4v16l13-8z" />
               </svg>
             </button>
           </div>

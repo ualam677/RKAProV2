@@ -2,11 +2,11 @@
 // turns, and check your worked lines against hand traps.
 import { useEffect, useMemo, useState } from "react";
 import { describeInterruption, describeNibiru, describeProtection } from "./interruptText";
-import { hasRole, rolesOf, secondOnly } from "./optimiser";
+import { hasRole, isNonEngine, rolesOf, secondOnly } from "./optimiser";
 import type { TestResult } from "./decks";
 import { CardArt } from "./CardArt";
 import { EndBoard } from "./Tests";
-import { MiniCards, RoleBadges, RoleStrip, TraitGlyphs, type Mini } from "./CardGlyphs";
+import { MiniCards, RoleBadges, RoleStrip, TraitGlyphs, roleTally, type Mini } from "./CardGlyphs";
 import { rescored } from "./decks";
 import { EXTRA_TYPES, deckSignature, loadTagDefaults, storeTagDefault, type SavedDeck, type SavedRoute } from "./decks";
 import { CHOKE_TRAPS, type CardEvidence, type Choke, type ChokeCombo } from "./engine/probe";
@@ -149,10 +149,13 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   useEffect(() => {
     try {
       localStorage.setItem(`rka.odds.${deck.id}`, String(first.combo));
+      // the menu's Optimise tile: going-first odds, engine against non-engine, and the cards of each kind
+      const nonEngine = main.filter((card) => isNonEngine(card.tag)).reduce((sum, card) => sum + card.count, 0);
+      localStorage.setItem(`rka.summary.${deck.id}`, JSON.stringify({ first: first.combo, total, nonEngine, tally: roleTally(main.map((card) => ({ count: card.count, role: rolesOf(card.tag)[0] ?? "none" }))) }));
     } catch {
       // the tile just shows no number
     }
-  }, [deck.id, first.combo]);
+  }, [deck.id, first.combo, main]);
   const odds = second ? secondOdds : first;
   const everyStartProven = useMemo(() => allProven(main), [main]);
   const proven = useMemo(() => computeOdds(provenOnly(main), second ? 6 : 5), [main, second]);
