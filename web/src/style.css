@@ -1082,8 +1082,10 @@ h1.logo::after { content: ""; flex: none; width: 35px; height: 26px; margin-left
 .optimise-tile .engine-split b { font-family: var(--num); font-style: italic; font-weight: 800; font-size: 26px; line-height: 1; color: var(--text); }
 .menu-dock { padding-bottom: 18px; }
 /* the menu fills the screen exactly and never scrolls: the middle takes whatever height is left */
-main.menu-screen { box-sizing: border-box; height: var(--app-h, 100dvh); overflow: hidden; display: flex; flex-direction: column; }
+main.menu-screen { box-sizing: border-box; min-height: var(--app-h, 100dvh); display: flex; flex-direction: column; }
 main.menu-screen .main-menu { flex: 1; min-height: 0; }
+/* tiles keep their size: when they don't all fit (a browser's address bar, the install button) the page scrolls */
+main.menu-screen .main-menu > * { flex-shrink: 0; }
 
 /* card actions: compact, the verb first, what it does in two short lines (not a big bright pill) */
 .float-actions { gap: 6px; min-width: 0; width: min(300px, calc(100vw - 16px)); }
