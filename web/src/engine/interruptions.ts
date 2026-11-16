@@ -297,3 +297,42 @@ export function interruptionsOf(
   }
   return found;
 }
+
+/** What each of a card's effects does, by its description (Stringid index): negate, removal or other. */
+export function readKinds(source: string): Map<string, Kind> {
+  const kinds = new Map<string, Kind>();
+  const drafts = new Map<string, { category: string; description: string }>();
+  for (const line of source.split("\n")) {
+    let match = /local\s+(\w+)\s*=\s*Effect\.CreateEffect/.exec(line);
+    if (match) {
+      drafts.set(match[1], { category: "", description: "" });
+      continue;
+    }
+    match = /local\s+(\w+)\s*=\s*(\w+):Clone\(\)/.exec(line);
+    if (match && drafts.has(match[2])) {
+      drafts.set(match[1], { ...drafts.get(match[2])! });
+      continue;
+    }
+    match = /(\w+):Set(Category|Description)\((.*)\)\s*$/.exec(line.trim());
+    if (match && drafts.has(match[1])) {
+      drafts.get(match[1])![match[2] === "Category" ? "category" : "description"] = match[3];
+      continue;
+    }
+    match = /RegisterEffect\((\w+)/.exec(line);
+    const draft = match ? drafts.get(match[1]) : undefined;
+    const index = draft && /Stringid\(\s*id\s*,\s*(\d+)\)/.exec(draft.description)?.[1];
+    if (draft && index !== undefined && !kinds.has(index)) kinds.set(index, kindOf(draft.category));
+  }
+  return kinds;
+}
+
+/** What the engine found the end of a line can do on the opponent's turn (the board audit), beside the count above. */
+export interface BoardAudit {
+  // the replay reached the saved board; if not, nothing below can be trusted
+  trusted: boolean;
+  // every effect the engine offered you on their turn: the card, what it does, its kind, where it was, and when
+  effects: { code: number; text: string; kind: Kind; location: number; at: string[] }[];
+  // your monsters their targeting couldn't pick, your cards their "destroy" left standing
+  untargetable: number[];
+  indestructible: number[];
+}

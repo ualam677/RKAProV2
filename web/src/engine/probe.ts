@@ -14,6 +14,7 @@ import {
   OcgProcessResult,
   OcgQueryFlags,
   OcgResponseType,
+  SelectBattleCMDAction,
   SelectIdleCMDAction,
   type OcgCardData,
   type OcgCoreSync,
@@ -1140,4 +1141,233 @@ export function* chokeCombo(
     if (!best || result.interruptions < best.interruptions) best = result;
   }
   return best ?? { traps, steps: [], interruptions: 0, board: [], unused: traps };
+}
+
+// ==== The board audit: what the end of a line really does on the opponent's turn, asked of the engine ====
+// The line is replayed, the turn ends, and the opponent does one thing per duel (a probe): Normal Summons and attacks,
+// activates a Spell, uses a monster effect, targets your cards, destroys them. Everything the engine offers you while
+// it does is recorded (your Quick Effects, Traps, triggers, cards that float when destroyed), and so is what it can't
+// do to you: cards it can't target, cards its "destroy" leaves standing. Your chains are declined (the board stays
+// as it is for the probe); a yes/no ("use this instead of being destroyed?", an optional trigger) is answered yes.
+
+export type ProbeAction = "summon" | "spell" | "effect" | "target-monster" | "target-spell" | "destroy-monsters" | "destroy-spells";
+export interface AuditProbe {
+  action: ProbeAction;
+  // the card the opponent uses, and a vanilla monster it draws (and summons for "summon")
+  card: number;
+  filler: number;
+}
+export interface AuditOffer {
+  code: number;
+  // which of its effects (description id), where it was, and the moment the engine offered it
+  description: string;
+  // the full description id, for its wording
+  raw: string;
+  location: number;
+  at: string;
+}
+export interface AuditOnce {
+  // your field when the line ended: monsters, then Spells and Traps
+  board: number[];
+  monsters: number[];
+  // your hand when the line ended
+  hand?: number[];
+  ran: boolean;
+  offers: AuditOffer[];
+  // probe "target-…": your face-up cards it could have targeted; "destroy-…": your cards on the field before and after
+  targetable?: number[];
+  before?: number[];
+  after?: number[];
+}
+
+const PHASE_NAME: Record<number, string> = { 1: "their Draw Phase", 2: "their Standby Phase", 4: "their Main Phase 1", 8: "their Battle Phase", 0x100: "their Main Phase 2", 0x200: "their End Phase" };
+
+// `placed`: cards put face-up on your field before the duel starts (the Node checks use it to test known protections)
+export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: number[], recorded: string[], probe: AuditProbe, placed: number[] = []): AuditOnce {
+  const { core } = env;
+  const original = (code: number) => {
+    const card = env.card(code);
+    return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
+  };
+  const keys = recorded.map((key) => key.replace(/:(\d+)$/, (_, code: string) => `:${original(Number(code))}`));
+  const opening = probe.action === "summon" ? [probe.filler] : [probe.card];
+  const duel = core.createDuel({
+    flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
+    seed: [1n, 2n, 3n, 4n],
+    team1: { drawCountPerTurn: 1, startingDrawCount: hand.length, startingLP: 8000 },
+    team2: { drawCountPerTurn: 1, startingDrawCount: opening.length, startingLP: 8000 },
+    cardReader: (code) => env.card(code),
+    scriptReader: (name) => env.script(name),
+    errorHandler: () => {},
+  });
+  if (!duel) throw new Error("The audit could not create a duel");
+  const field = (locations = [OcgLocation.MZONE, OcgLocation.SZONE]) =>
+    locations.flatMap((location) => core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location }).flatMap((card) => (card?.code ? [card.code] : [])));
+  // what the probe's "destroy" can reach: Dark Hole your monsters, Harpie's Feather Duster your Spells and Traps
+  const reach = probe.action === "destroy-monsters" ? [OcgLocation.MZONE] : [OcgLocation.SZONE];
+  const result: AuditOnce = { board: [], monsters: [], ran: false, offers: [] };
+  try {
+    for (const file of ["constant.lua", "utility.lua"]) core.loadScript(duel, file, env.script(file));
+    const add = (code: number, location: OcgLocation, team: 0 | 1) =>
+      core.duelNewCard(duel, { team, duelist: 0, code, controller: team, location, sequence: 0, position: OcgPosition.FACEDOWN_DEFENSE });
+    for (const code of [...deck, ...[...hand].reverse()]) add(code, OcgLocation.DECK, 0);
+    for (const code of extra) add(code, OcgLocation.EXTRA, 0);
+    placed.forEach((code, sequence) => core.duelNewCard(duel, { team: 0, duelist: 0, code, controller: 0, location: OcgLocation.MZONE, sequence, position: OcgPosition.FACEUP_ATTACK }));
+    // drawn on their turn: the filler (bottom), then what they open with (top)
+    for (const code of [probe.filler, probe.filler, probe.filler, probe.filler, ...opening]) add(code, OcgLocation.DECK, 1);
+    core.startDuel(duel);
+
+    let turn = 0;
+    let lineDone = false;
+    let acted = false;
+    let attacked = false;
+    let next = 0;
+    let hint = 0;
+    let phase = "";
+    const chain: number[] = [];
+    let lastSummon = 0;
+    let lastAct = "";
+    const moment = () => (chain.length ? env.name(chain[chain.length - 1]) : lastSummon ? `the summon of ${env.name(lastSummon)}` : lastAct ? `after ${lastAct}` : phase || "their turn");
+    const follow = (offered: { key: (k: string) => boolean; exact?: (k: string) => boolean }[]): number => {
+      for (let step = next; step < keys.length; step++) {
+        let at = offered.findIndex((option) => (option.exact ?? option.key)(keys[step]));
+        if (at < 0) at = offered.findIndex((option) => option.key(keys[step]));
+        if (at >= 0) {
+          next = step + 1;
+          return at;
+        }
+      }
+      return -1;
+    };
+    const record = (card: { code: number; location: number; description: bigint }) => {
+      const description = String(card.description >> 20n === BigInt(card.code) || card.description >> 20n === BigInt(original(card.code)) ? card.description & 0xfffffn : card.description);
+      result.offers.push({ code: original(card.code), description, raw: String(card.description), location: card.location, at: moment() });
+    };
+    for (let guard = 0; guard < 6000; guard++) {
+      const status = core.duelProcess(duel);
+      let response: OcgResponse | null = null;
+      for (const message of core.duelGetMessage(duel)) {
+        switch (message.type) {
+          case OcgMessageType.NEW_TURN:
+            turn++;
+            chain.length = 0;
+            lastSummon = 0;
+            lastAct = "";
+            if (turn >= 3) return result;
+            break;
+          case OcgMessageType.NEW_PHASE:
+            phase = turn >= 2 ? (PHASE_NAME[message.phase] ?? phase) : "";
+            lastSummon = 0;
+            break;
+          case OcgMessageType.CHAINING:
+            chain.push(message.code);
+            if (turn >= 2 && message.controller === 1) lastAct = env.name(message.code);
+            break;
+          case OcgMessageType.CHAIN_END:
+            chain.length = 0;
+            lastSummon = 0;
+            if (turn >= 2 && result.before && !result.after) result.after = field(reach);
+            break;
+          case OcgMessageType.SUMMONING:
+          case OcgMessageType.SPSUMMONING:
+            lastSummon = message.code;
+            break;
+          case OcgMessageType.ATTACK:
+            if (turn >= 2) lastAct = "the attack";
+            break;
+          case OcgMessageType.HINT:
+            if (message.hint_type === OcgHintType.SELECTMSG && message.player === 0) hint = Number(message.hint);
+            break;
+          case OcgMessageType.RETRY:
+            return result;
+          default: {
+            if (!isPrompt(message.type)) break;
+            const mine = "player" in message && message.player === 0;
+            if (turn < 2) {
+              // your turn: the line, as recorded
+              if (!mine) response = message.type === OcgMessageType.SELECT_CHAIN ? { type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null } : autoAnswer(message);
+              else if (message.type === OcgMessageType.SELECT_IDLECMD) {
+                hint = 0;
+                // the line's Sets too (a Trap Set for their turn): the probe's own options leave them out
+                const m = message;
+                const sets: Option[] = [
+                  // and Normal Summons of hand trap monsters (Ghost Ogre), which the probe's options skip
+                  ...m.summons.flatMap((card, index) => (isHandTrap(card.code) ? [{ label: `Normal Summon ${env.name(card.code)}`, response: { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.SELECT_SUMMON, index } as OcgResponse, ui: null, code: card.code }] : [])),
+                  ...m.monster_sets.map((card, index) => ({ label: `Set ${env.name(card.code)}`, response: { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.SELECT_MONSTER_SET, index } as OcgResponse, ui: null, code: card.code })),
+                  ...m.spell_sets.map((card, index) => ({ label: `Set ${env.name(card.code)}`, response: { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.SELECT_SPELL_SET, index } as OcgResponse, ui: null, code: card.code })),
+                ];
+                const offered = [...idleOptions(env, message), ...sets].map((option) => ({ ...option, key: (k: string) => plainKey(k) === `${verbOf(option.label)}:${option.code}`, exact: (k: string) => k === stepKey(option.label, option.code ?? 0) }));
+                const at = lineDone ? -1 : follow(offered);
+                if (at < 0) {
+                  // the line is over: its board, then on to their turn
+                  if (!lineDone) {
+                    lineDone = true;
+                    result.board = field();
+                    result.monsters = core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location: OcgLocation.MZONE }).flatMap((card) => (card?.code ? [card.code] : []));
+                    result.hand = core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location: OcgLocation.HAND }).flatMap((card) => (card?.code ? [card.code] : []));
+                  }
+                  response = { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null };
+                } else response = offered[at].response;
+              } else if (message.type === OcgMessageType.SELECT_BATTLECMD) {
+                response = { type: OcgResponseType.SELECT_BATTLECMD, action: SelectBattleCMDAction.TO_EP, index: null };
+              } else if (message.type === OcgMessageType.SELECT_CHAIN && !lineDone) {
+                // an activation in a chain window (recorded as a pick of the card): only when it's the line's very next step
+                const step = keys[next] ?? "";
+                const at = /^(pick|Activate)\b/.test(step) ? message.selects.findIndex((card) => step.endsWith(`:${original(card.code)}`)) : -1;
+                if (at >= 0) next++;
+                response = { type: OcgResponseType.SELECT_CHAIN, index: at >= 0 ? at : message.forced ? 0 : null };
+              } else {
+                const branch = lineDone ? null : deckPick(env, message);
+                const exact = branch ? follow(branch.map((option) => ({ ...option, key: (k: string) => k === `pick:${hint}:${option.code}` }))) : -1;
+                const at = exact >= 0 || !branch ? exact : follow(branch.map((option) => ({ ...option, key: (k: string) => k.startsWith("pick:") && k.endsWith(`:${option.code}`) })));
+                response = branch && at >= 0 ? branch[at].response : message.type === OcgMessageType.SELECT_CHAIN ? { type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null } : autoAnswer(message);
+                hint = 0;
+              }
+            } else if (mine) {
+              // their turn, you: note everything on offer, decline chains (the board stays whole), yes to yes/no
+              if (message.type === OcgMessageType.SELECT_CHAIN) {
+                for (const card of message.selects) record(card);
+                response = { type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null };
+              } else if (message.type === OcgMessageType.SELECT_EFFECTYN) {
+                record(message);
+                response = { type: OcgResponseType.SELECT_EFFECTYN, yes: true };
+              } else if (message.type === OcgMessageType.SELECT_YESNO) response = { type: OcgResponseType.SELECT_YESNO, yes: true };
+              else response = autoAnswer(message);
+            } else {
+              // their turn, the opponent: the probe, once
+              if (message.type === OcgMessageType.SELECT_IDLECMD) {
+                const m = message;
+                const list = probe.action === "summon" ? m.summons : m.activates;
+                const index = acted ? -1 : list.findIndex((card) => original(card.code) === probe.card);
+                if (index >= 0) {
+                  acted = true;
+                  result.ran = true;
+                  if (probe.action.startsWith("destroy")) result.before = field(reach);
+                  response = { type: OcgResponseType.SELECT_IDLECMD, action: probe.action === "summon" ? SelectIdleCMDAction.SELECT_SUMMON : SelectIdleCMDAction.SELECT_ACTIVATE, index };
+                } else if (probe.action === "summon" && acted && !attacked && m.to_bp) response = { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_BP, index: null };
+                else response = { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null };
+              } else if (message.type === OcgMessageType.SELECT_BATTLECMD) {
+                if (!attacked && message.attacks.length) {
+                  attacked = true;
+                  response = { type: OcgResponseType.SELECT_BATTLECMD, action: SelectBattleCMDAction.SELECT_BATTLE, index: 0 };
+                } else response = { type: OcgResponseType.SELECT_BATTLECMD, action: SelectBattleCMDAction.TO_EP, index: null };
+              } else if (message.type === OcgMessageType.SELECT_CARD && probe.action.startsWith("target") && !result.targetable) {
+                result.targetable = message.selects.filter((card) => card.controller === 0).map((card) => original(card.code));
+                response = autoAnswer(message);
+              } else if (message.type === OcgMessageType.SELECT_CHAIN) response = { type: OcgResponseType.SELECT_CHAIN, index: message.forced ? 0 : null };
+              else if (message.type === OcgMessageType.SELECT_EFFECTYN) response = { type: OcgResponseType.SELECT_EFFECTYN, yes: true };
+              else if (message.type === OcgMessageType.SELECT_YESNO) response = { type: OcgResponseType.SELECT_YESNO, yes: true };
+              else response = autoAnswer(message);
+            }
+            if (!response) return result;
+          }
+        }
+      }
+      if (response) core.duelSetResponse(duel, response);
+      else if (status === OcgProcessResult.END) return result;
+    }
+    return result;
+  } finally {
+    core.destroyDuel(duel);
+  }
 }

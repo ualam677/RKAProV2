@@ -23,11 +23,11 @@ import createCore, {
 import coreWasmUrl from "ocgcore-wasm/lib/ocgcore.sync.wasm?url";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import { CHOKE_TRAPS, autoAnswer, chokeCombo, chokePoints, isFollow, isNeed, isProbes, play, playAgainst, probe, probeDeck, routeSearch, type CardEvidence } from "./probe";
+import { CHOKE_TRAPS, auditOnce, autoAnswer, chokeCombo, chokePoints, isFollow, isNeed, isProbes, play, playAgainst, probe, probeDeck, routeSearch, type AuditOnce, type CardEvidence, type ProbeAction } from "./probe";
 import type { TrapPlan } from "./protocol";
 import type { FromHelper, ToHelper } from "./helper";
 import { isHandTrap } from "./handtraps";
-import { interruptionsOf, nibiruStopper, readEffects, readSetConstants, type NibiruCheck, type Protection, type QuickEffect } from "./interruptions";
+import { interruptionsOf, nibiruStopper, readEffects, readKinds, readSetConstants, type BoardAudit, type Kind, type NibiruCheck, type Protection, type QuickEffect } from "./interruptions";
 import { isFirstTurnHandTrap } from "./handtraps";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
 
@@ -1620,6 +1620,89 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
   send({ type: "route", id, tried: route.tried, done: { route: { ...route, protection: protectionOf(usedOf(route.keys)) }, record } });
 }
 
+// The board audit for a working line: one short duel per thing the opponent tries (see auditOnce in probe.ts)
+const AUDIT_PROBES: [ProbeAction, string][] = [
+  ["summon", "Mystical Elf"],
+  ["spell", "Pot of Greed"],
+  ["effect", 'Maxx "C"'],
+  ["target-monster", "Book of Moon"],
+  ["target-spell", "Mystical Space Typhoon"],
+  ["destroy-monsters", "Dark Hole"],
+  ["destroy-spells", "Harpie's Feather Duster"],
+];
+const effectKinds = new Map<number, Map<string, Kind>>();
+// `handEnd`: the hand the line ended with, when the test kept it (a replay that took another card on the way is not it)
+async function runAudit(main: number[], extra: number[], hand: number[], keys: string[], board: number[], handEnd?: number[]): Promise<BoardAudit | null> {
+  const canonical = (code: number) => {
+    const known = knownCode(code);
+    const card = cards.get(known);
+    return card?.alias && Math.abs(card.alias - known) < 20 && cards.has(card.alias) ? card.alias : known;
+  };
+  const handCodes = hand.map(canonical);
+  const deck = main.map(canonical).filter((code) => cards.has(code));
+  for (const code of handCodes) deck.splice(deck.indexOf(code), 1);
+  const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
+  const filler = cardByName("Mystical Elf")?.code;
+  const probes = AUDIT_PROBES.flatMap(([action, name]) => {
+    const card = cardByName(name)?.code;
+    return card && filler ? [{ action, card, filler }] : [];
+  });
+  if (!probes.length) return null;
+  await prefetchScripts([...handCodes, ...deck, ...extraCodes, ...probes.map((one) => one.card), filler!]);
+  const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
+  const sorted = (list: number[]) => list.map(canonical).sort((a, b) => a - b).join();
+  const want = sorted(board);
+  const wantHand = handEnd ? sorted(handEnd) : null;
+  const runs: { action: ProbeAction; run: AuditOnce }[] = [];
+  for (const probe of probes) {
+    const run = auditOnce(env, handCodes, deck, extraCodes, keys, probe);
+    // only a replay that reached the saved board says anything about it
+    if (sorted(run.board) === want && (!wantHand || sorted(run.hand ?? []) === wantHand)) runs.push({ action: probe.action, run });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  if (!runs.length) return { trusted: false, effects: [], untargetable: [], indestructible: [] };
+  // cards in the hand the line never played (a hand trap held back, a card only picked as a cost) aren't part of it:
+  // only what it summoned, activated or Set counts (a card the line searched is its own)
+  const played = new Set(keys.flatMap((key) => (/^(Normal|Special|Xyz|Synchro|Link|Fusion|Pendulum|Activate|Set)\b[^:]*:(\d+)$/.exec(key) ? [canonical(Number(/:(\d+)$/.exec(key)![1]))] : [])));
+  const unused = new Set(handCodes.filter((code) => !played.has(code)));
+  const effects = new Map<string, BoardAudit["effects"][number]>();
+  for (const { run } of runs)
+    for (const offer of run.offers) {
+      if (offer.location === OcgLocation.HAND && unused.has(offer.code)) continue;
+      const key = `${offer.code}:${offer.description}`;
+      if (!effects.has(key)) {
+        if (!effectKinds.has(offer.code)) effectKinds.set(offer.code, readKinds(readScript(`c${offer.code}.lua`) ?? ""));
+        effects.set(key, { code: offer.code, text: describe(BigInt(offer.raw)), kind: effectKinds.get(offer.code)!.get(offer.description) ?? "other", location: offer.location, at: [] });
+      }
+      const one = effects.get(key)!;
+      if (!one.at.includes(offer.at)) one.at.push(offer.at);
+    }
+  // multiset difference: what's in `all` and not taken by `taken`
+  const minus = (all: number[], taken: number[]) => {
+    const left = [...taken];
+    return all.filter((code) => {
+      const at = left.indexOf(code);
+      if (at < 0) return true;
+      left.splice(at, 1);
+      return false;
+    });
+  };
+  const untargetable = new Set<number>();
+  const indestructible = new Set<number>();
+  for (const { action, run } of runs) {
+    if (!run.ran) continue;
+    // Book of Moon picks your face-up monsters, MST your Spells and Traps: what it couldn't pick can't be targeted
+    const pool = action === "target-monster" ? run.monsters : action === "target-spell" ? minus(run.board, run.monsters) : [];
+    if (run.targetable) for (const code of minus(pool.map(canonical), run.targetable.map(canonical))) untargetable.add(code);
+    // Dark Hole and Harpie's Feather Duster: what's still there after they resolve wasn't destroyed
+    if (run.before) {
+      const gone = minus(run.before.map(canonical), (run.after ?? []).map(canonical));
+      for (const code of minus(run.before.map(canonical), gone)) indestructible.add(code);
+    }
+  }
+  return { trusted: true, effects: [...effects.values()], untargetable: [...untargetable], indestructible: [...indestructible] };
+}
+
 // Choke points for one line, between other requests like the probe and the route search
 let chokeJob = 0;
 async function runChoke(id: number, main: number[], extra: number[], hand: number[], keys: string[], goal: number, combo: number[] = [], traps: number[] = CHOKE_TRAPS) {
@@ -1818,6 +1901,10 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
         nibiru = { summons: message.summons, proof: message.summons < 5 || !!stopper, by: stopper?.code };
       }
       send({ type: "interruptions", id: message.id, list, protection: protectionOf(used), nibiru });
+    } else if (message.type === "audit") {
+      void runAudit(message.main, message.extra, message.hand, message.keys, message.board, message.handEnd)
+        .then((audit) => send({ type: "audit", id: message.id, audit }))
+        .catch(() => send({ type: "audit", id: message.id, audit: null }));
     } else if (message.type === "choke") {
       void runChoke(message.id, message.main, message.extra, message.hand, message.keys, message.goal, message.combo, message.traps).catch((error) =>
         send({ type: "error", text: `Hand trap check stopped: ${error instanceof Error ? error.message : error}` }),

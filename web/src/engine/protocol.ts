@@ -1,7 +1,7 @@
 // Messages between the page and the duel worker. The worker turns everything
 // the duel core says into these plain shapes, so the page knows nothing about the core.
 import type { CardEvidence, Choke, ChokeCombo, Route } from "./probe";
-import type { Interruption, NibiruCheck, Piece, Protection } from "./interruptions";
+import type { BoardAudit, Interruption, NibiruCheck, Piece, Protection } from "./interruptions";
 
 export interface CardRef {
   controller: number;
@@ -221,6 +221,8 @@ export type ToWorker =
   // `combo`: the hand traps the opponent holds together (Ash and Imperm), checked as a set after the single ones
   // traps: the hand traps to check (the ones the deck tags as hand traps, then the common staples)
   | { type: "choke"; id: number; main: number[]; extra: number[]; hand: number[]; keys: string[]; goal: number; combo?: number[]; traps?: number[] }
+  // the board audit for a working line: replayed, then the opponent's turn probed
+  | { type: "audit"; id: string; main: number[]; extra: number[]; hand: number[]; keys: string[]; board: number[]; handEnd?: number[] }
   // the interruptions a board holds (a working test's end): cards still in the hand it opened with don't count
   // used: the effects the line activated (code, and which of its effects when known), for what they leave in place
   // fifth: what you had right after your 5th summon, if the line made 5 (for Nibiru)
@@ -249,6 +251,7 @@ export type FromWorker =
   // progress, then the line found, as a test the duel screen replays
   | { type: "route"; id: number; tried: number; done?: { route: Route; record: TestRecord } }
   | { type: "choke"; id: number; done?: Choke[]; combo?: ChokeCombo }
+  | { type: "audit"; id: string; audit: BoardAudit | null }
   | { type: "interruptions"; id: string; list: Interruption[]; protection: Protection[]; nibiru?: NibiruCheck }
   | { type: "names"; id: string; cards: (CardInfo | null)[] }
   | { type: "cut"; id: number; cut: number; lines: { start: number; before: number; after: number; board: number[] }[] }

@@ -77,6 +77,36 @@ if (process.env.SAVED) {
   console.log("RESULT", r.interruptions, "interruptions; board", r.board.map((c) => names.get(c)).join(", "));
   process.exit(0);
 }
+// AUDIT="card name,card name": find a line for that hand with the route search, then audit its end board
+if (process.env.AUDIT) {
+  const { routeSearch, auditOnce } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const byName = (name) => [...names].find(([code, n]) => n.toLowerCase() === name.toLowerCase() && cards.has(code))?.[0];
+  const hand = process.env.AUDIT.split(",").map((name) => byName(name.trim()));
+  if (hand.some((code) => !code)) throw new Error(`unknown card in ${process.env.AUDIT}`);
+  let keys = process.env.KEYS?.split(" ");
+  if (!keys) {
+    const steps = routeSearch(env, hand, rest(hand), extra, { goal: 3, targets: [], budget: Number(process.env.BUDGET ?? 300) });
+    let next = steps.next();
+    while (!next.done) next = steps.next();
+    keys = next.value.keys;
+  }
+  console.log("LINE", keys.join(" "));
+  console.log("HAND", hand.join(","));
+  const filler = byName("Mystical Elf");
+  const probes = [["summon", "Mystical Elf"], ["spell", "Pot of Greed"], ["effect", 'Maxx "C"'], ["target-monster", "Book of Moon"], ["target-spell", "Mystical Space Typhoon"], ["destroy-monsters", "Dark Hole"], ["destroy-spells", "Harpie's Feather Duster"]];
+  for (const [action, name] of probes) {
+    const card = byName(name);
+    const t = performance.now();
+    const placed = (process.env.PLACED ?? "").split(",").filter(Boolean).map((name) => byName(name.trim()));
+    const r = auditOnce(env, hand, rest(hand), extra, keys, { action, card, filler }, placed);
+    if (action === "summon") console.log("BOARD", r.board.join(","), "HANDEND", JSON.stringify(r.hand), rest(hand).length, extra.length);
+    console.log(`\n== ${action} (${name}) ran=${r.ran} ${Math.round(performance.now() - t)}ms board: ${r.board.map((c) => names.get(c)).join(", ")}`);
+    for (const o of r.offers) console.log(`  offer: ${names.get(o.code)} #${o.description} @${o.location} on ${o.at}`);
+    if (r.targetable) console.log("  targetable:", r.targetable.map((c) => names.get(c)).join(", "));
+    if (r.before) console.log("  before:", r.before.map((c) => names.get(c)).join(", "), "| after:", (r.after ?? []).map((c) => names.get(c)).join(", "));
+  }
+  process.exit(0);
+}
 console.log(`${main.length} main, ${extra.length} extra\n`);
 const t0 = performance.now();
 const r0 = probe(env, [distinct[0]], rest([distinct[0]]), extra, { budget: 1 });

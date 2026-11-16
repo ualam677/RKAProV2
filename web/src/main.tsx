@@ -176,6 +176,12 @@ function App() {
   const lastRecord = useRef<TestRecord | null>(null);
   const [worked, setWorked] = useState(false);
   // what marking the test as working did: became a start's line, the start kept a better one, or no start in the hand
+  // a line just marked as working, while the engine audits its end board (the "Analysing" note); then its line is shown
+  const [analysing, setAnalysing] = useState<string | null>(null);
+  const analysingRef = useRef<string | null>(null);
+  analysingRef.current = analysing;
+  const scrollToLine = useRef<string | null>(null);
+  const audited = useRef(new Set<string>());
   const [workedNote, setWorkedNote] = useState<{ testId: string; count: number; kind: "line" | "kept" | "nostart"; start?: number; best?: number } | null>(null);
   // watching a saved test: its choices are made one by one; any tap of yours takes over from there
   const [replay, setReplay] = useState<{ picks: (number[] | null)[]; at: number } | null>(null);
@@ -418,12 +424,14 @@ function App() {
           if (start === undefined) {
             setDecks((all) => all.map((one) => (one.id === owner.id ? { ...one, results } : one)));
             setWorkedNote({ testId: test.id, count, kind: "nostart" });
+            setAnalysing((now) => (now === test.id ? null : now));
             return;
           }
           // the start keeps its best worked line
           if (before?.source === "replay" && before.testId !== test.id && before.signature === deckSignature(owner) && (before.interruptions?.length ?? 0) > count) {
             setDecks((all) => all.map((one) => (one.id === owner.id ? { ...one, results } : one)));
             setWorkedNote({ testId: test.id, count, kind: "kept", start, best: before.interruptions?.length ?? 0 });
+            setAnalysing((now) => (now === test.id ? null : now));
             return;
           }
           const keys = test.steps.flatMap((step) => (!step.code ? [] : step.idle ? [`${step.text.split(/[ :]/)[0]}:${step.code}`] : [`pick:${step.hint ?? 0}:${step.code}`]));
@@ -434,6 +442,9 @@ function App() {
           const updated = { ...owner, results, routes: { ...owner.routes, [start]: line } };
           setDecks((all) => all.map((one) => (one.id === owner.id ? updated : one)));
           setWorkedNote({ testId: test.id, count, kind: "line", start });
+          // the engine's look at its end board on the opponent's turn
+          audited.current.add(test.id);
+          post({ type: "audit", id: test.id, main: owner.main, extra: owner.extra, hand: test.startHand, keys, board: test.board ?? [], handEnd: test.pieces?.filter((piece) => piece.location === 2).map((piece) => piece.code) });
           // its hand trap check: now, or after the one running
           if (!chokingRef.current) checkChokes(updated, [{ code: start, hand: test.startHand }]);
           else if (!chokingRef.current.queue.some((one) => one.code === start)) chokingRef.current.queue.push({ code: start, hand: test.startHand });
@@ -455,13 +466,18 @@ function App() {
           setDecks((all) => all.map((one) => (one.id === job.deckId ? { ...one, engine: { signature: job.signature, evidence } } : one)));
           setProbe(null);
         } else setProbe({ ...job, done: message.done, total: message.total });
+      } else if (message.type === "audit") {
+        const audit = message.audit;
+        if (audit) setDecks((all) => all.map((one) => (Object.values(one.routes ?? {}).some((route) => route.testId === message.id) ? { ...one, routes: Object.fromEntries(Object.entries(one.routes ?? {}).map(([key, route]) => [key, route.testId === message.id ? { ...route, audit } : route])) } : one)));
+        if (analysingRef.current === message.id) finishAnalysing.current(message.id);
       } else if (message.type === "error") {
         setLoadingDuel(false);
+        setAnalysing(null);
         setError(message.text);
       }
     };
     // a crash in the worker posts no "error" message, so the loading note is dropped here too
-    instance.onerror = instance.onmessageerror = () => setLoadingDuel(false);
+    instance.onerror = instance.onmessageerror = () => (setLoadingDuel(false), setAnalysing(null));
     instance.postMessage({ type: "init" } satisfies ToWorker);
     return () => instance.terminate();
   }, []);
@@ -746,6 +762,55 @@ function App() {
     setRecord(null);
     setWorked(false);
   };
+  // the audit is done: back from the duel (or Replays) to the lines, scrolled to this one
+  const finishAnalysing = useRef((_id: string) => {});
+  finishAnalysing.current = (id: string) => {
+    setAnalysing(null);
+    scrollToLine.current = id;
+    if (view) (finishTest(), skip(), setReplay(null), setView(null));
+    else if (screen === "replays") setScreen("test");
+  };
+  // never stuck on "Analysing": a minute at most
+  useEffect(() => {
+    if (!analysing) return;
+    const timer = window.setTimeout(() => setAnalysing(null), 60000);
+    return () => window.clearTimeout(timer);
+  }, [analysing]);
+  useEffect(() => {
+    if (view || !scrollToLine.current) return;
+    const id = scrollToLine.current;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      const line = document.querySelector(`[data-line="${id}"]`);
+      if (line || ++tries > 40) {
+        window.clearInterval(timer);
+        scrollToLine.current = null;
+      }
+      if (line) {
+        line.scrollIntoView({ block: "center", behavior: "smooth" });
+        line.classList.add("line-new");
+      }
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, [view, screen]);
+  // lines saved before the audit existed: audited in the background, one after another
+  useEffect(() => {
+    if (!ready || !deck?.routes) return;
+    const waiting = Object.values(deck.routes).find((route) => route.source === "replay" && route.testId && !route.audit && !route.unreplayable && route.keys?.length && route.record?.startHand?.length && !audited.current.has(route.testId));
+    if (!waiting?.testId) return;
+    audited.current.add(waiting.testId);
+    const pieces = deck.tests?.find((one) => one.id === waiting.testId)?.pieces;
+    post({ type: "audit", id: waiting.testId, main: deck.main, extra: deck.extra, hand: waiting.record.startHand, keys: waiting.keys!, board: waiting.board, handEnd: pieces?.filter((piece) => piece.location === 2).map((piece) => piece.code) });
+  }, [ready, deck]);
+  const analysingNote = analysing && (
+    <div className="duel-loading" role="status" aria-live="polite">
+      <span className="duel-loading-spin" aria-hidden="true" />
+      <span>
+        <b>Analysing</b>
+        <small>Playing out the opponent's turn…</small>
+      </span>
+    </div>
+  );
   const markWorked = () => {
     const current = test.current;
     if (!current || !record || !view) return;
@@ -767,6 +832,7 @@ function App() {
         ]
       : undefined;
     setWorked(current.worked);
+    setAnalysing(current.worked ? current.id : null);
     if (!current.worked) {
       setWorkedNote(null);
       const owner = decksRef.current.find((one) => one.id === current.deckId);
@@ -913,8 +979,9 @@ function App() {
       changeDeck({ ...without, tests: (without.tests ?? []).map((test) => (test.id === saved.id ? { ...test, worked: false, board: undefined, pieces: undefined, interruptions: undefined } : test)) });
       return;
     }
+    setAnalysing(saved.id);
     const counted = await countBoard(saved, views);
-    if (!counted) return;
+    if (!counted) return setAnalysing(null);
     const { pieces, board } = counted;
     const latest = decksRef.current.find((one) => one.id === target.id) ?? target;
     const known = latest.tests?.some((test) => test.id === saved.id);
@@ -1233,6 +1300,7 @@ function App() {
             {error}
           </p>
         )}
+        {analysingNote}
         <Duel
           view={view}
           texts={texts}
@@ -1320,6 +1388,7 @@ function App() {
   })();
   return (
     <main className={`start ${screen === "menu" ? "menu-screen" : ""}`}>
+      {analysingNote}
       {loadingDuel && (
         <div className="duel-loading" role="status" aria-live="polite">
           <span className="duel-loading-spin" aria-hidden="true" />

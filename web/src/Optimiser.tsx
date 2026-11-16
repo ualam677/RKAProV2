@@ -731,7 +731,23 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
   const stops = route.interruptions ?? [];
   const say = (text: string) => setSaid(said === text ? null : text);
   const stopsText = stops.length ? `${stops.length} interruption${stops.length > 1 ? "s" : ""}: ${stops.map((one) => describeInterruption(one, nameOf)).join(", ")}` : "No interruptions";
-  const protectText = route.protection?.length ? `Protection on their turn: ${route.protection.map((one) => describeProtection(one, nameOf)).join(" · ")}` : "";
+  // protection: what the line's effects leave in place (read from the scripts), and what the engine found it couldn't
+  // target or destroy on their turn
+  const audit = route.audit?.trusted ? route.audit : undefined;
+  const names = (codes: number[]) => [...new Set(codes)].map(nameOf).join(", ");
+  const protectParts = [
+    ...(route.protection ?? []).map((one) => describeProtection(one, nameOf)),
+    ...(audit?.untargetable.length ? [`Can't be targeted: ${names(audit.untargetable)}`] : []),
+    ...(audit?.indestructible.length ? [`Can't be destroyed by card effects: ${names(audit.indestructible)}`] : []),
+  ];
+  const protectText = protectParts.length ? `Protection on their turn: ${protectParts.join(" · ")}` : "";
+  // every effect the engine offered on their turn, and when
+  const WHERE: Record<number, string> = { 2: "hand", 4: "field", 8: "field", 16: "GY", 32: "banished" };
+  const effectsText = audit?.effects.length
+    ? `On their turn, checked by the engine: ${audit.effects
+        .map((one) => `${nameOf(one.code)} (${WHERE[one.location] ?? "field"}): ${one.text || "an effect"}${one.kind !== "other" ? ` [${one.kind}]` : ""} — on ${one.at.slice(0, 3).join(", ")}${one.at.length > 3 ? "…" : ""}`)
+        .join(" · ")}`
+    : "";
   const nibiruText = route.nibiru ? describeNibiru(route.nibiru, nameOf) : "";
   const combo = route.combo;
   const comboText = combo
@@ -744,7 +760,7 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
   const marksText = route.marks?.length ? `Choke points you marked (the smart opponent hand-traps here): ${route.marks.map((mark) => mark.at).join(" · ")}` : "";
   const tone = (count: number) => (count >= fullAt ? "good" : count === 0 ? "bad" : "warn");
   return (
-    <div className={`route-line ${full ? "full" : ""}`}>
+    <div className={`route-line ${full ? "full" : ""}`} data-line={route.testId}>
       <div className="route-needs" aria-label={route.needs ? `This line needs ${route.needs.map(nameOf).join(" + ")}${route.any ? ` and ${route.any} other card${route.any === 1 ? "" : "s"}` : ""}` : "Working out which cards this line needs"}>
         <small>NEEDS</small>
         {route.unreplayable ? (
@@ -775,6 +791,14 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
               <CardArt code={27204311} />
             </span>
             {route.nibiru.proof ? "✓" : "✕"}
+          </button>
+        )}
+        {effectsText && (
+          <button className={`route-mark ${said === effectsText ? "on" : ""}`} onClick={() => say(effectsText)} aria-label={effectsText}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M13 2 4 14h7l-1 8 9-12h-7z" />
+            </svg>
+            {audit!.effects.length}
           </button>
         )}
         {protectText && (

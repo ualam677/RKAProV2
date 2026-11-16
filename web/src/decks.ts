@@ -4,7 +4,7 @@ import { parseYdk, type Deck } from "./deck";
 import type { Tag } from "./optimiser";
 import type { CardEvidence } from "./engine/probe";
 import type { TestRecord } from "./engine/protocol";
-import type { Interruption, NibiruCheck, Piece, Protection } from "./engine/interruptions";
+import type { BoardAudit, Interruption, NibiruCheck, Piece, Protection } from "./engine/interruptions";
 import type { Choke, ChokeCombo } from "./engine/probe";
 
 // A hand test kept with its deck: enough to replay it exactly, and what it ended on if you said it worked
@@ -113,6 +113,8 @@ export interface SavedRoute {
   needsFor?: string;
   // the engine couldn't replay it to the board it reached (its checks and needs can't be trusted)
   unreplayable?: boolean;
+  // the engine's look at the end board on the opponent's turn (protection, every effect it offered)
+  audit?: BoardAudit;
   // the worked replay it came from
   testId?: string;
 }

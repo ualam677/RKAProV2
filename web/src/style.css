@@ -1193,3 +1193,8 @@ main.menu-screen .main-menu { flex: 1; min-height: 0; }
 .deck-card .muted, .deck-card-text small, .decks-strip-deck { color: var(--sub); }
 /* "T1" sat 2px left of the button centre (measured): moved over */
 .phase-turn { transform: translateX(2px); }
+
+/* a line just saved: lit up for a moment once you're brought to it */
+.route-line.line-new { animation: line-new 2.2s ease-out; border-radius: 10px; }
+@keyframes line-new { 0%, 40% { box-shadow: 0 0 0 2px var(--gold), 0 0 18px rgba(230, 195, 106, 0.5); } 100% { box-shadow: none; } }
+.route-mark svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
