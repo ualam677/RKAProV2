@@ -920,7 +920,7 @@ function smartUse(trap: number, moment: string): boolean {
   // moment in that line hurts more
   const hand = (record?.startHand ?? []).map(canonicalOf);
   for (const plan of trapPlans) {
-    if (canonicalOf(plan.trap) !== canonicalOf(trap) || !hand.includes(canonicalOf(plan.start))) continue;
+    if (canonicalOf(plan.trap) !== canonicalOf(trap) || !(plan.needs?.length ? plan.needs : [plan.start]).every((need) => hand.includes(canonicalOf(need)))) continue;
     const key = `${plan.start}:${plan.trap}`;
     const from = planAt.get(key) ?? 0;
     const at = plan.windows.findIndex((window, index) => index >= from && window.at === moment);

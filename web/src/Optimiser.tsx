@@ -165,10 +165,27 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   // a full board: at least this many interruptions on the opponent's turn
   const fullAt = deck.fullAt ?? 3;
   const isFull = (route?: SavedRoute) => !!route && (route.interruptions?.length ?? 0) >= fullAt;
+  // for the odds, a line counts toward a card only if that card is all it needs (plus any other cards)
+  const aloneFull = (code: number, route?: SavedRoute) => isFull(route) && (!route!.needs || route!.needs.every((need) => nameKey(need) === code));
+  // the hand a start's ▶ deals: a saved line's needed cards plus its other cards (from that line's own hand); with no
+  // line, the card alone if the engine saw it start alone, or with its partner
+  const neededHand = (card: DeckCard): number[] | null => {
+    const route = routes[card.code];
+    if (route?.needs?.length && route.record?.startHand) {
+      let others = [...route.record.startHand];
+      for (const need of route.needs) {
+        const at = others.findIndex((code) => nameKey(code) === nameKey(need));
+        if (at >= 0) others.splice(at, 1);
+      }
+      return [...route.needs, ...others.slice(0, route.any ?? 0)];
+    }
+    const full = testHand(card, main);
+    return full ? full.slice(0, card.tag.role === "pair" ? 2 : 1) : null;
+  };
   const reached = useMemo(() => {
     if (!startCardsAll.some((card) => routeOf(card.code))) return null;
     const checked = main.map((card) =>
-      (card.tag.role === "starter" || card.tag.role === "pair") && !isFull(routeOf(card.code)) ? { ...card, tag: { role: "other" as Role } } : card,
+      (card.tag.role === "starter" || card.tag.role === "pair") && !aloneFull(card.code, routeOf(card.code)) ? { ...card, tag: { role: "other" as Role } } : card,
     );
     return computeOdds(checked, second ? 6 : 5);
   }, [main, second, deck.routes, fullAt]);
@@ -205,7 +222,8 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
     // none picked is allowed: no hand traps
     onChange({ ...deck, opponentTraps: next, updated: Date.now() });
   };
-  const checkAgain = () => onCheckChokes(startCards.flatMap((card) => { const hand = handFor(card); return hand && routes[card.code]?.keys ? [{ code: card.code, hand }] : []; }));
+  // each line checked from the hand it was played with (its moves only make sense from there)
+  const checkAgain = () => onCheckChokes(Object.entries(routes).flatMap(([code, route]) => (route.keys && route.record?.startHand?.length ? [{ code: Number(code), hand: route.record.startHand }] : [])));
   const through = useMemo(
     () =>
       trapCodes.map((trap) => {
@@ -659,10 +677,10 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
                   className="play-round"
                   aria-label={`Test ${nameOf(card.code)}`}
                   onClick={() => {
-                    const hand = testHand(card, main);
+                    const hand = neededHand(card);
                     if (hand) onTest(hand.map((code) => held.get(code) ?? code));
                   }}
-                  disabled={!testHand(card, main)}
+                  disabled={!neededHand(card)}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M7 4v16l13-8z" />
@@ -722,6 +740,21 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
   const tone = (count: number) => (count >= fullAt ? "good" : count === 0 ? "bad" : "warn");
   return (
     <div className={`route-line ${full ? "full" : ""}`}>
+      <div className="route-needs" aria-label={route.needs ? `This line needs ${route.needs.map(nameOf).join(" + ")}${route.any ? ` and ${route.any} other card${route.any === 1 ? "" : "s"}` : ""}` : "Working out which cards this line needs"}>
+        <small>NEEDS</small>
+        {route.needs ? (
+          <>
+            {route.needs.map((code, at) => (
+              <span key={at} className="mini-card plain" title={nameOf(code)}>
+                <CardArt code={code} />
+              </span>
+            ))}
+            {route.any ? <b className="needs-any">+{route.any}</b> : null}
+          </>
+        ) : (
+          <span className="muted">…</span>
+        )}
+      </div>
       {route.board.length > 0 && <EndBoard board={route.board} interruptions={stops} nameOf={nameOf} />}
       <div className="route-marks">
         <button className={`int-badge ${tone(stops.length)} ${said === stopsText ? "on" : ""}`} onClick={() => say(stopsText)} aria-label={stopsText}>

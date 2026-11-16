@@ -441,7 +441,7 @@ function App() {
       trapTiming: deck?.trapTiming ?? ("smart" as const),
       // your saved lines' hand trap checks, so the smart opponent waits for the moment that hurts each line most
       trapPlans: Object.entries(deck?.routes ?? {}).flatMap(([start, route]) =>
-        route.source === "replay" ? (route.chokes ?? []).map((choke) => ({ start: Number(start), trap: choke.trap, clean: choke.clean, windows: choke.windows.map((window) => ({ at: window.at, interruptions: window.interruptions })) })) : [],
+        route.source === "replay" ? (route.chokes ?? []).map((choke) => ({ start: Number(start), needs: route.needs, trap: choke.trap, clean: choke.clean, windows: choke.windows.map((window) => ({ at: window.at, interruptions: window.interruptions })) })) : [],
       ),
       goSecond: false,
     };
@@ -1038,7 +1038,8 @@ function App() {
     newTest(test ? test.chosen[0] : undefined);
     // a start's ▶ deals its own hand (and New hand deals it again); the screen's own settings stay as you left them
     startedWith.current = test;
-    const use = test ? { hand: 5, chosen: test.chosen, ignoreHandTraps: true } : { hand, chosen, ignoreHandTraps };
+    // a start's ▶ deals exactly the cards it needs (no filler)
+    const use = test ? { hand: test.chosen.length, chosen: test.chosen, ignoreHandTraps: true } : { hand, chosen, ignoreHandTraps };
     setError("");
     // a test started from the editor returns to it when you leave the duel
     // whatever was still being shown from the last hand is dropped

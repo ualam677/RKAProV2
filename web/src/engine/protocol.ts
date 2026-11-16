@@ -164,6 +164,8 @@ export interface StartOptions {
 
 export interface TrapPlan {
   start: number;
+  // the hand cards the line needs (all of them in your hand for the plan to apply); without it, the start card
+  needs?: number[];
   trap: number;
   clean: number;
   windows: { at: string; interruptions: number }[];

@@ -1007,3 +1007,7 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .deck-card-row .deck-card { flex: 1; min-width: 0; }
 .deck-edit { width: 56px; height: auto; min-height: 56px; flex: none; border-radius: 14px; border-color: #5c4b22; color: var(--gold, #e6c36a); }
 .deck-edit svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* a line's needs: the cards it was measured to need, then how many other cards it uses */
+.route-needs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.route-needs small { font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: 0.06em; color: #8a96ad; margin-right: 4px; }
+.needs-any { font-family: var(--display); font-weight: 700; font-size: 16px; color: #8a96ad; margin-left: 2px; }
