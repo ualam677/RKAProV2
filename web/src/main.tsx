@@ -132,10 +132,20 @@ function App() {
   // every screen opens at its top; a reload doesn't carry the last screen's scroll onto the menu
   useEffect(() => {
     if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+    // a phone browser can still put the old scroll back while the page loads, or when it comes back from the
+    // back/forward cache: to the top each time
+    const top = () => window.scrollTo(0, 0);
+    window.addEventListener("load", top);
+    window.addEventListener("pageshow", top);
+    return () => (window.removeEventListener("load", top), window.removeEventListener("pageshow", top));
   }, []);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [screen]);
+  // the cards finishing loading changes the page's height: back to the top on the menu once more
+  useEffect(() => {
+    if (ready && screen === "menu") window.scrollTo(0, 0);
+  }, [ready]);
   // a duel on its way (the first one downloads card scripts): a small "loading" note until its first screen arrives
   const [loadingDuel, setLoadingDuel] = useState(false);
   // the deck whose ⋯ is open on the Decks screen
@@ -914,6 +924,10 @@ function App() {
   type Frame = { index: number; label: string; picks: number };
   // fast: playing straight through, nothing described until paused; mini: the bar folded down to one line
   const [viewing, setViewing] = useState<{ test: SavedTest; views: DuelView[]; frames: Frame[]; at: number; back: boolean; playing: boolean; fast?: boolean; mini?: boolean } | null>(null);
+  // the menu never scrolls: the page itself is locked while it shows (not under the editor, a duel or a replay)
+  useEffect(() => {
+    document.documentElement.classList.toggle("no-scroll", screen === "menu" && !editing && !view && !viewing);
+  }, [screen, editing, view, viewing]);
   // the phone's back button steps back through the app (replay, duel, editor, a section) and only leaves it from the menu
   const goBack = useRef<() => boolean>(() => false);
   goBack.current = () => {

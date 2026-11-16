@@ -12,6 +12,10 @@
     <link rel="icon" href="./icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <meta name="theme-color" content="#04060b" />
+    <!-- the app always opens on the menu: never put back the scroll of the screen you reloaded on -->
+    <script>
+      if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+    </script>
   </head>
   <body style="background: #03060c">
     <div id="root"></div>
