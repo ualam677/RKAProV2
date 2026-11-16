@@ -1097,3 +1097,13 @@ main.menu-screen .main-menu { flex: 1; min-height: 0; }
 .hand-card.focused, .zone .tile.focused { z-index: 36; }
 .float-actions { width: min(320px, calc(100vw - 16px)); }
 .action-what { display: block; -webkit-line-clamp: unset; overflow: visible; }
+
+/* a duel loading: a small note on the side; the duel screen then fades in */
+.duel-loading { position: fixed; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 60; display: flex; align-items: center; gap: 12px; padding: 12px 16px 12px 12px; border: 1px solid #2c4a80; border-left: 3px solid #e6c36a; border-radius: 12px; background: rgba(8, 15, 30, 0.97); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); animation: loading-in 220ms ease-out; }
+.duel-loading b { display: block; font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: 0.06em; text-transform: uppercase; color: #f6e3a8; }
+.duel-loading small { font-size: 12px; color: #9fb0cc; }
+.duel-loading-spin { width: 26px; height: 26px; border-radius: 50%; border: 3px solid rgba(230, 195, 106, 0.25); border-top-color: #e6c36a; animation: loading-spin 0.8s linear infinite; flex: none; }
+@keyframes loading-spin { to { transform: rotate(360deg); } }
+@keyframes loading-in { from { opacity: 0; transform: translateX(24px); } }
+.duel { animation: duel-in 320ms ease-out; }
+@keyframes duel-in { from { opacity: 0; } }

@@ -136,6 +136,8 @@ function App() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [screen]);
+  // a duel on its way (the first one downloads card scripts): a small "loading" note until its first screen arrives
+  const [loadingDuel, setLoadingDuel] = useState(false);
   // the deck whose ⋯ is open on the Decks screen
   const [deckMenu, setDeckMenu] = useState<string | null>(null);
   const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
@@ -275,7 +277,10 @@ function App() {
         setReady(true);
         setBanlist(message.banlist);
         setStatus(`${message.cards.toLocaleString()} cards loaded`);
-      } else if (message.type === "view") receive(message.view);
+      } else if (message.type === "view") {
+        setLoadingDuel(false);
+        receive(message.view);
+      }
       else if (message.type === "record") {
         lastRecord.current = message.record;
         if (!replayRef.current) setRecord(message.record);
@@ -450,7 +455,10 @@ function App() {
           setDecks((all) => all.map((one) => (one.id === job.deckId ? { ...one, engine: { signature: job.signature, evidence } } : one)));
           setProbe(null);
         } else setProbe({ ...job, done: message.done, total: message.total });
-      } else if (message.type === "error") setError(message.text);
+      } else if (message.type === "error") {
+        setLoadingDuel(false);
+        setError(message.text);
+      }
     };
     instance.postMessage({ type: "init" } satisfies ToWorker);
     return () => instance.terminate();
@@ -1039,6 +1047,7 @@ function App() {
   };
   const watch = (saved: SavedTest, from = 0, same = false, play = false) => {
     setError("");
+    if (!view) setLoadingDuel(true);
     if (same) setRecord(null);
     else newTest(saved.testOf, from > 0 || play ? from : saved.picks.length);
     window.clearTimeout(timer.current);
@@ -1070,6 +1079,7 @@ function App() {
   const startedWith = useRef<{ chosen: number[] } | undefined>(undefined);
   const start = useCallback((test?: { chosen: number[] }) => {
     if (!deck) return;
+    setLoadingDuel(true);
     setReplay(null);
     newTest(test ? test.chosen[0] : undefined);
     // a start's ▶ deals its own hand (and New hand deals it again); the screen's own settings stay as you left them
@@ -1308,6 +1318,15 @@ function App() {
   })();
   return (
     <main className={`start ${screen === "menu" ? "menu-screen" : ""}`}>
+      {loadingDuel && (
+        <div className="duel-loading" role="status" aria-live="polite">
+          <span className="duel-loading-spin" aria-hidden="true" />
+          <span>
+            <b>Loading duel</b>
+            <small>Setting up the cards…</small>
+          </span>
+        </div>
+      )}
       <header>
         <h1 className="logo">
           RKA<em>PRO</em>
