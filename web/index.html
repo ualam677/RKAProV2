@@ -15,6 +15,21 @@
     <!-- the app always opens on the menu: never put back the scroll of the screen you reloaded on -->
     <script>
       if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+      // full-screen pages are sized to what's actually visible: after a reload, an installed app on Android can report
+      // a 100dvh that runs under the navigation bar, so the visible height is measured instead, and again whenever it
+      // changes (and a few times while the page settles)
+      (function () {
+        var fit = function () {
+          var height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+          document.documentElement.style.setProperty("--app-h", Math.round(Math.min(height, window.innerHeight)) + "px");
+        };
+        fit();
+        window.addEventListener("resize", fit);
+        window.addEventListener("pageshow", fit);
+        window.addEventListener("load", fit);
+        if (window.visualViewport) window.visualViewport.addEventListener("resize", fit);
+        [100, 400, 1200].forEach(function (ms) { setTimeout(fit, ms); });
+      })();
     </script>
   </head>
   <body style="background: #03060c">
