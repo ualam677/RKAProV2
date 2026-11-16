@@ -270,9 +270,9 @@ function CardInfo({ card, text, materials, children }: { card: CardView | null; 
   );
 }
 
-const PHASE_SHORT: Record<string, string> = { Draw: "DP", Standby: "SP", "Main 1": "M1", Battle: "BP", Damage: "BP", "Main 2": "M2", End: "EP" };
+const PHASE_SHORT: Record<string, string> = { Draw: "DP", Standby: "SP", "Main 1": "MP1", Battle: "BP", Damage: "BP", "Main 2": "MP2", End: "EP" };
 
-// DP SP M1 BP M2 EP, the current one lit, in your colour or the opponent's (EDOPro's phase bar)
+// DP SP MP1 BP MP2 EP, the current one lit, in your colour or the opponent's (EDOPro's phase bar)
 const TRACK = ["Draw", "Standby", "Main 1", "Battle", "Main 2", "End"];
 function PhaseTrack({ phase, mine }: { phase: string; mine: boolean }) {
   const now = phase === "Damage" ? "Battle" : phase;
