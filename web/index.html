@@ -15,6 +15,8 @@
     <!-- the app always opens on the menu: never put back the scroll of the screen you reloaded on -->
     <script>
       if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+      // running as the installed app (not in a browser tab): the menu is locked to the screen (style.css, html.app)
+      if (matchMedia("(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)").matches || navigator.standalone) document.documentElement.classList.add("app");
       // full-screen pages are sized to what's actually visible: after a reload, an installed app on Android can report
       // a 100dvh that runs under the navigation bar, so the visible height is measured instead, and again whenever it
       // changes (and a few times while the page settles)

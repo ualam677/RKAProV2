@@ -1242,3 +1242,9 @@ main.menu-screen .main-menu > * { flex-shrink: 0; }
 .icon-button.settings-button { display: flex; align-items: center; justify-content: center; }
 /* keyword colours off: the words stay plain */
 .plain-keywords .kw-does, .plain-keywords .kw-where { color: inherit; font-weight: inherit; }
+
+/* the installed app: the menu is the screen, locked to its height, tiles giving a little if needed (no scrolling);
+   in a browser tab (its address bar takes room) it scrolls instead, as above */
+html.app main.menu-screen { height: var(--app-h, 100dvh); overflow: hidden; }
+html.app main.menu-screen .main-menu > * { flex-shrink: 1; }
+html.app main.menu-screen .main-menu > .optimise-tile, html.app main.menu-screen .main-menu > .menu-dock { flex-shrink: 0; }
