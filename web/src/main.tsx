@@ -460,6 +460,8 @@ function App() {
         setError(message.text);
       }
     };
+    // a crash in the worker posts no "error" message, so the loading note is dropped here too
+    instance.onerror = instance.onmessageerror = () => setLoadingDuel(false);
     instance.postMessage({ type: "init" } satisfies ToWorker);
     return () => instance.terminate();
   }, []);
