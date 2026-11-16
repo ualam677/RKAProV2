@@ -330,9 +330,122 @@ export function readKinds(source: string): Map<string, Kind> {
 export interface BoardAudit {
   // the replay reached the saved board; if not, nothing below can be trusted
   trusted: boolean;
-  // every effect the engine offered you on their turn: the card, what it does, its kind, where it was, and when
-  effects: { code: number; text: string; kind: Kind; location: number; at: string[] }[];
+  // every effect that can matter on their turn: the card, what it does, its kind, where it was and when. `confirmed`:
+  // the engine offered it on this board; otherwise it was read from the script (its condition may not hold)
+  effects: { code: number; text: string; kind: Kind; location: number; at: string[]; confirmed?: boolean }[];
+  // protection read from the scripts: the card, what it stops, whether the engine saw it hold
+  protections?: { code: number; text: string; confirmed: boolean }[];
   // your monsters their targeting couldn't pick, your cards their "destroy" left standing
   untargetable: number[];
   indestructible: number[];
+}
+
+// ==== Everything a card's script says it can do on the opponent's turn (read, not played): Quick Effects, Traps,
+// triggers that can happen then (destroyed, sent to the GY, their summon), and protection that is always on ====
+
+/** One effect read from a script, for the board audit to list beside what the engine confirmed. */
+export interface ScriptEffect {
+  // its description (Stringid index) when it has one: the engine names offered effects the same way
+  description?: string;
+  kind: Kind;
+  how: "quick" | "trigger" | "protection";
+  // where the card has to be: location bits (2 hand, 4 Monster Zone, 8 Spell & Trap Zone, 16 GY, 32 banished)
+  where: number;
+  // a trigger: what sets it off, in plain words; protection: what it stops
+  when?: string;
+  protects?: string;
+  // protection given to your other cards too, not only this one
+  others?: boolean;
+  // it has a condition the script checks on the spot (materials, a card you control): may not hold on this board
+  conditional?: boolean;
+}
+
+// protection codes, in plain words
+const GUARDS: [RegExp, string][] = [
+  [/EFFECT_CANNOT_BE_EFFECT_TARGET\b/, "can't be targeted by card effects"],
+  [/EFFECT_INDESTRUCTABLE_EFFECT\b/, "can't be destroyed by card effects"],
+  [/EFFECT_INDESTRUCTABLE_BATTLE\b/, "can't be destroyed by battle"],
+  [/EFFECT_INDESTRUCTABLE_COUNT\b/, "survives being destroyed once"],
+  [/EFFECT_DESTROY_REPLACE\b/, "can avoid being destroyed (a replacement effect)"],
+  [/EFFECT_IMMUNE_EFFECT\b/, "unaffected by card effects"],
+  [/EFFECT_CANNOT_BE_BATTLE_TARGET\b/, "can't be attacked"],
+  [/EFFECT_CANNOT_REMOVE\b/, "can't be banished"],
+  [/EFFECT_CANNOT_TO_GRAVE\b/, "can't be sent to the GY"],
+  [/EFFECT_CANNOT_TO_DECK\b/, "can't be returned to the Deck"],
+  [/EFFECT_CANNOT_TO_HAND\b/, "can't be returned to the hand"],
+  [/EFFECT_CANNOT_RELEASE\b/, "can't be Tributed"],
+  [/EFFECT_CANNOT_INACTIVATE\b|EFFECT_CANNOT_DISEFFECT\b/, "its effects can't be negated"],
+];
+// triggers that can happen on the opponent's turn, in plain words
+const EVENTS: [RegExp, string, boolean?][] = [
+  [/EVENT_DESTROYED\b/, "when it's destroyed"],
+  [/EVENT_BATTLE_DESTROYED\b/, "when it's destroyed by battle"],
+  [/EVENT_TO_GRAVE\b/, "when it's sent to the GY"],
+  [/EVENT_LEAVE_FIELD\b/, "when it leaves the field"],
+  [/EVENT_REMOVE\b/, "when it's banished"],
+  [/EVENT_TO_HAND\b/, "when it's returned to the hand"],
+  [/EVENT_BE_BATTLE_TARGET\b|EVENT_ATTACK_ANNOUNCE\b/, "when they attack"],
+  // these only count when the effect watches the field (their summon, their activation), not this card's own
+  [/EVENT_SPSUMMON_SUCCESS\b|EVENT_SUMMON_SUCCESS\b|EVENT_FLIP_SUMMON_SUCCESS\b/, "when they summon", true],
+  [/EVENT_CHAINING\b/, "when they activate a card or effect", true],
+  [/EVENT_PHASE\s*\+\s*PHASE_STANDBY\b/, "in the Standby Phase", true],
+  [/EVENT_PHASE\s*\+\s*PHASE_END\b/, "in the End Phase", true],
+];
+
+/** Every effect a card's script gives it that can matter on the opponent's turn. */
+export function readBoardEffects(source: string, cardType: number): ScriptEffect[] {
+  type Draft = { type: string; category: string; range: string; code: string; condition: string; description: string; reset: string };
+  const drafts = new Map<string, Draft>();
+  const registered: Draft[] = [];
+  for (const line of source.split("\n")) {
+    let match = /local\s+(\w+)\s*=\s*Effect\.CreateEffect/.exec(line);
+    if (match) {
+      drafts.set(match[1], { type: "", category: "", range: "", code: "", condition: "", description: "", reset: "" });
+      continue;
+    }
+    match = /local\s+(\w+)\s*=\s*(\w+):Clone\(\)/.exec(line);
+    if (match && drafts.has(match[2])) {
+      drafts.set(match[1], { ...drafts.get(match[2])! });
+      continue;
+    }
+    match = /(\w+):Set(Type|Category|Range|Code|Condition|Description|Reset)\((.*)\)\s*$/.exec(line.trim());
+    if (match && drafts.has(match[1])) {
+      drafts.get(match[1])![match[2].toLowerCase() as keyof Draft] = match[3];
+      continue;
+    }
+    match = /RegisterEffect\((\w+)/.exec(line);
+    if (match && drafts.has(match[1])) registered.push({ ...drafts.get(match[1])! });
+  }
+  const isTrap = (cardType & 4) !== 0;
+  const isQuickPlay = (cardType & 2) !== 0 && (cardType & 0x10000) !== 0;
+  const out: ScriptEffect[] = [];
+  for (const draft of registered) {
+    const description = /Stringid\(\s*id\s*,\s*(\d+)\)/.exec(draft.description)?.[1];
+    let where = 0;
+    for (const [name, bits] of Object.entries(LOCATIONS)) if (draft.range.includes(name)) where |= bits;
+    const conditional = !!draft.condition;
+    // always-on protection: no activation, nothing that wears off
+    const guard = GUARDS.find(([code]) => code.test(draft.code));
+    if (guard && !/EFFECT_TYPE_(ACTIVATE|QUICK|TRIGGER|IGNITION)/.test(draft.type) && !draft.reset) {
+      out.push({ description, kind: "other", how: "protection", where: where || 4 | 8, protects: guard[1], others: /EFFECT_TYPE_FIELD/.test(draft.type), conditional });
+      continue;
+    }
+    const quick = /EFFECT_TYPE_QUICK_[OF]/.test(draft.type) || (/EFFECT_TYPE_ACTIVATE/.test(draft.type) && (isTrap || isQuickPlay));
+    if (quick) {
+      if (BATTLE.test(draft.code)) continue;
+      if (/EFFECT_TYPE_ACTIVATE/.test(draft.type)) where |= 8;
+      if (!where) continue;
+      out.push({ description, kind: kindOf(draft.category), how: "quick", where, conditional });
+      continue;
+    }
+    if (/EFFECT_TYPE_TRIGGER_[OF]/.test(draft.type)) {
+      const event = EVENTS.find(([code]) => code.test(draft.code));
+      if (!event) continue;
+      // "when they summon": an effect watching the field (FIELD type), not this card's own summon (SINGLE)
+      if (event[2] && /EFFECT_TYPE_SINGLE/.test(draft.type)) continue;
+      // a card's own leaving: it's on the field until then
+      out.push({ description, kind: kindOf(draft.category), how: "trigger", where: where || 4 | 8, when: event[1], conditional });
+    }
+  }
+  return out;
 }

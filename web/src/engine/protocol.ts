@@ -222,7 +222,7 @@ export type ToWorker =
   // traps: the hand traps to check (the ones the deck tags as hand traps, then the common staples)
   | { type: "choke"; id: number; main: number[]; extra: number[]; hand: number[]; keys: string[]; goal: number; combo?: number[]; traps?: number[] }
   // the board audit for a working line: replayed, then the opponent's turn probed
-  | { type: "audit"; id: string; main: number[]; extra: number[]; hand: number[]; keys: string[]; board: number[]; handEnd?: number[] }
+  | { type: "audit"; id: string; main: number[]; extra: number[]; hand: number[]; keys: string[]; board: number[]; pieces?: Piece[] }
   // the interruptions a board holds (a working test's end): cards still in the hand it opened with don't count
   // used: the effects the line activated (code, and which of its effects when known), for what they leave in place
   // fifth: what you had right after your 5th summon, if the line made 5 (for Nibiru)

@@ -731,21 +731,31 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
   const stops = route.interruptions ?? [];
   const say = (text: string) => setSaid(said === text ? null : text);
   const stopsText = stops.length ? `${stops.length} interruption${stops.length > 1 ? "s" : ""}: ${stops.map((one) => describeInterruption(one, nameOf)).join(", ")}` : "No interruptions";
-  // protection: what the line's effects leave in place (read from the scripts), and what the engine found it couldn't
-  // target or destroy on their turn
-  const audit = route.audit?.trusted ? route.audit : undefined;
+  // protection: what the line's effects leave in place, what each card's script says is always on, and what the engine
+  // saw it couldn't target or destroy on their turn (✓: the engine saw it hold on this board)
+  const audit = route.audit;
+  const trusted = !!audit?.trusted;
   const names = (codes: number[]) => [...new Set(codes)].map(nameOf).join(", ");
+  const scripted = audit?.protections ?? [];
+  const engineOnly = (codes: number[], word: RegExp) => (trusted ? codes.filter((code) => !scripted.some((one) => one.code === code && word.test(one.text))) : []);
+  const untargetableOnly = engineOnly(audit?.untargetable ?? [], /targeted/);
+  const indestructibleOnly = engineOnly(audit?.indestructible ?? [], /destroyed by card effects|avoid being destroyed/);
   const protectParts = [
     ...(route.protection ?? []).map((one) => describeProtection(one, nameOf)),
-    ...(audit?.untargetable.length ? [`Can't be targeted: ${names(audit.untargetable)}`] : []),
-    ...(audit?.indestructible.length ? [`Can't be destroyed by card effects: ${names(audit.indestructible)}`] : []),
+    ...[...scripted].sort((a, b) => Number(b.confirmed) - Number(a.confirmed)).map((one) => `${nameOf(one.code)}: ${one.text}${one.confirmed ? " ✓" : ""}`),
+    ...(untargetableOnly.length ? [`Can't be targeted: ${names(untargetableOnly)} ✓`] : []),
+    ...(indestructibleOnly.length ? [`Can't be destroyed by card effects: ${names(indestructibleOnly)} ✓`] : []),
   ];
-  const protectText = protectParts.length ? `Protection on their turn: ${protectParts.join(" · ")}` : "";
-  // every effect the engine offered on their turn, and when
+  const protectText = protectParts.length ? `Protection on their turn (✓ seen by the engine on this board): ${protectParts.join(" · ")}` : "";
+  // every effect that can matter on their turn: the ones the engine offered first, then the ones read from the scripts
   const WHERE: Record<number, string> = { 2: "hand", 4: "field", 8: "field", 16: "GY", 32: "banished" };
-  const effectsText = audit?.effects.length
-    ? `On their turn, checked by the engine: ${audit.effects
-        .map((one) => `${nameOf(one.code)} (${WHERE[one.location] ?? "field"}): ${one.text || "an effect"}${one.kind !== "other" ? ` [${one.kind}]` : ""}, ${one.at.includes("any time") ? "any time" : `in answer to ${one.at.join(" or ")}`}`)
+  const effectsList = [...(audit?.effects ?? [])].sort((a, b) => Number(b.confirmed !== false) - Number(a.confirmed !== false));
+  const effectsText = effectsList.length
+    ? `On their turn (✓ offered by the engine on this board, the rest read from the card scripts): ${effectsList
+        .map((one) => {
+          const when = one.confirmed === false ? one.at.join(", ") : one.at.includes("any time") ? "any time" : `in answer to ${one.at.join(" or ")}`;
+          return `${nameOf(one.code)} (${WHERE[one.location] ?? "field"}): ${one.text || "an effect"}${one.kind !== "other" ? ` [${one.kind}]` : ""}, ${when}${one.confirmed === false ? "" : " ✓"}`;
+        })
         .join(" · ")}`
     : "";
   const nibiruText = route.nibiru ? describeNibiru(route.nibiru, nameOf) : "";
@@ -798,7 +808,7 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M13 2 4 14h7l-1 8 9-12h-7z" />
             </svg>
-            {audit!.effects.length}
+            {effectsList.length}
           </button>
         )}
         {protectText && (

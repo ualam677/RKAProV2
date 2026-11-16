@@ -1172,8 +1172,10 @@ export interface AuditOnce {
   // your field when the line ended: monsters, then Spells and Traps
   board: number[];
   monsters: number[];
-  // your hand when the line ended
+  // your hand, GY and banished cards when the line ended
   hand?: number[];
+  grave?: number[];
+  banished?: number[];
   ran: boolean;
   offers: AuditOffer[];
   // probe "target-…": your face-up cards it could have targeted; "destroy-…": your cards on the field before and after
@@ -1327,6 +1329,8 @@ export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: 
                       .duelQueryLocation(duel, { flags: (OcgQueryFlags.CODE | OcgQueryFlags.POSITION) as OcgQueryFlags, controller: 0, location: OcgLocation.MZONE })
                       .flatMap((card) => (card?.code && card.position !== undefined && card.position & OcgPosition.FACEUP ? [card.code] : []));
                     result.hand = core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location: OcgLocation.HAND }).flatMap((card) => (card?.code ? [card.code] : []));
+                    result.grave = core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location: OcgLocation.GRAVE }).flatMap((card) => (card?.code ? [card.code] : []));
+                    result.banished = core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location: OcgLocation.REMOVED }).flatMap((card) => (card?.code ? [card.code] : []));
                   }
                   response = { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null };
                 } else response = offered[at].response;

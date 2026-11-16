@@ -444,7 +444,7 @@ function App() {
           setWorkedNote({ testId: test.id, count, kind: "line", start });
           // the engine's look at its end board on the opponent's turn
           audited.current.add(test.id);
-          post({ type: "audit", id: test.id, main: owner.main, extra: owner.extra, hand: test.startHand, keys, board: test.board ?? [], handEnd: test.pieces?.filter((piece) => piece.location === 2).map((piece) => piece.code) });
+          post({ type: "audit", id: test.id, main: owner.main, extra: owner.extra, hand: test.startHand, keys, board: test.board ?? [], pieces: test.pieces });
           // its hand trap check: now, or after the one running
           if (!chokingRef.current) checkChokes(updated, [{ code: start, hand: test.startHand }]);
           else if (!chokingRef.current.queue.some((one) => one.code === start)) chokingRef.current.queue.push({ code: start, hand: test.startHand });
@@ -802,7 +802,7 @@ function App() {
     if (!waiting?.testId) return;
     audited.current.add(waiting.testId);
     const pieces = deck.tests?.find((one) => one.id === waiting.testId)?.pieces;
-    post({ type: "audit", id: waiting.testId, main: deck.main, extra: deck.extra, hand: waiting.record.startHand, keys: waiting.keys!, board: waiting.board, handEnd: pieces?.filter((piece) => piece.location === 2).map((piece) => piece.code) });
+    post({ type: "audit", id: waiting.testId, main: deck.main, extra: deck.extra, hand: waiting.record.startHand, keys: waiting.keys!, board: waiting.board, pieces });
   }, [ready, deck]);
   const analysingNote = analysing && (
     <div className="duel-loading" role="status" aria-live="polite">

@@ -27,7 +27,7 @@ import { CHOKE_TRAPS, auditOnce, autoAnswer, chokeCombo, chokePoints, isFollow, 
 import type { TrapPlan } from "./protocol";
 import type { FromHelper, ToHelper } from "./helper";
 import { isHandTrap } from "./handtraps";
-import { interruptionsOf, nibiruStopper, readEffects, readKinds, readSetConstants, type BoardAudit, type Kind, type NibiruCheck, type Protection, type QuickEffect } from "./interruptions";
+import { interruptionsOf, nibiruStopper, readBoardEffects, readEffects, readKinds, readSetConstants, type BoardAudit, type Kind, type NibiruCheck, type Piece, type ScriptEffect, type Protection, type QuickEffect } from "./interruptions";
 import { isFirstTurnHandTrap } from "./handtraps";
 import type { CardInfo, CardRef, CardSearch, CardView, Choice, DuelEvent, DuelView, FromWorker, PlayerView, Prompt, StartOptions, TestRecord, ToWorker } from "./protocol";
 
@@ -1633,8 +1633,11 @@ const AUDIT_PROBES: [ProbeAction, string, string?, ("summon" | "set")?][] = [
   ["destroy-spells", "Harpie's Feather Duster"],
 ];
 const effectKinds = new Map<number, Map<string, Kind>>();
-// `handEnd`: the hand the line ended with, when the test kept it (a replay that took another card on the way is not it)
-async function runAudit(main: number[], extra: number[], hand: number[], keys: string[], board: number[], handEnd?: number[]): Promise<BoardAudit | null> {
+const boardEffects = new Map<number, ScriptEffect[]>();
+// `pieces`: where everything was when the line ended, when the test kept it: the replay must end the same way, and the
+// scripts are read for those cards even when it doesn't
+async function runAudit(main: number[], extra: number[], hand: number[], keys: string[], board: number[], pieces?: Piece[]): Promise<BoardAudit | null> {
+  const handEnd = pieces?.filter((piece) => piece.location === OcgLocation.HAND).map((piece) => piece.code);
   const canonical = (code: number) => {
     const known = knownCode(code);
     const card = cards.get(known);
@@ -1664,7 +1667,7 @@ async function runAudit(main: number[], extra: number[], hand: number[], keys: s
     if (sorted(run.board) === want && (!wantHand || sorted(run.hand ?? []) === wantHand)) runs.push({ action: probe.action, run });
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  if (!runs.length) return { trusted: false, effects: [], untargetable: [], indestructible: [] };
+  if (!runs.length && !pieces) return { trusted: false, effects: [], untargetable: [], indestructible: [] };
   // cards in the hand the line never played (a hand trap held back, a card only picked as a cost) aren't part of it:
   // only what it summoned, activated or Set counts (a card the line searched is its own)
   const played = new Set(keys.flatMap((key) => (/^(Normal|Special|Xyz|Synchro|Link|Fusion|Pendulum|Activate|Set)\b[^:]*:(\d+)$/.exec(key) ? [canonical(Number(/:(\d+)$/.exec(key)![1]))] : [])));
@@ -1705,7 +1708,48 @@ async function runAudit(main: number[], extra: number[], hand: number[], keys: s
       for (const code of minus(run.before.map(canonical), gone)) indestructible.add(code);
     }
   }
-  return { trusted: true, effects: [...effects.values()], untargetable: [...untargetable], indestructible: [...indestructible] };
+  // what the scripts say the end position can do, beside what the engine saw: the field, the GY, banished cards, and
+  // the hand cards the line played or gained
+  const end: Piece[] = (pieces ?? [
+    ...(runs[0]?.run.monsters ?? []).map((code) => ({ code, location: OcgLocation.MZONE, materials: 0 })),
+    ...minus(runs[0]?.run.board ?? [], runs[0]?.run.monsters ?? []).map((code) => ({ code, location: OcgLocation.SZONE, materials: 0 })),
+    ...(runs[0]?.run.hand ?? []).map((code) => ({ code, location: OcgLocation.HAND, materials: 0 })),
+    ...(runs[0]?.run.grave ?? []).map((code) => ({ code, location: OcgLocation.GRAVE, materials: 0 })),
+    ...(runs[0]?.run.banished ?? []).map((code) => ({ code, location: OcgLocation.REMOVED, materials: 0 })),
+  ]).map((piece) => ({ ...piece, code: canonical(piece.code) }));
+  const leftInHand = minus(handCodes, []).filter((code) => unused.has(code));
+  const protections: NonNullable<BoardAudit["protections"]> = [];
+  const seen = new Set<string>();
+  for (const piece of end) {
+    if (!([OcgLocation.MZONE, OcgLocation.SZONE, OcgLocation.HAND, OcgLocation.GRAVE, OcgLocation.REMOVED] as number[]).includes(piece.location)) continue;
+    if (piece.location === OcgLocation.HAND) {
+      const at = leftInHand.indexOf(piece.code);
+      if (at >= 0) {
+        leftInHand.splice(at, 1);
+        continue;
+      }
+    }
+    const bits = piece.location === OcgLocation.MZONE ? 4 : piece.location === OcgLocation.SZONE ? 8 : piece.location === OcgLocation.HAND ? 2 : piece.location === OcgLocation.GRAVE ? 16 : 32;
+    await prefetchScripts([piece.code]);
+    if (!boardEffects.has(piece.code)) boardEffects.set(piece.code, readBoardEffects(readScript(`c${piece.code}.lua`) ?? "", cards.get(piece.code)?.type ?? 0));
+    for (const effect of boardEffects.get(piece.code)!) {
+      if (!(effect.where & bits)) continue;
+      const once = `${piece.code}:${effect.how}:${effect.description ?? effect.protects ?? effect.when}`;
+      if (seen.has(once)) continue;
+      seen.add(once);
+      if (effect.how === "protection") {
+        const confirmed = (/targeted/.test(effect.protects!) && untargetable.has(piece.code)) || (/destroyed by card effects|avoid being destroyed/.test(effect.protects!) && indestructible.has(piece.code));
+        protections.push({ code: piece.code, text: `${effect.protects}${effect.others ? " (gives this to your other cards too)" : ""}${effect.conditional && !confirmed ? " (if its condition holds)" : ""}`, confirmed });
+        continue;
+      }
+      const key = `${piece.code}:${effect.description}`;
+      if (effect.description !== undefined && effects.has(key)) continue;
+      const text = effect.description !== undefined ? cardString(piece.code, Number(effect.description)) : "";
+      effects.set(`${key}:${effect.how}:${effect.when}`, { code: piece.code, text: text || (effect.how === "trigger" ? "a triggered effect" : "an effect"), kind: effect.kind, location: piece.location, at: [effect.how === "trigger" ? effect.when! : "any time"], confirmed: false });
+    }
+  }
+  for (const one of effects.values()) if (one.confirmed === undefined) one.confirmed = true;
+  return { trusted: runs.length > 0, effects: [...effects.values()], untargetable: [...untargetable], indestructible: [...indestructible], protections };
 }
 
 // Choke points for one line, between other requests like the probe and the route search
@@ -1907,7 +1951,7 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
       }
       send({ type: "interruptions", id: message.id, list, protection: protectionOf(used), nibiru });
     } else if (message.type === "audit") {
-      void runAudit(message.main, message.extra, message.hand, message.keys, message.board, message.handEnd)
+      void runAudit(message.main, message.extra, message.hand, message.keys, message.board, message.pieces)
         .then((audit) => send({ type: "audit", id: message.id, audit }))
         .catch(() => send({ type: "audit", id: message.id, audit: null }));
     } else if (message.type === "choke") {
