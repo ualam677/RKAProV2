@@ -167,7 +167,7 @@ export interface TrapPlan {
   // the hand cards the line needs (all of them in your hand for the plan to apply); without it, the start card
   needs?: number[];
   // choke points you marked on the line, in order: the smart opponent uses its hand trap there
-  marks?: string[];
+  marks?: { at: string; traps: number[] }[];
   trap: number;
   clean: number;
   windows: { at: string; interruptions: number }[];
@@ -254,7 +254,8 @@ export type FromWorker =
   | { type: "cut"; id: number; cut: number; lines: { start: number; before: number; after: number; board: number[] }[] }
   // needs: cards whose absence lowers the line's board; any: how many more of the hand's other cards it still uses
   | { type: "needs"; id: number; lines: { key: string; before: number; needs: number[]; any: number }[] }
-  | { type: "moment"; id: number; at: string; step: number }
+  // traps: the hand traps the opponent could have used there (a mark binds only those)
+  | { type: "moment"; id: number; at: string; step: number; traps: number[] }
   | { type: "traits"; traits: [number, string[]][] }
   | { type: "error"; text: string };
 

@@ -166,7 +166,8 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   const fullAt = deck.fullAt ?? 3;
   const isFull = (route?: SavedRoute) => !!route && (route.interruptions?.length ?? 0) >= fullAt;
   // for the odds, a line counts toward a card only if that card is all it needs (plus any other cards)
-  const aloneFull = (code: number, route?: SavedRoute) => isFull(route) && (!route!.needs || route!.needs.every((need) => nameKey(need) === code));
+  // (measured, replayed faithfully, and needing nothing but this card)
+  const aloneFull = (code: number, route?: SavedRoute) => isFull(route) && !route!.unreplayable && !!route!.needs?.length && route!.needs.every((need) => nameKey(need) === code);
   // the hand a start's ▶ deals: a saved line's needed cards plus its other cards (from that line's own hand); with no
   // line, the card alone if the engine saw it start alone, or with its partner
   const neededHand = (card: DeckCard): number[] | null => {
@@ -208,7 +209,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
   // through them together
   const livesOf = (code: number) => {
     const route = routeOf(code);
-    if (!isFull(route)) return 0;
+    if (!aloneFull(code, route)) return 0;
     if (sameSet(route?.combo) && route!.combo!.interruptions >= fullAt) return 1 + holding.length;
     const each = holding.map((trap) => worstOf(route, trap));
     return each.every((worst) => worst !== null && worst >= fullAt) ? 2 : 1;
@@ -229,7 +230,7 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
       trapCodes.map((trap) => {
         const verdict = (code: number): "through" | "full" | "no" => {
           const route = routeOf(code);
-          if (!isFull(route)) return "no";
+          if (!aloneFull(code, route)) return "no";
           const choke = route?.chokes?.find((one) => one.trap === trap);
           // never usable against this line, or its worst moment still leaves a full board
           const worst = !choke ? 0 : choke.windows.length ? Math.min(...choke.windows.map((window) => window.interruptions)) : (route?.interruptions?.length ?? 0);
@@ -743,7 +744,9 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
     <div className={`route-line ${full ? "full" : ""}`}>
       <div className="route-needs" aria-label={route.needs ? `This line needs ${route.needs.map(nameOf).join(" + ")}${route.any ? ` and ${route.any} other card${route.any === 1 ? "" : "s"}` : ""}` : "Working out which cards this line needs"}>
         <small>NEEDS</small>
-        {route.needs ? (
+        {route.unreplayable ? (
+          <span className="route-warn">the engine couldn't replay this line: no needs or hand trap check</span>
+        ) : route.needs ? (
           <>
             {route.needs.map((code, at) => (
               <span key={at} className="mini-card plain" title={nameOf(code)}>

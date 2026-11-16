@@ -179,7 +179,11 @@ flat gold frame over a fan of three cards (no stars, no gradient on the border).
 - Built in: the hand trap list (handtraps.ts) and CHOKE_TRAPS. Lines are filed under a card they need (re-filed once
   measured), and a start's ▶ deals exactly what it needs (its line's cards, else the card alone or with its partner).
 - Replays of saved lines had been failing silently past any Xyz/Link summon, on alternate-art codes, and when a
-  skipped prompt's pick stood in for a search; all three fixed (16 Nov), so hand trap checks of older lines are now right.
+  skipped prompt's pick stood in for a search; all three fixed (16 Nov). A line whose stored hand trap check doesn't
+  start from the board it reached is re-checked automatically; a line the engine still can't replay to its board is
+  flagged on its row and kept out of the odds and the smart opponent. Marks bind only the hand traps that could
+  answer at that moment. The replay still auto-answers non-Deck picks (materials, discards, targets), so lines whose
+  result depends on a specific material choice may be flagged as unreplayable.
 
 ## 1.0.0 (15 Nov 2026)
 Released after advisor/checker reviews (developer, Yu-Gi-Oh! player, UI). In this release: the smart hand-trap

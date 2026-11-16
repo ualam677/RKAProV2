@@ -155,7 +155,7 @@ function App() {
   probeRef.current = probe;
   // the hand test on screen, saved with its deck as it is played (not while a saved one is being watched)
   // `from`: choices replayed from a saved test, not saved again until you make one of your own
-  const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; pieces?: Piece[]; from: number; marks?: { at: string; step: number }[] } | null>(null);
+  const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; pieces?: Piece[]; from: number; marks?: { at: string; step: number; traps?: number[] }[] } | null>(null);
   const [record, setRecord] = useState<TestRecord | null>(null);
   const lastRecord = useRef<TestRecord | null>(null);
   const [worked, setWorked] = useState(false);
@@ -318,7 +318,7 @@ function App() {
         const current = test.current;
         if (!current || markWaiting.current !== message.id) return;
         markWaiting.current = 0;
-        current.marks = [...(current.marks ?? []).filter((mark) => mark.step !== message.step), { at: message.at, step: message.step }];
+        current.marks = [...(current.marks ?? []).filter((mark) => mark.step !== message.step), { at: message.at, step: message.step, traps: message.traps }];
         setMarks(current.marks.length);
         const played = lastRecord.current;
         if (played) keep(current.deckId, { ...played, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces, marks: current.marks });
@@ -333,7 +333,13 @@ function App() {
             for (const line of message.lines) {
               const route = routes[line.key];
               if (!route) continue;
-              const measured = { ...route, needs: line.needs, any: line.any, needsFor: deckSignature(one) };
+              // a replay short of the board it reached proves nothing about what it needs
+              const faithful = line.before >= (route.interruptions?.length ?? 0);
+              const measured = faithful ? { ...route, needs: line.needs, any: line.any, needsFor: deckSignature(one), unreplayable: false } : { ...route, needs: undefined, any: undefined, needsFor: deckSignature(one), unreplayable: true };
+              if (!faithful) {
+                routes[line.key] = measured;
+                continue;
+              }
               const starts = (code: number) => ["starter", "pair"].includes(one.tags?.[code]?.role ?? "") || !!one.engine?.evidence.some((entry) => entry.code === code && (entry.alone.deck > 0 || entry.partners.length > 0));
               const key = line.needs.includes(Number(line.key)) || !line.needs.length ? Number(line.key) : (line.needs.find(starts) ?? line.needs[0]);
               if (key !== Number(line.key)) {
@@ -452,7 +458,7 @@ function App() {
       trapTiming: deck?.trapTiming ?? ("smart" as const),
       // your saved lines' hand trap checks, so the smart opponent waits for the moment that hurts each line most
       trapPlans: Object.entries(deck?.routes ?? {}).flatMap(([start, route]) =>
-        route.source === "replay" ? (route.chokes ?? []).map((choke) => ({ start: Number(start), needs: route.needs, marks: route.marks?.map((mark) => mark.at), trap: choke.trap, clean: choke.clean, windows: choke.windows.map((window) => ({ at: window.at, interruptions: window.interruptions })) })) : [],
+        route.source === "replay" && !route.unreplayable ? (route.chokes ?? []).filter((choke) => choke.clean >= (route.interruptions?.length ?? 0)).map((choke) => ({ start: Number(start), needs: route.needs, marks: route.marks?.map((mark) => ({ at: mark.at, traps: mark.traps ?? [] })), trap: choke.trap, clean: choke.clean, windows: choke.windows.map((window) => ({ at: window.at, interruptions: window.interruptions })) })) : [],
       ),
       goSecond: false,
     };
@@ -1063,6 +1069,21 @@ function App() {
     lastRecord.current = null;
     post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...opponentDeck(), seed: Math.floor(Math.random() * 2 ** 31) });
   }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond, decks]);
+
+  // a line whose hand trap check doesn't start from the board it reached (checked before replays were fixed, or filed
+  // under another card since) is checked again, once
+  const rechecked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!ready || !deck?.routes || choking) return;
+    const stale = Object.entries(deck.routes).filter(([key, route]) => {
+      const id = `${deck.id}:${key}:${route.testId ?? route.date}`;
+      if (route.source !== "replay" || route.unreplayable || !route.keys?.length || !route.record?.startHand?.length || rechecked.current.has(id)) return false;
+      const mismatch = !route.chokes || route.chokes.some((choke) => choke.clean !== (route.interruptions?.length ?? 0));
+      if (mismatch) rechecked.current.add(id);
+      return mismatch;
+    });
+    if (stale.length) checkChokes(deck, stale.map(([key, route]) => ({ code: Number(key), hand: route.record.startHand })));
+  }, [ready, deck, choking]);
 
   const requestText = useCallback(
     (code: number) => {

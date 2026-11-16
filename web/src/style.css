@@ -1021,3 +1021,7 @@ header .status { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhe
 .zone-stats, .zone-level, .pile-count { -webkit-text-stroke: 0; text-shadow: -1px -1px 0 #04060b, 1px -1px 0 #04060b, -1px 1px 0 #04060b, 1px 1px 0 #04060b, 0 0 4px rgba(0, 0, 0, 0.8); }
 .lifebar-lp { letter-spacing: 0.02em; }
 .duel .lifebar-lp { font-family: var(--num); font-style: italic; font-weight: 800; font-size: 24px; }
+.route-warn { font-size: 12px; color: #f2b544; }
+/* LP plates: the same space on both sides (the italic numbers lean right, so they get a little more) */
+.duel .lifebar { padding: 4px 10px; }
+.duel .lifebar-lp { padding-right: 3px; }

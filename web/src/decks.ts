@@ -17,7 +17,7 @@ export interface SavedTest extends TestRecord {
   // the start the optimiser's Test button was testing
   testOf?: number;
   // choke points you marked while playing it: the moment (as the hand trap check names it) and the choice it came at
-  marks?: { at: string; step: number }[];
+  marks?: { at: string; step: number; traps?: number[] }[];
   // what you had when you said it worked (field with Xyz Materials, hand, GY), and the interruptions it holds
   pieces?: Piece[];
   interruptions?: Interruption[];
@@ -109,8 +109,10 @@ export interface SavedRoute {
   needs?: number[];
   any?: number;
   // your marked choke points (copied from the test it was saved from)
-  marks?: { at: string; step: number }[];
+  marks?: { at: string; step: number; traps?: number[] }[];
   needsFor?: string;
+  // the engine couldn't replay it to the board it reached (its checks and needs can't be trusted)
+  unreplayable?: boolean;
   // the worked replay it came from
   testId?: string;
 }
