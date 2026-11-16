@@ -1217,6 +1217,7 @@ function App() {
       {screen === "menu" && <span className="version">{__APP_VERSION__}</span>}
       {screen === "menu" && (
         <nav className="main-menu">
+          <div className="deck-card-row">
           <button className="deck-card" onClick={() => setScreen("decks")} aria-label={deck ? `${deck.name}: change deck` : "Choose or import a deck"}>
             {deck ? (
               <>
@@ -1232,6 +1233,14 @@ function App() {
               <b>Choose or import a deck</b>
             )}
           </button>
+          {deck && (
+            <button className="icon-button deck-edit" disabled={!ready} onClick={() => openEditor(false)} aria-label={`Edit "${deck.name}"`}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" />
+              </svg>
+            </button>
+          )}
+          </div>
           {canInstall && (
             <button
               className="button small"
@@ -1261,16 +1270,6 @@ function App() {
                 {deck?.tests?.length ?? 0}
                 {Object.keys(deck?.routes ?? {}).length > 0 && <small className="good">{Object.keys(deck?.routes ?? {}).length} working</small>}
               </span>
-            </button>
-            <button className="menu-tile" disabled={!ready || !deck} onClick={() => openEditor(false)}>
-              <b>Edit deck</b>
-              <svg className="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" />
-              </svg>
-            </button>
-            <button className="menu-tile" onClick={() => setScreen("decks")}>
-              <b>Decks</b>
-              <span className="tile-number">{decks.length}</span>
             </button>
             <button className="menu-tile" onClick={() => setScreen("sync")}>
               <b>Sync</b>

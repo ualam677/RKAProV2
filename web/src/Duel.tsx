@@ -1117,11 +1117,6 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
               return pickButton(twin && choice.card ? { ...choice, label: `${choice.label}: ${choice.card.name}` } : choice, index, "float-action");
             })}
             {materialsButton(focus.card, "float-action info")}
-            {!wide && (
-              <button className="float-action info" onClick={(event) => (event.stopPropagation(), showDetail(focus.card))}>
-                Card text
-              </button>
-            )}
           </div>
         </>
       )}
