@@ -805,10 +805,11 @@ function App() {
     }, 150);
     return () => window.clearInterval(timer);
   }, [view, screen]);
-  // lines saved before the audit existed: audited in the background, one after another
+  // lines saved before the audit existed: audited in the background, one after another (a line the older replay
+  // couldn't follow too: this one follows more, and if it can't either, the scripts are read for the saved board)
   useEffect(() => {
     if (!ready || !deck?.routes) return;
-    const waiting = Object.values(deck.routes).find((route) => route.source === "replay" && route.testId && !route.audit && !route.unreplayable && route.keys?.length && route.record?.startHand?.length && !audited.current.has(route.testId));
+    const waiting = Object.values(deck.routes).find((route) => route.source === "replay" && route.testId && !route.audit && route.keys?.length && route.record?.startHand?.length && !audited.current.has(route.testId));
     if (!waiting?.testId) return;
     audited.current.add(waiting.testId);
     const pieces = deck.tests?.find((one) => one.id === waiting.testId)?.pieces;
@@ -1381,7 +1382,7 @@ function App() {
     );
   }
 
-  const nameOf = (code: number) => texts.get(code)?.name ?? `#${code}`;
+  const nameOf = (code: number) => texts.get(code)?.name ?? cards.get(code)?.name ?? `#${code}`;
   // the first-turn combo odds the Optimiser last worked out for this deck
   const menuSummary = (() => {
     if (!deck || screen !== "menu") return null;
