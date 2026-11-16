@@ -1300,7 +1300,7 @@ function App() {
     }
   })();
   return (
-    <main className="start">
+    <main className={`start ${screen === "menu" ? "menu-screen" : ""}`}>
       <header>
         <h1 className="logo">
           RKA<em>PRO</em>

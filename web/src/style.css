@@ -1081,3 +1081,6 @@ h1.logo::after { content: ""; flex: none; width: 35px; height: 26px; margin-left
 .dock-tile .tile-number { font-family: var(--num); font-style: italic; font-weight: 800; color: var(--text); }
 .optimise-tile .engine-split b { font-family: var(--num); font-style: italic; font-weight: 800; font-size: 26px; line-height: 1; color: var(--text); }
 .menu-dock { padding-bottom: 18px; }
+/* the menu fills the screen exactly and never scrolls: the middle takes whatever height is left */
+main.menu-screen { box-sizing: border-box; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+main.menu-screen .main-menu { flex: 1; min-height: 0; }
