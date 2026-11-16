@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CardArt } from "./CardArt";
+import { Keywords } from "./Keywords";
 import { isMuted, onMuted, play, setMuted, type Sound } from "./sound";
 import { LOCATION, POSITION, TYPE, sumReady, sumSoFar, type CardRef, type CardText, type CardView, type Choice, type DuelEvent, type DuelView, type PlayerView } from "./engine/protocol";
 
@@ -467,7 +468,8 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   const materialsButton = (card: CardView, className: string) =>
     card.overlay.length > 0 && (
       <button className={className} onClick={(event) => (event.stopPropagation(), openMaterials(card))}>
-        Xyz Materials ({card.overlay.length})
+        <b className="action-verb">Xyz Materials</b>
+        <span className="action-what">{card.overlay.length} attached: tap to see them</span>
       </button>
     );
   const inspect = (card: CardView) => {
@@ -498,6 +500,11 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     const actions = actionsFor(card);
     // picking materials or targets: the tap is the answer
     if (prompt?.kind === "choice" && !idle && actions.length === 1 && actions[0].choice.pick) {
+      inspect(card);
+      return answer([actions[0].index]);
+    }
+    // an Extra Deck monster with one way to summon it: the tap summons it (holding it still shows its text)
+    if (idle && card.location === LOCATION.EXTRA && actions.length === 1 && /^(Xyz|Synchro|Link|Fusion) Summon$/.test(actions[0].choice.label)) {
       inspect(card);
       return answer([actions[0].index]);
     }
@@ -608,18 +615,32 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
         answer([index]);
       }}
     >
-      {className.includes("float-action") ? actionLabel(choice.label) : choice.label}
+      {className.includes("float-action") ? actionLabel(choice) : choice.label}
     </button>
   );
   // an action on a card: the verb in the display face, what it does underneath in small text ("Activate: Take 1 …")
-  const actionLabel = (label: string) => {
+  // a chain window says "<card name>: <effect>": the card is the one tapped, so it reads "Activate" instead
+  const actionLabel = (choice: Choice) => {
+    const name = choice.card?.name;
+    const label = name && choice.label.startsWith(`${name}: `) ? `Activate: ${choice.label.slice(name.length + 2)}` : choice.label;
     const at = label.indexOf(": ");
     const verb = at > 0 && at < 24 ? label.slice(0, at) : label;
     const what = at > 0 && at < 24 ? label.slice(at + 2) : "";
+    // a long option with no verb of its own (an effect's text): plain words, not a heading
+    if (!what && verb.length > 24)
+      return (
+        <span className="action-what lone">
+          <Keywords text={verb} />
+        </span>
+      );
     return (
       <>
         <b className="action-verb">{verb}</b>
-        {what && <span className="action-what">{what}</span>}
+        {what && (
+          <span className="action-what">
+            <Keywords text={what} />
+          </span>
+        )}
       </>
     );
   };
@@ -673,7 +694,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     promptMode === "board" ? (
       <div className="prompt-bar" onClick={(event) => event.stopPropagation()}>
         <span className="prompt-title">
-          {zonePrompt ? `${prompt!.title}: tap a highlighted zone` : prompt!.title}
+          <Keywords text={zonePrompt ? `${prompt!.title}: tap a highlighted zone` : prompt!.title} />
           {count && !zonePrompt && <b> ({count})</b>}
         </span>
         {promptButtons}
@@ -799,10 +820,12 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
 
   const promptDialog = prompt?.kind === "counter" ? counterDialog : promptMode === "dialog" && !promptHidden && (
     <div className="dialog" onClick={(event) => event.stopPropagation()}>
-      <h2>{prompt!.title}</h2>
+      <h2>
+        <Keywords text={prompt!.title} />
+      </h2>
       <div className="actions">
         {prompt!.kind === "choice"
-          ? choices.map((choice, index) => pickButton(choice, index))
+          ? choices.map((choice, index) => pickButton(choice, index, "float-action"))
           : choices.map((choice, index) => (
               <button className={`list-row ${picks.includes(index) ? "picked" : ""}`} key={index} onClick={() => togglePick(index)}>
                 {choice.label}

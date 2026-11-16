@@ -1107,3 +1107,41 @@ main.menu-screen .main-menu { flex: 1; min-height: 0; }
 @keyframes loading-in { from { opacity: 0; transform: translateX(24px); } }
 .duel { animation: duel-in 320ms ease-out; }
 @keyframes duel-in { from { opacity: 0; } }
+
+/* ==== One panel for every prompt (the style of the card actions): dark surface, thin blue edge, a bright blue
+   bar on the left, headings in the display face. Gold stays for what's chosen and the current phase. ==== */
+:root {
+  --surface: rgba(8, 15, 30, 0.96);
+  --surface-solid: #08101f;
+  --edge: #2c4a80;
+  --blue: #3d8bff;
+  --label: #cfe2ff;
+  --sub: #9fb0cc;
+  --scrim: rgba(2, 4, 10, 0.55);
+}
+.kw-does { color: var(--gold); font-weight: 600; }
+.kw-where { color: #9cd0ff; font-weight: 600; }
+.action-what.lone { font-size: 14px; line-height: 1.35; color: var(--text); }
+.scrim.dim, .scrim.card-focus { background: var(--scrim); }
+
+.prompt-bar { border: 1px solid var(--edge); border-left: 3px solid var(--blue); border-radius: 10px; background: var(--surface); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6), 0 0 10px rgba(61, 139, 255, 0.25); }
+.prompt-title { color: var(--label); font-weight: 500; }
+.dialog { border: 1px solid var(--edge); border-left: 3px solid var(--blue); border-radius: 12px; background: var(--surface-solid); box-shadow: 0 0 0 100vmax var(--scrim), 0 12px 40px rgba(0, 0, 0, 0.7); }
+.dialog h2, .sheet h2 { font-family: var(--display); font-weight: 700; font-size: 20px; line-height: 1.15; letter-spacing: 0.02em; color: var(--label); }
+.dialog .actions { gap: 6px; }
+.dialog .float-action { width: 100%; }
+.sheet { background: var(--surface-solid); border-top: 1px solid var(--edge); box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.6), 0 -1px 0 rgba(61, 139, 255, 0.35); }
+.menu, .phase-menu { border: 1px solid var(--edge); border-left: 3px solid var(--blue); border-radius: 10px; background: var(--surface-solid); }
+.list-row { border-color: var(--edge); border-radius: 10px; background: var(--surface); }
+.list-row.picked { border-color: var(--gold); background: rgba(230, 195, 106, 0.12); }
+.banner { font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: 0.06em; text-transform: uppercase; border-color: var(--edge); border-left: 3px solid var(--blue); border-radius: 10px; color: var(--label); }
+.duel-loading { border-left-color: var(--blue); }
+.duel-loading b { color: var(--label); }
+.duel-loading-spin { border-color: rgba(61, 139, 255, 0.25); border-top-color: var(--blue); }
+
+/* buttons in the duel: the same surface, words in the display face */
+.duel .button, .sheet .button, .dialog .button, .menu .button { border-color: var(--edge); border-radius: 10px; background: var(--surface); font-family: var(--display); font-weight: 600; font-size: 17px; letter-spacing: 0.02em; color: var(--label); }
+.duel .button.small, .sheet .button.small, .dialog .button.small { font-size: 15px; }
+.duel .button.primary, .duel .button.on, .sheet .button.primary, .sheet .button.on, .dialog .button.primary, .menu .button.on { background: linear-gradient(180deg, #4a95ff, #2563d9); border-color: #7ab4ff; color: #fff; }
+.duel .button.ghost, .sheet .button.ghost, .dialog .button.ghost, .menu .button.ghost { background: transparent; color: var(--sub); }
+.float-action.info { background: var(--surface); border-color: var(--edge); border-left-color: var(--gold); color: var(--text); }
