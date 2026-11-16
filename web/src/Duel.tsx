@@ -383,22 +383,6 @@ function Cues({ events, onSkip }: { events: DuelEvent[]; onSkip: () => void }) {
 
 export function Duel({ view, texts, requestText, answer, restart, leave, skip, worked, onWorked, onMark, marks, markNote, workedText, replaying, states, onSaveState, onLoadState, onRewind, viewer, viewerMenu }: Props) {
   const [stateList, setStateList] = useState(false);
-  // Xyz Materials drawn under their monster, like EDOPro (an option, remembered)
-  const [showMaterials, setShowMaterials] = useState(() => {
-    try {
-      return localStorage.getItem("rka.materials") !== "0";
-    } catch {
-      return true;
-    }
-  });
-  const toggleMaterials = () => {
-    setShowMaterials(!showMaterials);
-    try {
-      localStorage.setItem("rka.materials", showMaterials ? "0" : "1");
-    } catch {
-      // just for this visit
-    }
-  };
   const [savedNote, setSavedNote] = useState("");
   const wide = useMedia(WIDE_QUERY);
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -541,7 +525,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
         key={`${controller}-${location}-${sequence}`}
         onClick={index >= 0 && !card ? (event) => (event.stopPropagation(), togglePick(index)) : undefined}
       >
-        {showMaterials && card && card.overlay.length > 0 && (
+        {card && card.overlay.length > 0 && (
           // the materials peek out under the monster, one edge each; they slide in as they are attached
           <span className="overlay-stack" aria-label={`${card.overlay.length} Xyz Material${card.overlay.length > 1 ? "s" : ""}`}>
             {card.overlay.slice(0, 5).map((code, at) => (
@@ -931,16 +915,10 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   const focusActions = focus ? actionsFor(focus.card) : [];
   const myTurn = view.turnPlayer === 0;
 
-  const materialsToggle = (
-    <button className={`button ${showMaterials ? "on" : ""}`} onClick={(event) => (event.stopPropagation(), toggleMaterials())}>
-      {showMaterials ? "✓ Xyz Materials shown" : "Show Xyz Materials"}
-    </button>
-  );
   const menu = viewer ? (
     <>
       {wide && <MuteButton className="button" />}
       {viewerMenu}
-      {materialsToggle}
       <button className="button ghost" onClick={leave}>
         Exit
       </button>
@@ -948,7 +926,6 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
   ) : (
     <>
       {wide && <MuteButton className="button" />}
-      {materialsToggle}
       <button
         className="button"
         onClick={(event) => {
