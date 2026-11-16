@@ -5,7 +5,7 @@
 // - The card database, strings and ban list (BabelCDB, Distribution, LFLists on GitHub): the same.
 // - Card scripts (CardScripts): kept once downloaded; a card's script only changes with an engine update.
 // Card pictures are not kept: their servers don't allow pages to keep them cheaply, and offline they show as names.
-const VERSION = "rka-1.1.0";
+const VERSION = "rka-1.1.1";
 const APP = `${VERSION}-app`;
 const DATA = `${VERSION}-data`;
 
@@ -39,7 +39,9 @@ async function fresh(cacheName, request) {
 async function online(cacheName, request) {
   const cache = await caches.open(cacheName);
   try {
-    const response = await fetch(request);
+    // always asks GitHub whether there is a newer copy (Pages lets browsers reuse a page for 10 minutes otherwise,
+    // which showed an update a reload or two late)
+    const response = await fetch(request, { cache: "no-cache" });
     if (response.ok) cache.put(request, response.clone());
     return response;
   } catch {
