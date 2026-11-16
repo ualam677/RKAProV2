@@ -745,7 +745,7 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
   const WHERE: Record<number, string> = { 2: "hand", 4: "field", 8: "field", 16: "GY", 32: "banished" };
   const effectsText = audit?.effects.length
     ? `On their turn, checked by the engine: ${audit.effects
-        .map((one) => `${nameOf(one.code)} (${WHERE[one.location] ?? "field"}): ${one.text || "an effect"}${one.kind !== "other" ? ` [${one.kind}]` : ""} — on ${one.at.slice(0, 3).join(", ")}${one.at.length > 3 ? "…" : ""}`)
+        .map((one) => `${nameOf(one.code)} (${WHERE[one.location] ?? "field"}): ${one.text || "an effect"}${one.kind !== "other" ? ` [${one.kind}]` : ""}, ${one.at.includes("any time") ? "any time" : `in answer to ${one.at.join(" or ")}`}`)
         .join(" · ")}`
     : "";
   const nibiruText = route.nibiru ? describeNibiru(route.nibiru, nameOf) : "";

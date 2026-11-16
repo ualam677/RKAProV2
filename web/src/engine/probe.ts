@@ -1156,6 +1156,8 @@ export interface AuditProbe {
   // the card the opponent uses, and a vanilla monster it draws (and summons for "summon")
   card: number;
   filler: number;
+  // played first so the probe always has a legal target of its own (a monster Normal Summoned, a Spell Set)
+  prep?: { card: number; how: "summon" | "set" };
 }
 export interface AuditOffer {
   code: number;
@@ -1176,8 +1178,12 @@ export interface AuditOnce {
   offers: AuditOffer[];
   // probe "target-…": your face-up cards it could have targeted; "destroy-…": your cards on the field before and after
   targetable?: number[];
+  // your face-up monsters when the line ended (what a "face-up monster" target could pick)
+  faceUp?: number[];
   before?: number[];
   after?: number[];
+  // the probe's own effect was negated (its result says nothing about protection)
+  negated?: boolean;
 }
 
 const PHASE_NAME: Record<number, string> = { 1: "their Draw Phase", 2: "their Standby Phase", 4: "their Main Phase 1", 8: "their Battle Phase", 0x100: "their Main Phase 2", 0x200: "their End Phase" };
@@ -1190,7 +1196,7 @@ export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: 
     return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
   };
   const keys = recorded.map((key) => key.replace(/:(\d+)$/, (_, code: string) => `:${original(Number(code))}`));
-  const opening = probe.action === "summon" ? [probe.filler] : [probe.card];
+  const opening = probe.action === "summon" ? [probe.filler] : [probe.card, ...(probe.prep ? [probe.prep.card] : [])];
   const duel = core.createDuel({
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
     seed: [1n, 2n, 3n, 4n],
@@ -1220,6 +1226,8 @@ export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: 
     let turn = 0;
     let lineDone = false;
     let acted = false;
+    let prepped = !probe.prep;
+    let probeChain = 0;
     let attacked = false;
     let next = 0;
     let hint = 0;
@@ -1227,7 +1235,9 @@ export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: 
     const chain: number[] = [];
     let lastSummon = 0;
     let lastAct = "";
-    const moment = () => (chain.length ? env.name(chain[chain.length - 1]) : lastSummon ? `the summon of ${env.name(lastSummon)}` : lastAct ? `after ${lastAct}` : phase || "their turn");
+    // when it was offered, in plain words: in answer to their summon, Spell, monster effect or attack, or any time
+    let theirChain = false;
+    const moment = () => (chain.length && theirChain ? (probe.action === "effect" ? "a monster effect" : "a Spell") : lastSummon ? "a summon" : lastAct === "the attack" ? "an attack" : "any time");
     const follow = (offered: { key: (k: string) => boolean; exact?: (k: string) => boolean }[]): number => {
       for (let step = next; step < keys.length; step++) {
         let at = offered.findIndex((option) => (option.exact ?? option.key)(keys[step]));
@@ -1261,10 +1271,19 @@ export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: 
             break;
           case OcgMessageType.CHAINING:
             chain.push(message.code);
-            if (turn >= 2 && message.controller === 1) lastAct = env.name(message.code);
+            if (turn >= 2 && message.controller === 1) {
+              lastAct = env.name(message.code);
+              theirChain = chain.length === 1;
+              if (original(message.code) === probe.card && !probeChain) probeChain = chain.length;
+            }
+            break;
+          case OcgMessageType.CHAIN_NEGATED:
+          case OcgMessageType.CHAIN_DISABLED:
+            if (turn >= 2 && probeChain && message.chain_size === probeChain) result.negated = true;
             break;
           case OcgMessageType.CHAIN_END:
             chain.length = 0;
+            theirChain = false;
             lastSummon = 0;
             if (turn >= 2 && result.before && !result.after) result.after = field(reach);
             break;
@@ -1304,6 +1323,9 @@ export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: 
                     lineDone = true;
                     result.board = field();
                     result.monsters = core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location: OcgLocation.MZONE }).flatMap((card) => (card?.code ? [card.code] : []));
+                    result.faceUp = core
+                      .duelQueryLocation(duel, { flags: (OcgQueryFlags.CODE | OcgQueryFlags.POSITION) as OcgQueryFlags, controller: 0, location: OcgLocation.MZONE })
+                      .flatMap((card) => (card?.code && card.position !== undefined && card.position & OcgPosition.FACEUP ? [card.code] : []));
                     result.hand = core.duelQueryLocation(duel, { flags: QUERY_OUT, controller: 0, location: OcgLocation.HAND }).flatMap((card) => (card?.code ? [card.code] : []));
                   }
                   response = { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null };
@@ -1313,7 +1335,7 @@ export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: 
               } else if (message.type === OcgMessageType.SELECT_CHAIN && !lineDone) {
                 // an activation in a chain window (recorded as a pick of the card): only when it's the line's very next step
                 const step = keys[next] ?? "";
-                const at = /^(pick|Activate)\b/.test(step) ? message.selects.findIndex((card) => step.endsWith(`:${original(card.code)}`)) : -1;
+                const at = /^(pick:0:|Activate)/.test(step) ? message.selects.findIndex((card) => step.endsWith(`:${original(card.code)}`)) : -1;
                 if (at >= 0) next++;
                 response = { type: OcgResponseType.SELECT_CHAIN, index: at >= 0 ? at : message.forced ? 0 : null };
               } else {
@@ -1338,8 +1360,13 @@ export function auditOnce(env: ProbeEnv, hand: number[], deck: number[], extra: 
               if (message.type === OcgMessageType.SELECT_IDLECMD) {
                 const m = message;
                 const list = probe.action === "summon" ? m.summons : m.activates;
-                const index = acted ? -1 : list.findIndex((card) => original(card.code) === probe.card);
-                if (index >= 0) {
+                const index = acted || !prepped ? -1 : list.findIndex((card) => original(card.code) === probe.card);
+                const prepAt = prepped || !probe.prep ? -1 : (probe.prep.how === "summon" ? m.summons : m.spell_sets).findIndex((card) => original(card.code) === probe.prep!.card);
+                if (!prepped) {
+                  prepped = true;
+                  if (prepAt >= 0) response = { type: OcgResponseType.SELECT_IDLECMD, action: probe.prep!.how === "summon" ? SelectIdleCMDAction.SELECT_SUMMON : SelectIdleCMDAction.SELECT_SPELL_SET, index: prepAt };
+                  else response = { type: OcgResponseType.SELECT_IDLECMD, action: SelectIdleCMDAction.TO_EP, index: null };
+                } else if (index >= 0) {
                   acted = true;
                   result.ran = true;
                   if (probe.action.startsWith("destroy")) result.before = field(reach);

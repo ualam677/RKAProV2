@@ -767,7 +767,9 @@ function App() {
   finishAnalysing.current = (id: string) => {
     setAnalysing(null);
     scrollToLine.current = id;
-    if (view) (finishTest(), skip(), setReplay(null), setView(null));
+    // marked from the replay viewer or the Replays list: the lines are on the Test screen
+    if (viewing) (setViewing(null), setScreen("test"));
+    else if (view) (finishTest(), skip(), setReplay(null), setView(null));
     else if (screen === "replays") setScreen("test");
   };
   // never stuck on "Analysing": a minute at most
@@ -1273,6 +1275,8 @@ function App() {
       </>
     );
     return (
+      <>
+      {analysingNote}
       <Duel
         view={shown}
         texts={texts}
@@ -1289,6 +1293,7 @@ function App() {
         viewer={controls}
         viewerMenu={viewerMenu}
       />
+      </>
     );
   }
 

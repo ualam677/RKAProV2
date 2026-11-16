@@ -1621,12 +1621,14 @@ async function runRoute(id: number, main: number[], extra: number[], hand: numbe
 }
 
 // The board audit for a working line: one short duel per thing the opponent tries (see auditOnce in probe.ts)
-const AUDIT_PROBES: [ProbeAction, string][] = [
+// (Forbidden Lance only asks for a face-up monster, so a Link Monster counts; Book of Moon would skip it. The opponent
+// first summons a monster or Sets a Spell of its own, so the targeting card always has something legal to aim at.)
+const AUDIT_PROBES: [ProbeAction, string, string?, ("summon" | "set")?][] = [
   ["summon", "Mystical Elf"],
   ["spell", "Pot of Greed"],
   ["effect", 'Maxx "C"'],
-  ["target-monster", "Book of Moon"],
-  ["target-spell", "Mystical Space Typhoon"],
+  ["target-monster", "Forbidden Lance", "Mystical Elf", "summon"],
+  ["target-spell", "Mystical Space Typhoon", "Pot of Greed", "set"],
   ["destroy-monsters", "Dark Hole"],
   ["destroy-spells", "Harpie's Feather Duster"],
 ];
@@ -1643,12 +1645,14 @@ async function runAudit(main: number[], extra: number[], hand: number[], keys: s
   for (const code of handCodes) deck.splice(deck.indexOf(code), 1);
   const extraCodes = extra.map(canonical).filter((code) => cards.has(code));
   const filler = cardByName("Mystical Elf")?.code;
-  const probes = AUDIT_PROBES.flatMap(([action, name]) => {
+  const probes = AUDIT_PROBES.flatMap(([action, name, prepName, how]) => {
     const card = cardByName(name)?.code;
-    return card && filler ? [{ action, card, filler }] : [];
+    const prep = prepName ? cardByName(prepName)?.code : undefined;
+    if (!card || !filler || (prepName && !prep)) return [];
+    return [{ action, card, filler, prep: prep && how ? { card: prep, how } : undefined }];
   });
   if (!probes.length) return null;
-  await prefetchScripts([...handCodes, ...deck, ...extraCodes, ...probes.map((one) => one.card), filler!]);
+  await prefetchScripts([...handCodes, ...deck, ...extraCodes, ...probes.flatMap((one) => [one.card, ...(one.prep ? [one.prep.card] : [])]), filler!]);
   const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
   const sorted = (list: number[]) => list.map(canonical).sort((a, b) => a - b).join();
   const want = sorted(board);
@@ -1690,9 +1694,10 @@ async function runAudit(main: number[], extra: number[], hand: number[], keys: s
   const untargetable = new Set<number>();
   const indestructible = new Set<number>();
   for (const { action, run } of runs) {
-    if (!run.ran) continue;
-    // Book of Moon picks your face-up monsters, MST your Spells and Traps: what it couldn't pick can't be targeted
-    const pool = action === "target-monster" ? run.monsters : action === "target-spell" ? minus(run.board, run.monsters) : [];
+    // a probe that never went off, or was negated, proves nothing
+    if (!run.ran || run.negated) continue;
+    // Forbidden Lance picks a face-up monster, MST a Spell or Trap: yours it couldn't pick can't be targeted
+    const pool = action === "target-monster" ? (run.faceUp ?? []) : action === "target-spell" ? minus(run.board, run.monsters) : [];
     if (run.targetable) for (const code of minus(pool.map(canonical), run.targetable.map(canonical))) untargetable.add(code);
     // Dark Hole and Harpie's Feather Duster: what's still there after they resolve wasn't destroyed
     if (run.before) {

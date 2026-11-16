@@ -93,16 +93,17 @@ if (process.env.AUDIT) {
   console.log("LINE", keys.join(" "));
   console.log("HAND", hand.join(","));
   const filler = byName("Mystical Elf");
-  const probes = [["summon", "Mystical Elf"], ["spell", "Pot of Greed"], ["effect", 'Maxx "C"'], ["target-monster", "Book of Moon"], ["target-spell", "Mystical Space Typhoon"], ["destroy-monsters", "Dark Hole"], ["destroy-spells", "Harpie's Feather Duster"]];
-  for (const [action, name] of probes) {
+  const probes = [["summon", "Mystical Elf"], ["spell", "Pot of Greed"], ["effect", 'Maxx "C"'], ["target-monster", "Forbidden Lance", "Mystical Elf", "summon"], ["target-spell", "Mystical Space Typhoon", "Pot of Greed", "set"], ["destroy-monsters", "Dark Hole"], ["destroy-spells", "Harpie's Feather Duster"]];
+  for (const [action, name, prepName, how] of probes) {
     const card = byName(name);
+    const prep = prepName ? { card: byName(prepName), how } : undefined;
     const t = performance.now();
     const placed = (process.env.PLACED ?? "").split(",").filter(Boolean).map((name) => byName(name.trim()));
-    const r = auditOnce(env, hand, rest(hand), extra, keys, { action, card, filler }, placed);
+    const r = auditOnce(env, hand, rest(hand), extra, keys, { action, card, filler, prep }, placed);
     if (action === "summon") console.log("BOARD", r.board.join(","), "HANDEND", JSON.stringify(r.hand), rest(hand).length, extra.length);
     console.log(`\n== ${action} (${name}) ran=${r.ran} ${Math.round(performance.now() - t)}ms board: ${r.board.map((c) => names.get(c)).join(", ")}`);
     for (const o of r.offers) console.log(`  offer: ${names.get(o.code)} #${o.description} @${o.location} on ${o.at}`);
-    if (r.targetable) console.log("  targetable:", r.targetable.map((c) => names.get(c)).join(", "));
+    if (r.targetable) console.log("  targetable:", r.targetable.map((c) => names.get(c)).join(", "), "| face-up:", (r.faceUp ?? []).map((c) => names.get(c)).join(", "), r.negated ? "NEGATED" : "");
     if (r.before) console.log("  before:", r.before.map((c) => names.get(c)).join(", "), "| after:", (r.after ?? []).map((c) => names.get(c)).join(", "));
   }
   process.exit(0);
