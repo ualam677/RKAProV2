@@ -1198,3 +1198,25 @@ main.menu-screen .main-menu { flex: 1; min-height: 0; }
 .route-line.line-new { animation: line-new 2.2s ease-out; border-radius: 10px; }
 @keyframes line-new { 0%, 40% { box-shadow: 0 0 0 2px var(--gold), 0 0 18px rgba(230, 195, 106, 0.5); } 100% { box-shadow: none; } }
 .route-mark svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+
+/* the board audit as cards: one row per effect (or protected card), in the prompt panel's style */
+.audit-panel { display: grid; gap: 8px; margin-top: 6px; padding: 10px 10px 10px 12px; border: 1px solid var(--edge); border-left: 3px solid var(--blue); border-radius: 10px; background: var(--surface); }
+.audit-title { margin: 0; font-family: var(--display); font-weight: 700; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); }
+.audit-divider { margin: 4px 0 0; padding-top: 8px; border-top: 1px solid rgba(44, 74, 128, 0.6); font-family: var(--display); font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sub); }
+.audit-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.audit-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; align-items: start; }
+.audit-row.read { opacity: 0.62; }
+.audit-art.mini-card { position: relative; width: 40px; height: auto; aspect-ratio: 59 / 86; overflow: hidden; border-radius: 3px; }
+.audit-art.mini-card .art { width: 100%; height: 100%; object-fit: cover; }
+.audit-body { display: grid; gap: 4px; min-width: 0; }
+.audit-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.audit-head b { font-family: var(--display); font-weight: 600; font-size: 16px; line-height: 1.15; color: var(--label); overflow-wrap: anywhere; }
+.audit-check { color: #6fd39b; font-weight: 700; font-size: 15px; }
+.audit-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.audit-chip { padding: 1px 6px; border: 1px solid var(--edge); border-radius: 5px; font-style: normal; font-family: var(--display); font-weight: 700; font-size: 11px; letter-spacing: 0.06em; line-height: 16px; color: var(--sub); }
+.audit-chip.kind.negate { border-color: #3d8bff; background: rgba(61, 139, 255, 0.18); color: #cfe2ff; }
+.audit-chip.kind.removal { border-color: var(--gold); background: rgba(230, 195, 106, 0.14); color: #f6e3a8; }
+.audit-chip.guard { border-color: #2f7a55; color: #9fdcbc; }
+.audit-chip.guard.sure { background: rgba(111, 211, 155, 0.14); color: #6fd39b; }
+.audit-text { font-size: 12.5px; line-height: 1.35; color: var(--sub); }
+.audit-art.mini-card { padding: 0; border: 0; background: #0b1120; }

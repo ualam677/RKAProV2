@@ -330,6 +330,8 @@ export function readKinds(source: string): Map<string, Kind> {
 export interface BoardAudit {
   // the replay reached the saved board; if not, nothing below can be trusted
   trusted: boolean;
+  // which version of the audit made it (an older one is made again)
+  v?: number;
   // every effect that can matter on their turn: the card, what it does, its kind, where it was and when. `confirmed`:
   // the engine offered it on this board; otherwise it was read from the script (its condition may not hold)
   effects: { code: number; text: string; kind: Kind; location: number; at: string[]; confirmed?: boolean }[];

@@ -809,7 +809,7 @@ function App() {
   // couldn't follow too: this one follows more, and if it can't either, the scripts are read for the saved board)
   useEffect(() => {
     if (!ready || !deck?.routes) return;
-    const waiting = Object.values(deck.routes).find((route) => route.source === "replay" && route.testId && !route.audit && route.keys?.length && route.record?.startHand?.length && !audited.current.has(route.testId));
+    const waiting = Object.values(deck.routes).find((route) => route.source === "replay" && route.testId && (route.audit?.v ?? 0) < 2 && route.keys?.length && route.record?.startHand?.length && !audited.current.has(route.testId));
     if (!waiting?.testId) return;
     audited.current.add(waiting.testId);
     const pieces = deck.tests?.find((one) => one.id === waiting.testId)?.pieces;

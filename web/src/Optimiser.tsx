@@ -5,6 +5,7 @@ import { describeInterruption, describeNibiru, describeProtection } from "./inte
 import { hasRole, isNonEngine, rolesOf, secondOnly } from "./optimiser";
 import type { TestResult } from "./decks";
 import { CardArt } from "./CardArt";
+import { Keywords } from "./Keywords";
 import { EndBoard } from "./Tests";
 import { MiniCards, RoleBadges, RoleStrip, TraitGlyphs, roleTally, type Mini } from "./CardGlyphs";
 import { rescored } from "./decks";
@@ -746,6 +747,16 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
     ...(untargetableOnly.length ? [`Can't be targeted: ${names(untargetableOnly)} ✓`] : []),
     ...(indestructibleOnly.length ? [`Can't be destroyed by card effects: ${names(indestructibleOnly)} ✓`] : []),
   ];
+  // the same, card by card: what each one stops, and whether the engine saw it hold
+  const protectRows: ProtectRow[] = [];
+  const addRow = (code: number, text: string, confirmed: boolean) => {
+    const row = protectRows.find((one) => one.code === code) ?? (protectRows.push({ code, guards: [] }), protectRows[protectRows.length - 1]);
+    if (!row.guards.some((one) => one.text === text)) row.guards.push({ text, confirmed });
+  };
+  for (const one of route.protection ?? []) addRow(one.code, one.text || "protects your cards on their turn", false);
+  for (const one of scripted) addRow(one.code, one.text, one.confirmed);
+  for (const code of untargetableOnly) addRow(code, "can't be targeted by card effects", true);
+  for (const code of indestructibleOnly) addRow(code, "can't be destroyed by card effects", true);
   const protectText = protectParts.length ? `Protection on their turn (✓ seen by the engine on this board): ${protectParts.join(" · ")}` : "";
   // every effect that can matter on their turn: the ones the engine offered first, then the ones read from the scripts
   const WHERE: Record<number, string> = { 2: "hand", 4: "field", 8: "field", 16: "GY", 32: "banished" };
@@ -845,7 +856,13 @@ function RouteLine({ route, full, fullAt, checking, fresh, searching, waiting, n
           Watch
         </button>
       </div>
-      {said && <p className="trait-said">{said}</p>}
+      {said && said === effectsText ? (
+        <BoardEffects effects={effectsList} nameOf={nameOf} />
+      ) : said && said === protectText ? (
+        <BoardProtection rows={protectRows} nameOf={nameOf} />
+      ) : (
+        said && <p className="trait-said">{said}</p>
+      )}
       {!route.unreplayable && checking === "now" && <span className="opt-chokes">Checking hand traps against this line…</span>}
       {checking === "waiting" && <span className="opt-chokes">Hand traps next</span>}
       {!route.unreplayable && !checking && route.chokes && route.chokes.length > 0 && <Chokes chokes={route.chokes} fullAt={fullAt} nameOf={nameOf} />}
@@ -1351,5 +1368,109 @@ function StartRecord({ results, nameOf }: { results: TestResult[]; nameOf: (code
         </span>
       )}
     </span>
+  );
+}
+
+
+// ==== The board audit, shown as cards: what each card can do on their turn, and what protects it ====
+type AuditEffect = NonNullable<SavedRoute["audit"]>["effects"][number];
+interface ProtectRow {
+  code: number;
+  guards: { text: string; confirmed: boolean }[];
+}
+const AUDIT_WHERE: Record<number, string> = { 2: "HAND", 4: "FIELD", 8: "FIELD", 16: "GY", 32: "BANISHED" };
+const AUDIT_KIND: Record<string, string> = { negate: "NEGATE", removal: "REMOVAL" };
+const whenOf = (one: AuditEffect) => (one.confirmed === false ? one.at.join(" · ") : one.at.includes("any time") ? "any time" : `on ${one.at.join(" · ")}`).toUpperCase();
+function EffectRow({ one, nameOf }: { one: AuditEffect; nameOf: (code: number) => string }) {
+  const sure = one.confirmed !== false;
+  return (
+    <li className={`audit-row ${sure ? "sure" : "read"} ${one.kind}`}>
+      <span className="mini-card plain audit-art" title={nameOf(one.code)}>
+        <CardArt code={one.code} />
+      </span>
+      <span className="audit-body">
+        <span className="audit-head">
+          <b>{nameOf(one.code)}</b>
+          {sure && (
+            <span className="audit-check" role="img" aria-label="seen by the engine on this board">
+              ✓
+            </span>
+          )}
+        </span>
+        <span className="audit-chips">
+          {AUDIT_KIND[one.kind] && <i className={`audit-chip kind ${one.kind}`}>{AUDIT_KIND[one.kind]}</i>}
+          <i className="audit-chip">{AUDIT_WHERE[one.location] ?? "FIELD"}</i>
+          <i className="audit-chip when">{whenOf(one)}</i>
+        </span>
+        {one.text && (
+          <span className="audit-text">
+            <Keywords text={one.text} />
+          </span>
+        )}
+      </span>
+    </li>
+  );
+}
+function BoardEffects({ effects, nameOf }: { effects: AuditEffect[]; nameOf: (code: number) => string }) {
+  const sure = effects.filter((one) => one.confirmed !== false);
+  const read = effects.filter((one) => one.confirmed === false);
+  return (
+    <div className="audit-panel">
+      <p className="audit-title">On their turn</p>
+      {sure.length > 0 && (
+        <ul className="audit-list">
+          {sure.map((one, at) => (
+            <EffectRow key={`s${at}`} one={one} nameOf={nameOf} />
+          ))}
+        </ul>
+      )}
+      {read.length > 0 && (
+        <>
+          <p className="audit-divider">From the card scripts · not seen by the engine on this board</p>
+          <ul className="audit-list">
+            {read.map((one, at) => (
+              <EffectRow key={`r${at}`} one={one} nameOf={nameOf} />
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+// a protection's words as a short label
+const guardLabel = (text: string) =>
+  /targeted|cannot target/i.test(text) ? "NO TARGET" : /destroyed by card effects|cannot be destroyed/i.test(text) ? "NO DESTROY" : /destroyed by battle/i.test(text) ? "BATTLE-PROOF" : /avoid being destroyed|once/i.test(text) ? "SURVIVES" : /unaffected/i.test(text) ? "UNAFFECTED" : /banished/i.test(text) ? "NO BANISH" : /negated/i.test(text) ? "NO NEGATE" : "PROTECTED";
+function BoardProtection({ rows, nameOf }: { rows: ProtectRow[]; nameOf: (code: number) => string }) {
+  return (
+    <div className="audit-panel">
+      <p className="audit-title">Protection on their turn</p>
+      <ul className="audit-list">
+        {rows.map((row) => (
+          <li key={row.code} className={`audit-row ${row.guards.some((one) => one.confirmed) ? "sure" : "read"}`}>
+            <span className="mini-card plain audit-art" title={nameOf(row.code)}>
+              <CardArt code={row.code} />
+            </span>
+            <span className="audit-body">
+              <span className="audit-head">
+                <b>{nameOf(row.code)}</b>
+              </span>
+              <span className="audit-chips">
+                {row.guards.map((one) => (
+                  <i key={one.text} className={`audit-chip guard ${one.confirmed ? "sure" : ""}`} title={one.text}>
+                    {guardLabel(one.text)}
+                    {one.confirmed ? " ✓" : ""}
+                  </i>
+                ))}
+              </span>
+              {row.guards.map((one) => (
+                <span key={one.text} className="audit-text">
+                  <Keywords text={one.text.replace(/^./, (first) => first.toUpperCase())} />
+                </span>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

@@ -1634,6 +1634,22 @@ const AUDIT_PROBES: [ProbeAction, string, string?, ("summon" | "set")?][] = [
 ];
 const effectKinds = new Map<number, Map<string, Kind>>();
 const boardEffects = new Map<number, ScriptEffect[]>();
+// bumped when the audit learns something new, so saved lines are audited again
+export const AUDIT_VERSION = 2;
+// an effect with no short description of its own: the sentence of the card text that says it, without its condition
+// ("Once per opponent's turn (Quick Effect): You can detach …" → "Detach …")
+function sentenceFor(code: number, how: "quick" | "trigger", trap: boolean): string {
+  const text = (texts.get(code) ?? "").replace(/\r?\n/g, " ");
+  const sentences = text.split(/(?<=\.)\s+(?=[A-Z(●"])|●/).map((one) => one.trim()).filter(Boolean);
+  const pick =
+    how === "quick"
+      ? sentences.find((one) => /Quick Effect/.test(one)) ?? (trap ? sentences.find((one) => !/^You can only/.test(one)) : undefined)
+      : sentences.find((one) => /^(If|When)\b/.test(one) && /destroy|sent to the GY|leaves the field|banished|Summon|attack/i.test(one));
+  if (!pick) return "";
+  const what = pick.includes(": ") ? pick.slice(pick.indexOf(": ") + 2) : pick;
+  const plain = what.replace(/^You can /, "").replace(/^./, (first) => first.toUpperCase());
+  return plain.length > 160 ? `${plain.slice(0, 157)}…` : plain;
+}
 // `pieces`: where everything was when the line ended, when the test kept it: the replay must end the same way, and the
 // scripts are read for those cards even when it doesn't
 async function runAudit(main: number[], extra: number[], hand: number[], keys: string[], board: number[], pieces?: Piece[]): Promise<BoardAudit | null> {
@@ -1667,7 +1683,7 @@ async function runAudit(main: number[], extra: number[], hand: number[], keys: s
     if (sorted(run.board) === want && (!wantHand || sorted(run.hand ?? []) === wantHand)) runs.push({ action: probe.action, run });
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  if (!runs.length && !pieces) return { trusted: false, effects: [], untargetable: [], indestructible: [] };
+  if (!runs.length && !pieces) return { v: AUDIT_VERSION, trusted: false, effects: [], untargetable: [], indestructible: [] };
   // cards in the hand the line never played (a hand trap held back, a card only picked as a cost) aren't part of it:
   // only what it summoned, activated or Set counts (a card the line searched is its own)
   const played = new Set(keys.flatMap((key) => (/^(Normal|Special|Xyz|Synchro|Link|Fusion|Pendulum|Activate|Set)\b[^:]*:(\d+)$/.exec(key) ? [canonical(Number(/:(\d+)$/.exec(key)![1]))] : [])));
@@ -1679,7 +1695,7 @@ async function runAudit(main: number[], extra: number[], hand: number[], keys: s
       const key = `${offer.code}:${offer.description}`;
       if (!effects.has(key)) {
         if (!effectKinds.has(offer.code)) effectKinds.set(offer.code, readKinds(readScript(`c${offer.code}.lua`) ?? ""));
-        effects.set(key, { code: offer.code, text: describe(BigInt(offer.raw)), kind: effectKinds.get(offer.code)!.get(offer.description) ?? "other", location: offer.location, at: [] });
+        effects.set(key, { code: offer.code, text: describe(BigInt(offer.raw)) || sentenceFor(offer.code, "quick", ((cards.get(offer.code)?.type ?? 0) & 4) !== 0), kind: effectKinds.get(offer.code)!.get(offer.description) ?? "other", location: offer.location, at: [] });
       }
       const one = effects.get(key)!;
       if (!one.at.includes(offer.at)) one.at.push(offer.at);
@@ -1744,12 +1760,12 @@ async function runAudit(main: number[], extra: number[], hand: number[], keys: s
       }
       const key = `${piece.code}:${effect.description}`;
       if (effect.description !== undefined && effects.has(key)) continue;
-      const text = effect.description !== undefined ? cardString(piece.code, Number(effect.description)) : "";
+      const text = (effect.description !== undefined ? cardString(piece.code, Number(effect.description)) : "") || sentenceFor(piece.code, effect.how, ((cards.get(piece.code)?.type ?? 0) & 4) !== 0);
       effects.set(`${key}:${effect.how}:${effect.when}`, { code: piece.code, text: text || (effect.how === "trigger" ? "a triggered effect" : "an effect"), kind: effect.kind, location: piece.location, at: [effect.how === "trigger" ? effect.when! : "any time"], confirmed: false });
     }
   }
   for (const one of effects.values()) if (one.confirmed === undefined) one.confirmed = true;
-  return { trusted: runs.length > 0, effects: [...effects.values()], untargetable: [...untargetable], indestructible: [...indestructible], protections };
+  return { v: AUDIT_VERSION, trusted: runs.length > 0, effects: [...effects.values()], untargetable: [...untargetable], indestructible: [...indestructible], protections };
 }
 
 // Choke points for one line, between other requests like the probe and the route search
