@@ -924,10 +924,6 @@ function App() {
   type Frame = { index: number; label: string; picks: number };
   // fast: playing straight through, nothing described until paused; mini: the bar folded down to one line
   const [viewing, setViewing] = useState<{ test: SavedTest; views: DuelView[]; frames: Frame[]; at: number; back: boolean; playing: boolean; fast?: boolean; mini?: boolean } | null>(null);
-  // the menu never scrolls: the page itself is locked while it shows (not under the editor, a duel or a replay)
-  useEffect(() => {
-    document.documentElement.classList.toggle("no-scroll", screen === "menu" && !editing && !view && !viewing);
-  }, [screen, editing, view, viewing]);
   // the phone's back button steps back through the app (replay, duel, editor, a section) and only leaves it from the menu
   const goBack = useRef<() => boolean>(() => false);
   goBack.current = () => {
