@@ -1191,3 +1191,5 @@ main.menu-screen .main-menu { flex: 1; min-height: 0; }
 .button.state-row, .menu .button.state-row { font-size: 14px; }
 .role-counts .role-legend b { color: var(--text); }
 .deck-card .muted, .deck-card-text small, .decks-strip-deck { color: var(--sub); }
+/* "T1" sat 2px left of the button centre (measured): moved over */
+.phase-turn { transform: translateX(2px); }
