@@ -1084,3 +1084,11 @@ h1.logo::after { content: ""; flex: none; width: 35px; height: 26px; margin-left
 /* the menu fills the screen exactly and never scrolls: the middle takes whatever height is left */
 main.menu-screen { box-sizing: border-box; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
 main.menu-screen .main-menu { flex: 1; min-height: 0; }
+
+/* card actions: compact, the verb first, what it does in two short lines (not a big bright pill) */
+.float-actions { gap: 6px; min-width: 0; width: min(300px, calc(100vw - 16px)); }
+.float-action { display: grid; gap: 2px; min-height: 44px; padding: 8px 12px 8px 14px; border: 1px solid #2c4a80; border-left: 3px solid #3d8bff; border-radius: 10px; background: rgba(8, 15, 30, 0.96); color: var(--text); text-align: left; font-weight: 400; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6), 0 0 10px rgba(61, 139, 255, 0.25); }
+.float-action:hover { filter: none; border-color: #3d8bff; }
+.action-verb { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: 0.06em; text-transform: uppercase; color: #cfe2ff; line-height: 1.1; }
+.action-what { font-size: 12px; line-height: 1.3; color: #9fb0cc; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.float-action.info { border-left-color: #c9a85a; }

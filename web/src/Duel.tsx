@@ -608,9 +608,21 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
         answer([index]);
       }}
     >
-      {choice.label}
+      {className.includes("float-action") ? actionLabel(choice.label) : choice.label}
     </button>
   );
+  // an action on a card: the verb in the display face, what it does underneath in small text ("Activate: Take 1 …")
+  const actionLabel = (label: string) => {
+    const at = label.indexOf(": ");
+    const verb = at > 0 && at < 24 ? label.slice(0, at) : label;
+    const what = at > 0 && at < 24 ? label.slice(at + 2) : "";
+    return (
+      <>
+        <b className="action-verb">{verb}</b>
+        {what && <span className="action-what">{what}</span>}
+      </>
+    );
+  };
 
   // the floating actions go above the card, or below it when there is no room above
   const floatRef = useRef<HTMLDivElement>(null);
