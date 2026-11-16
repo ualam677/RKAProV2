@@ -1721,6 +1721,39 @@ onmessage = async (event: MessageEvent<ToWorker>) => {
         return { start: line.start, before: before.interruptions, after: after.interruptions, board: after.board };
       });
       send({ type: "cut", id: message.id, cut: message.cut, lines });
+    } else if (message.type === "needs") {
+      // each line from its own hand, then without each card (left in the Deck): the cards whose absence lowers the
+      // board are the ones it needs; the rest stand in for "any card" (a cost or a discard), counted until it matches
+      const canonical = (code: number) => {
+        const known = knownCode(code);
+        const card = cards.get(known);
+        return card?.alias && Math.abs(card.alias - known) < 20 && cards.has(card.alias) ? card.alias : known;
+      };
+      const main = message.main.map(canonical).filter((code) => cards.has(code));
+      const extra = message.extra.map(canonical).filter((code) => cards.has(code));
+      await prefetchScripts([...main, ...extra, 14558127]);
+      const env = { core, card: (code: number) => cards.get(code) ?? null, script: (name: string) => readScript(name) ?? "", name: nameOf, effects: effectsOf, setcodes: (code: number) => cards.get(code)?.setcodes ?? [] };
+      const without = (list: number[], code: number) => {
+        const at = list.indexOf(code);
+        return at < 0 ? list : [...list.slice(0, at), ...list.slice(at + 1)];
+      };
+      const board = (hand: number[], keys: string[]) => {
+        let deck = [...main];
+        for (const code of hand) deck = without(deck, code);
+        return playAgainst(env, hand, deck, extra, keys, 14558127, -1).interruptions;
+      };
+      const lines = message.lines.map((line) => {
+        const hand = line.hand.map(canonical);
+        const before = board(hand, line.keys);
+        const needs = [...new Set(hand)].filter((code) => board(without(hand, code), line.keys) < before);
+        // the other cards, added back one at a time until the line reaches its board again
+        let rest = [...hand];
+        for (const code of needs) rest = without(rest, code);
+        let any = 0;
+        while (any < rest.length && board([...needs, ...rest.slice(0, any)], line.keys) < before) any++;
+        return { key: line.key, before, needs, any };
+      });
+      send({ type: "needs", id: message.id, lines });
     } else if (message.type === "traits") {
       send({ type: "traits", traits: message.codes.map((code) => [code, traitsOf(knownCode(code))]) });
     } else if (message.type === "names") {

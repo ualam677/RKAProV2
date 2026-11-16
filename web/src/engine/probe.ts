@@ -703,7 +703,9 @@ export const stepKey = (label: string, code: number) => {
   const effect = verb === "Activate" ? /#(\d+)/.exec(label)?.[1] : undefined;
   return effect ? `${verb}#${effect}:${code}` : `${verb}:${code}`;
 };
-export const plainKey = (key: string) => key.replace(/#\d+/, "");
+// the effect number dropped; an Extra Deck summon recorded by how it was done ("Xyz:", "Link:"…, as the duel screen
+// names it) is the engine's Special Summon, so saved lines replay
+export const plainKey = (key: string) => key.replace(/#\d+/, "").replace(/^(Xyz|Synchro|Link|Fusion|Pendulum):/, "Special:");
 
 /** Pauses (yields) after every duel tried; returns the best line found. */
 /** Tries for the caller to play: each a plan from the start, answered in the same order. */
@@ -882,8 +884,14 @@ export interface FollowResult {
   board: number[];
 }
 
-export function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: number[], keys: string[], trap: number, useAt: number, fixed: Against[] = []): FollowResult {
+export function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra: number[], recorded: string[], trap: number, useAt: number, fixed: Against[] = []): FollowResult {
   const { core } = env;
+  // a saved line names the artwork you played (an alternate art's own code); the engine knows the card by its original
+  const original = (code: number) => {
+    const card = env.card(code);
+    return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
+  };
+  const keys = recorded.map((key) => key.replace(/:(\d+)$/, (_, code: string) => `:${original(Number(code))}`));
   const duel = core.createDuel({
     flags: OcgDuelMode.MODE_MR5 | OcgDuelMode.PSEUDO_SHUFFLE,
     seed: [1n, 2n, 3n, 4n],
@@ -1005,7 +1013,10 @@ export function playAgainst(env: ProbeEnv, hand: number[], deck: number[], extra
               response = offered[at].response;
             } else {
               const branch = deckPick(env, message);
-              const at = branch ? follow(branch.map((option) => ({ ...option, key: (k: string) => k === `pick:${hint}:${option.code}` || (k.startsWith("pick:") && k.endsWith(`:${option.code}`)) }))) : -1;
+              // the pick recorded for this same prompt first; only then any pick of an offered card (a skipped prompt's pick,
+              // like an Xyz Material, must not stand in for a search)
+              const exact = branch ? follow(branch.map((option) => ({ ...option, key: (k: string) => k === `pick:${hint}:${option.code}` }))) : -1;
+              const at = exact >= 0 || !branch ? exact : follow(branch.map((option) => ({ ...option, key: (k: string) => k.startsWith("pick:") && k.endsWith(`:${option.code}`) })));
               response = branch && at >= 0 ? branch[at].response : autoAnswer(message);
               hint = 0;
             }

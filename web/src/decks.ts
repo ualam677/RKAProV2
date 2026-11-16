@@ -102,6 +102,11 @@ export interface SavedRoute {
   record: TestRecord;
   // "replay": the line is one of your worked replays (the only kind shown); otherwise an old engine search
   source?: "replay";
+  // measured by replaying it without each opening-hand card: the cards it needs, how many other cards it still uses
+  // ("any card": a cost or a discard), and the deck it was measured for
+  needs?: number[];
+  any?: number;
+  needsFor?: string;
   // the worked replay it came from
   testId?: string;
 }

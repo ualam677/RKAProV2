@@ -68,6 +68,15 @@ const main = codes.filter((c) => !(cards.get(c).type & EXTRA)), extra = codes.fi
 const rest = (hand) => { const deck = [...main]; for (const c of hand) deck.splice(deck.indexOf(c), 1); return deck; };
 const distinct = [...new Set(main)].filter((c) => !only.length || only.some((n) => names.get(c).toLowerCase().includes(n.toLowerCase())));
 
+// SAVED="hand codes|keys": a saved line replayed from its own hand
+if (process.env.SAVED) {
+  const { playAgainst } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const [handText, keysText] = process.env.SAVED.split("|");
+  const hand = handText.split(",").map(Number).map(known);
+  const r = playAgainst(env, hand, rest(hand), extra, keysText.split(" "), 14558127, -1);
+  console.log("RESULT", r.interruptions, "interruptions; board", r.board.map((c) => names.get(c)).join(", "));
+  process.exit(0);
+}
 console.log(`${main.length} main, ${extra.length} extra\n`);
 const t0 = performance.now();
 const r0 = probe(env, [distinct[0]], rest([distinct[0]]), extra, { budget: 1 });

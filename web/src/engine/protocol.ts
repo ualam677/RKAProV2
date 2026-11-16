@@ -223,6 +223,8 @@ export type ToWorker =
   | { type: "names"; id: string; names: string[] }
   // each of your lines played as recorded, then without one copy of `cut` in the deck: what each line loses
   | { type: "cut"; id: number; main: number[]; extra: number[]; cut: number; lines: { start: number; hand: number[]; keys: string[] }[] }
+  // which opening-hand cards each saved line needs: replayed without each card in turn
+  | { type: "needs"; id: number; main: number[]; extra: number[]; lines: { key: string; hand: number[]; keys: string[] }[] }
   // what each card does that matters for building a deck, read from its text
   | { type: "traits"; codes: number[] };
 
@@ -244,6 +246,8 @@ export type FromWorker =
   | { type: "interruptions"; id: string; list: Interruption[]; protection: Protection[]; nibiru?: NibiruCheck }
   | { type: "names"; id: string; cards: (CardInfo | null)[] }
   | { type: "cut"; id: number; cut: number; lines: { start: number; before: number; after: number; board: number[] }[] }
+  // needs: cards whose absence lowers the line's board; any: how many more of the hand's other cards it still uses
+  | { type: "needs"; id: number; lines: { key: string; before: number; needs: number[]; any: number }[] }
   | { type: "traits"; traits: [number, string[]][] }
   | { type: "error"; text: string };
 

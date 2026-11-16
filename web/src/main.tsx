@@ -164,6 +164,24 @@ function App() {
   replayRef.current = replay;
 
   const post = (message: ToWorker) => worker.current?.postMessage(message);
+  // each saved line's needs, measured once per line and deck version (in the background, by the engine)
+  const needsJobs = useRef(new Map<number, string>());
+  const needsAsked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!ready || !deck?.routes) return;
+    const signature = deckSignature(deck);
+    const lines = Object.entries(deck.routes).flatMap(([key, route]) => {
+      const asked = `${deck.id}:${key}:${route.testId ?? route.date}:${signature}`;
+      if (route.source !== "replay" || !route.keys?.length || !route.record?.startHand?.length || route.needsFor === signature || needsAsked.current.has(asked)) return [];
+      needsAsked.current.add(asked);
+      return [{ key, hand: route.record.startHand, keys: route.keys }];
+    });
+    if (!lines.length) return;
+    const id = Date.now() + Math.random();
+    needsJobs.current.set(id, deck.id);
+    post({ type: "needs", id, main: deck.main, extra: deck.extra, lines });
+  }, [ready, deck]);
+
 
   // replies the worker sends back to a request: searches by id, card details in the order they were asked
   const searches = useRef(new Map<number, (result: { results: CardInfo[]; more: boolean }) => void>());
@@ -293,6 +311,30 @@ function App() {
         // every line found: now where hand traps hurt each of them
         const done = decksRef.current.find((one) => one.id === job.deckId);
         if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "needs") {
+        // each line filed under a card it needs (the start you pressed ▶ on, or the first starter in the hand, may not be)
+        const deckId = needsJobs.current.get(message.id);
+        needsJobs.current.delete(message.id);
+        setDecks((all) =>
+          all.map((one) => {
+            if (one.id !== deckId || !one.routes) return one;
+            const routes = { ...one.routes };
+            for (const line of message.lines) {
+              const route = routes[line.key];
+              if (!route) continue;
+              const measured = { ...route, needs: line.needs, any: line.any, needsFor: deckSignature(one) };
+              const starts = (code: number) => ["starter", "pair"].includes(one.tags?.[code]?.role ?? "") || !!one.engine?.evidence.some((entry) => entry.code === code && (entry.alone.deck > 0 || entry.partners.length > 0));
+              const key = line.needs.includes(Number(line.key)) || !line.needs.length ? Number(line.key) : (line.needs.find(starts) ?? line.needs[0]);
+              if (key !== Number(line.key)) {
+                delete routes[line.key];
+                const there = routes[key];
+                // a card can hold one line: the better one stays
+                if (!there || (there.interruptions?.length ?? 0) <= (route.interruptions?.length ?? 0)) routes[key] = measured;
+              } else routes[line.key] = measured;
+            }
+            return { ...one, routes };
+          }),
+        );
       } else if (message.type === "cut") {
         setCutResult((now) => (now && now.id === message.id ? { ...now, lines: message.lines } : now));
       } else if (message.type === "traits") {
@@ -331,10 +373,11 @@ function App() {
           const test = owner?.tests?.find((one) => one.id === message.id);
           if (!owner || !test?.worked) return;
           const results = owner.results ?? [];
-          const start = startOf(owner, test.startHand, test.testOf);
+          // filed under a start for now (or the hand's first card if none is known yet); once the engine has measured
+          // which hand cards the line needs, it is filed under one of those
+          const start = startOf(owner, test.startHand, test.testOf) ?? test.startHand[0];
           const before = start === undefined ? undefined : owner.routes?.[start];
           const count = message.list.length;
-          // no starter in this hand: it counts as working, but it isn't any start's line
           if (start === undefined) {
             setDecks((all) => all.map((one) => (one.id === owner.id ? { ...one, results } : one)));
             setWorkedNote({ testId: test.id, count, kind: "nostart" });
