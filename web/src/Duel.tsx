@@ -624,7 +624,7 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     );
   };
 
-  // the floating actions go above the card, or below it when there is no room above
+  // the floating actions go above the card
   const floatRef = useRef<HTMLDivElement>(null);
   const [floatPos, setFloatPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
@@ -637,7 +637,8 @@ export function Duel({ view, texts, requestText, answer, restart, leave, skip, w
     // a hand card on a phone: above the phase button and your LP plate too, so neither is covered
     // right above the card (the rest of the screen is darkened behind it)
     const above = focus.rect.top - margin - box.height;
-    const top = above >= 8 ? above : Math.min(focus.rect.bottom + 8, window.innerHeight - box.height - 8);
+    // always above the card; with no room there, at the top of the screen (never below the card)
+    const top = Math.max(8, above);
     setFloatPos({ left, top });
   }, [focus]);
 
