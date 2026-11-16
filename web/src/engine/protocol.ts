@@ -202,6 +202,8 @@ export interface CardSearch {
 
 export type ToWorker =
   | { type: "init" }
+  // load another ban list (a file in ProjectIgnis' LFLists: "0TCG", "OCG")
+  | { type: "banlist"; file: string }
   | ({ type: "start" } & StartOptions)
   | { type: "answer"; picks: number[] | null }
   // where the duel is now, named as the hand trap check names moments (to mark a choke point)
@@ -239,6 +241,7 @@ export type ToWorker =
 export type FromWorker =
   | { type: "progress"; text: string }
   | { type: "ready"; cards: number; banlist: { name: string; limits: Record<number, number> } }
+  | { type: "banlist"; banlist: { name: string; limits: Record<number, number> } }
   | { type: "view"; view: DuelView }
   | { type: "record"; record: TestRecord }
   // marks[i]: how many views there were once play i was made (marks[0]: the duel's start)

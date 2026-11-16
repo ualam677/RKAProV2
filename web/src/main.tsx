@@ -2,6 +2,8 @@ import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "r
 import { createRoot } from "react-dom/client";
 import { parseYdk, shuffled } from "./deck";
 import { Duel, MuteButton, cueTime, duelOverlay } from "./Duel";
+import { SettingsScreen } from "./Settings";
+import { getSettings } from "./settings";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt, setArtworkOriginals } from "./CardArt";
 import { RoleCounts } from "./CardGlyphs";
@@ -97,7 +99,7 @@ function App() {
     return () => void installListeners.delete(listener);
   }, []);
   // the main menu, or one of its sections
-  const [screen, setScreen] = useState<"menu" | "decks" | "test" | "replays" | "sync">("menu");
+  const [screen, setScreen] = useState<"menu" | "decks" | "test" | "replays" | "sync" | "settings">("menu");
   // the editor opens on the deck (Edit deck) or on the optimiser (Optimise)
   const openEditor = (optimise: boolean) => {
     try {
@@ -293,6 +295,10 @@ function App() {
         setReady(true);
         setBanlist(message.banlist);
         setStatus(`${message.cards.toLocaleString()} cards loaded`);
+        // another ban list chosen in Settings
+        if (getSettings().banlist !== "0TCG") instance.postMessage({ type: "banlist", file: getSettings().banlist } satisfies ToWorker);
+      } else if (message.type === "banlist") {
+        setBanlist(message.banlist);
       } else if (message.type === "view") {
         setLoadingDuel(false);
         receive(message.view);
@@ -1419,7 +1425,14 @@ function App() {
           RKA<em>PRO</em>
         </h1>
         <p className="status">{status}</p>
-        {screen === "menu" && <MuteButton className="icon-button mute" />}
+        {screen === "menu" && (
+          <button className="icon-button settings-button" onClick={() => setScreen("settings")} aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+            </svg>
+          </button>
+        )}
       </header>
       {error && (
         <p className="error" onClick={() => setError("")}>
@@ -1466,18 +1479,6 @@ function App() {
               </span>
               <span className="decks-strip-more" aria-hidden="true">›</span>
             </div>
-          )}
-          {canInstall && (
-            <button
-              className="button small"
-              onClick={async () => {
-                await installOffer?.prompt();
-                installOffer = null;
-                setCanInstall(false);
-              }}
-            >
-              Install RKAPro as an app (works offline)
-            </button>
           )}
           <button className="menu-tile optimise-tile" disabled={!ready || !deck} onClick={() => openEditor(true)}>
             <span className="optimise-head">
@@ -1577,6 +1578,39 @@ function App() {
             ))}
           </div>
         </div>
+      )}
+
+      {screen === "settings" && (
+        <SettingsScreen
+          banlistName={banlist.name}
+          deckName={deck?.name}
+          canInstall={canInstall}
+          onInstall={async () => {
+            await installOffer?.prompt();
+            installOffer = null;
+            setCanInstall(false);
+          }}
+          onBanlist={(file) => post({ type: "banlist", file })}
+          onClearDeck={
+            deck
+              ? () => {
+                  if (!window.confirm(`Clear every replay, working line and result saved for "${deck.name}"? The deck itself stays.`)) return;
+                  changeDeck({ ...deck, tests: [], routes: {}, results: [] });
+                }
+              : undefined
+          }
+          onResetAll={() => {
+            if (!window.confirm("Reset everything? All decks, replays, lines and settings on this device are deleted. A backup from Sync can bring them back.")) return;
+            try {
+              localStorage.clear();
+              sessionStorage.clear();
+            } catch {
+              // nothing more can be cleared
+            }
+            window.location.reload();
+          }}
+          onBack={() => setScreen("menu")}
+        />
       )}
 
       {screen === "sync" && (

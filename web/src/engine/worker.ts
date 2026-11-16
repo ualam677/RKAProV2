@@ -50,9 +50,13 @@ const counterNames = new Map<number, string>();
 // the TCG ban list: passcode -> copies allowed (0, 1 or 2); cards not listed allow 3
 const banlist = { name: "", limits: {} as Record<number, number> };
 
-async function loadBanlist() {
+// `file`: another list from the same folder ("OCG"); by default the TCG list
+async function loadBanlist(file?: string) {
+  banlist.name = "";
+  banlist.limits = {};
   try {
-    const text = await (await fetch(LFLIST_URL)).text();
+    const url = file ? LFLIST_URL.replace(/[^/]+$/, `${file}.lflist.conf`) : LFLIST_URL;
+    const text = await (await fetch(url)).text();
     for (const line of text.split(/\r?\n/)) {
       if (line.startsWith("!")) banlist.name = line.slice(1).trim();
       const match = /^(\d+) (\d)/.exec(line);
@@ -1806,7 +1810,10 @@ function cardLine(code: number): string {
 onmessage = async (event: MessageEvent<ToWorker>) => {
   const message = event.data;
   try {
-    if (message.type === "init") {
+    if (message.type === "banlist") {
+      await loadBanlist(message.file === "0TCG" ? undefined : message.file);
+      send({ type: "banlist", banlist });
+    } else if (message.type === "init") {
       await loadCards();
       send({ type: "progress", text: "Starting duel engine" });
       const wasmBinary = await (await fetch(coreWasmUrl)).arrayBuffer();

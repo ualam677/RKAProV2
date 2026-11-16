@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CardArt } from "./CardArt";
 import { Keywords } from "./Keywords";
+import { speedScale } from "./settings";
 import { isMuted, onMuted, play, setMuted, type Sound } from "./sound";
 import { LOCATION, POSITION, TYPE, sumReady, sumSoFar, type CardRef, type CardText, type CardView, type Choice, type DuelEvent, type DuelView, type PlayerView } from "./engine/protocol";
 
@@ -51,7 +52,8 @@ const CUE_MS: Record<DuelEvent["kind"], number> = {
   message: 1400,
   phase: 550,
 };
-export const cueTime = (events: DuelEvent[]) => events.reduce((longest, event) => Math.max(longest, CUE_MS[event.kind]), 0);
+// scaled by the Settings speed (Fast keeps a little over half, Instant none)
+export const cueTime = (events: DuelEvent[]) => Math.round(events.reduce((longest, event) => Math.max(longest, CUE_MS[event.kind]), 0) * speedScale());
 
 type Pile = "grave" | "banished" | "extra" | "hand";
 type Sheet = { kind: "card"; card: CardView } | { kind: "pile"; controller: number; pile: Pile } | { kind: "materials"; card: CardView } | null;
