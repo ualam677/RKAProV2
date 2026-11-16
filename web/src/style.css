@@ -23,7 +23,7 @@
 * { box-sizing: border-box; }
 html, body { touch-action: manipulation; }
 body {
-  margin: 0; min-height: 100dvh;
+  margin: 0; min-height: var(--app-h, 100dvh);
   background:
     radial-gradient(90% 60% at 50% 45%, rgba(29, 78, 160, 0.22), transparent 70%),
     repeating-linear-gradient(0deg, rgba(61, 127, 214, 0.04) 0 1px, transparent 1px 48px),

@@ -23,7 +23,9 @@
       (function () {
         var fit = function () {
           var height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-          document.documentElement.style.setProperty("--app-h", Math.round(Math.min(height, window.innerHeight)) + "px");
+          // the smallest of the browser's own measures: one of them can count the area under the navigation bar
+          var shown = Math.min(height, window.innerHeight, document.documentElement.clientHeight || height);
+          document.documentElement.style.setProperty("--app-h", Math.round(shown) + "px");
         };
         fit();
         window.addEventListener("resize", fit);
