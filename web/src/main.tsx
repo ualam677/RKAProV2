@@ -7,7 +7,7 @@ import { getSettings } from "./settings";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt, setArtworkOriginals } from "./CardArt";
 import { RoleCounts } from "./CardGlyphs";
-import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, scoredByCount, storeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
+import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, scoredByCount, storeDecks, freezeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
 import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
 import type { Piece } from "./engine/interruptions";
 import { CHOKE_TRAPS } from "./engine/probe";
@@ -1601,6 +1601,7 @@ function App() {
           }
           onResetAll={() => {
             if (!window.confirm("Reset everything? All decks, replays, lines and settings on this device are deleted. A backup from Sync can bring them back.")) return;
+            freezeDecks();
             try {
               localStorage.clear();
               sessionStorage.clear();

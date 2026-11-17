@@ -176,7 +176,11 @@ export function loadDecks(): SavedDeck[] {
   }
 }
 
+// Settings › Reset everything: nothing is saved again between clearing storage and the reload
+let frozen = false;
+export const freezeDecks = () => void (frozen = true);
 export function storeDecks(decks: SavedDeck[]) {
+  if (frozen) return;
   try {
     localStorage.setItem(KEY, JSON.stringify(decks));
   } catch {
