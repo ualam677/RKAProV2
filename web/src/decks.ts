@@ -1,0 +1,346 @@
+// Decks kept on this device, and the formats they come in and go out as:
+// .ydk (EDOPro), ydke:// links (EDOPro's "copy deck", YGOPRODeck) and YGO Omega deck codes.
+import { parseYdk, type Deck } from "./deck";
+import type { Tag } from "./optimiser";
+import type { CardEvidence } from "./engine/probe";
+import type { TestRecord } from "./engine/protocol";
+import type { BoardAudit, Interruption, NibiruCheck, Piece, Protection } from "./engine/interruptions";
+import type { Choke, ChokeCombo } from "./engine/probe";
+
+// A hand test kept with its deck: enough to replay it exactly, and what it ended on if you said it worked
+export interface SavedTest extends TestRecord {
+  id: string;
+  date: number;
+  worked?: boolean;
+  // your monsters and Spells/Traps when you said it worked
+  board?: number[];
+  // the start the optimiser's Test button was testing
+  testOf?: number;
+  // choke points you marked while playing it: the moment (as the hand trap check names it) and the choice it came at
+  marks?: { at: string; step: number; traps?: number[] }[];
+  // what you had when you said it worked (field with Xyz Materials, hand, GY), and the interruptions it holds
+  pieces?: Piece[];
+  interruptions?: Interruption[];
+  // what the line left in place for their turn (Cipher X: they cannot target your LIGHT monsters)
+  protection?: Protection[];
+  nibiru?: NibiruCheck;
+  // the counting rules it was counted with: older counts are done again
+  counted?: number;
+}
+/** How a test you played went, kept after the test itself is gone: what measured success per start is made of. */
+export interface TestResult {
+  id: string;
+  date: number;
+  // the start it was testing (the Test button's card, or the first starter in the hand)
+  start?: number;
+  hand: number[];
+  // what your first turn ended on
+  interruptions: number;
+  // full: reached a full board; handtrap: a hand trap stopped it; short: fell short on its own; brick: no start in hand
+  kind: "full" | "handtrap" | "short" | "brick";
+  why: string;
+  // the hand traps the opponent held (none: an empty list); older results don't say
+  held?: number[];
+}
+// working tests are kept; of the rest, the newest 5
+const KEEP_OTHERS = 5;
+export function keepTest(tests: SavedTest[] = [], test: SavedTest): SavedTest[] {
+  const next = [test, ...tests.filter((one) => one.id !== test.id)].sort((a, b) => b.date - a.date);
+  let others = 0;
+  return next.filter((one) => one.worked || ++others <= KEEP_OTHERS);
+}
+
+export interface SavedDeck extends Deck {
+  id: string;
+  name: string;
+  updated: number;
+  // Deck Optimiser roles, by card (alternate artworks share the original's)
+  // how each test you played went (the newest 300)
+  results?: TestResult[];
+  tags?: Record<string, Tag>;
+  // what the engine found each card starts, for the deck as it was (`signature`)
+  engine?: { signature: string; evidence: CardEvidence[] };
+  tests?: SavedTest[];
+  // the line the route search found from each start's test hand, for the deck as it was (`signature`)
+  routes?: Record<string, SavedRoute>;
+  // a full board: at least this many interruptions (default 3)
+  fullAt?: number;
+  // the hand traps the opponent holds together when lines are checked (default Ash Blossom and Infinite Impermanence)
+  opponentTraps?: number[];
+  // how the opponent uses them on your turn: "smart" (the default) or at the first legal chance
+  trapTiming?: "instant" | "smart";
+  // save states from the duel menu: the duel's start and every choice up to that moment
+  saves?: SavedState[];
+  // the file it is kept as in a linked deck folder, and when the two were last the same
+  file?: string;
+  fileSynced?: number;
+}
+
+export interface SavedState {
+  id: string;
+  name: string;
+  date: number;
+  record: TestRecord;
+}
+
+export interface SavedRoute {
+  board: number[];
+  interruptions?: Interruption[];
+  protection?: Protection[];
+  nibiru?: NibiruCheck;
+  // the line as steps another search can follow ("Activate:<code>", "pick:<hint>:<code>")
+  keys?: string[];
+  // each hand trap used at each moment it can be against this line, and what the line ends on then
+  chokes?: Choke[];
+  // those hand traps together: the order and moments that hurt most
+  combo?: ChokeCombo;
+  coverage: number;
+  full: boolean;
+  // whether you had marked any full boards when it searched (without them it aims for the most resources)
+  aimed: boolean;
+  tried: number;
+  date: number;
+  signature: string;
+  record: TestRecord;
+  // "replay": the line is one of your worked replays (the only kind shown); otherwise an old engine search
+  source?: "replay";
+  // measured by replaying it without each opening-hand card: the cards it needs, how many other cards it still uses
+  // ("any card": a cost or a discard), and the deck it was measured for
+  needs?: number[];
+  any?: number;
+  // your marked choke points (copied from the test it was saved from)
+  marks?: { at: string; step: number; traps?: number[] }[];
+  needsFor?: string;
+  // the engine couldn't replay it to the board it reached (its checks and needs can't be trusted)
+  unreplayable?: boolean;
+  // the engine's look at the end board on the opponent's turn (protection, every effect it offered)
+  audit?: BoardAudit;
+  // the worked replay it came from
+  testId?: string;
+}
+
+// Changes whenever the cards the engine checks change (Main and Extra, any order)
+export const deckSignature = (deck: Deck) => `${[...deck.main].sort((a, b) => a - b).join(",")}|${[...deck.extra].sort((a, b) => a - b).join(",")}`;
+
+const KEY = "rka.decks";
+
+// A test's result is the board it reached: a full board is enough interruptions, whether or not the line was saved as
+// working (saving only keeps the line). Older results were "Marked as working" and counted as full.
+const MARKED = "Marked as working";
+export function scoredByCount(one: TestResult, goal: number): TestResult {
+  if (one.why !== MARKED) return one;
+  const kind: TestResult["kind"] = one.interruptions >= goal ? "full" : one.start === undefined ? "brick" : "short";
+  const why = kind === "full" ? `Full board: ${one.interruptions} interruption${one.interruptions === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : `Fell short: ${one.interruptions} of ${goal} interruptions`;
+  return { ...one, kind, why };
+}
+
+/** Decks as stored or restored, made safe to use: anything that isn't a deck is dropped, and a bad field is reset
+ *  rather than allowed to break loading (which would lose every deck). */
+export function cleanDecks(value: unknown): SavedDeck[] {
+  if (!Array.isArray(value)) return [];
+  const codes = (list: unknown) => (Array.isArray(list) ? list.filter((code): code is number => typeof code === "number") : []);
+  const listOf = <T,>(list: unknown) => (Array.isArray(list) ? (list.filter((one) => one && typeof one === "object") as T[]) : undefined);
+  return value
+    .filter((deck): deck is SavedDeck => !!deck && typeof deck === "object" && typeof (deck as SavedDeck).id === "string")
+    .map((deck) => ({
+      ...deck,
+      name: typeof deck.name === "string" ? deck.name : "Deck",
+      updated: typeof deck.updated === "number" ? deck.updated : 0,
+      main: codes(deck.main),
+      extra: codes(deck.extra),
+      side: codes(deck.side),
+      tests: listOf<SavedTest>(deck.tests),
+      results: listOf<TestResult>(deck.results),
+      routes: deck.routes && typeof deck.routes === "object" && !Array.isArray(deck.routes) ? deck.routes : undefined,
+      tags: deck.tags && typeof deck.tags === "object" && !Array.isArray(deck.tags) ? deck.tags : undefined,
+    }));
+}
+
+/** Results scored again against a new FULL ≥ (a result keeps its interruption count; a brick stays a brick). */
+export function rescored(results: TestResult[] | undefined, goal: number): TestResult[] | undefined {
+  return results?.map((one) => {
+    if (one.kind === "brick") return one;
+    if (one.interruptions >= goal) return { ...one, kind: "full", why: `Full board: ${one.interruptions} interruption${one.interruptions === 1 ? "" : "s"}` };
+    if (one.kind === "handtrap") return { ...one, why: one.why.replace(/ended on \d+ of \d+/, `ended on ${one.interruptions} of ${goal}`) };
+    return { ...one, kind: "short", why: `Fell short: ${one.interruptions} of ${goal} interruptions` };
+  });
+}
+
+export function loadDecks(): SavedDeck[] {
+  try {
+    const decks = cleanDecks(JSON.parse(localStorage.getItem(KEY) ?? "[]"));
+    // results from when "working" counted as a full board are scored by their interruptions instead
+    return decks.map((deck) => (deck.results?.some((one) => one.why === MARKED) ? { ...deck, results: deck.results.map((one) => scoredByCount(one, deck.fullAt ?? 3)) } : deck));
+  } catch {
+    return [];
+  }
+}
+
+// Settings › Reset everything: nothing is saved again between clearing storage and the reload
+let frozen = false;
+export const freezeDecks = () => void (frozen = true);
+export function storeDecks(decks: SavedDeck[]) {
+  if (frozen) return;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(decks));
+  } catch {
+    // storage full or blocked: the decks stay for this visit only
+  }
+}
+
+// The latest role picked for a card, used for that card in every other deck until told otherwise
+const TAGS = "rka.tags";
+export function loadTagDefaults(): Record<string, Tag> {
+  try {
+    return JSON.parse(localStorage.getItem(TAGS) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+export function storeTagDefault(code: number, tag: Tag) {
+  try {
+    localStorage.setItem(TAGS, JSON.stringify({ ...loadTagDefaults(), [code]: tag }));
+  } catch {
+    // the tag still lives on the deck
+  }
+}
+
+export const newId = () => Math.random().toString(36).slice(2, 10);
+
+export function toYdk(deck: Deck): string {
+  return ["#created by RKAPro", "#main", ...deck.main, "#extra", ...deck.extra, "!side", ...deck.side, ""].join("\n");
+}
+
+// ---- ydke:// : base64 of little-endian 32-bit passcodes, main!extra!side! ----
+function fromBase64(text: string): Uint8Array {
+  const clean = text.trim().replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(clean + "===".slice((clean.length + 3) % 4));
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  bytes.forEach((byte) => (binary += String.fromCharCode(byte)));
+  return btoa(binary);
+}
+const readCodes = (bytes: Uint8Array, from = 0, count = (bytes.length - from) / 4) => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return Array.from({ length: count }, (_, i) => view.getUint32(from + i * 4, true));
+};
+const writeCodes = (codes: number[]) => {
+  const bytes = new Uint8Array(codes.length * 4);
+  const view = new DataView(bytes.buffer);
+  codes.forEach((code, i) => view.setUint32(i * 4, code, true));
+  return bytes;
+};
+
+export function parseYdke(link: string): Deck {
+  const [main = "", extra = "", side = ""] = link.trim().slice("ydke://".length).split("!");
+  const part = (text: string) => (text ? readCodes(fromBase64(text)) : []);
+  return { main: part(main), extra: part(extra), side: part(side) };
+}
+
+export function toYdke(deck: Deck): string {
+  return `ydke://${toBase64(writeCodes(deck.main))}!${toBase64(writeCodes(deck.extra))}!${toBase64(writeCodes(deck.side))}!`;
+}
+
+// ---- YGO Omega: base64(raw deflate([main+extra count][side count][32-bit passcodes...])) ----
+// Main and Extra come as one list; the caller splits them by card type.
+async function inflate(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function deflate(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+export async function parseOmega(code: string): Promise<{ mainAndExtra: number[]; side: number[] }> {
+  const raw = await inflate(fromBase64(code));
+  const [count, side] = raw;
+  // codes taken from replays carry a few more bytes after the list
+  if (raw.length < 2 + 4 * (count + side)) throw new Error("This Omega code is cut short");
+  const all = readCodes(raw, 2, count + side);
+  return { mainAndExtra: all.slice(0, count), side: all.slice(count) };
+}
+
+export async function toOmega(deck: Deck): Promise<string> {
+  const codes = [...deck.main, ...deck.extra, ...deck.side];
+  const raw = new Uint8Array(2 + codes.length * 4);
+  raw[0] = deck.main.length + deck.extra.length;
+  raw[1] = deck.side.length;
+  raw.set(writeCodes(codes), 2);
+  return toBase64(await deflate(raw));
+}
+
+// ---- card lists by name: "Main: 3 Mulcharmy Fuwalos", "3x Ash Blossom", "Ash Blossom & Joyous Spring x3",
+// with or without Main / Extra / Side headings (YGOPRODeck, Master Duel and Neuron text exports, forum posts) ----
+export interface ListEntry {
+  section: "main" | "extra" | "side" | null;
+  count: number;
+  name: string;
+}
+export function parseList(text: string): ListEntry[] {
+  const entries: ListEntry[] = [];
+  let section: ListEntry["section"] = null;
+  for (const raw of text.split(/\r?\n/)) {
+    let line = raw.replace(/\s+/g, " ").trim();
+    if (!line || /^(#created|\/\/)/i.test(line)) continue;
+    // a heading, alone or in front of the first card: "Main Deck (40):", "Extra:", "Side Deck", "#main"
+    // (a heading needs ":", "-", "Deck" or nothing after it, so "Extra Veiler" stays a card)
+    const heading = /^[#!]?(main|extra|side)(?:\s*deck)?(?:\s*\(\d+\))?\s*(?::|-|$)\s*(.*)$/i.exec(line) ?? /^[#!]?(main|extra|side)\s+deck\b\s*(.*)$/i.exec(line);
+    if (heading) {
+      section = heading[1].toLowerCase() as ListEntry["section"];
+      line = heading[2].trim();
+      if (!line) continue;
+    }
+    // Master Duel / Neuron group headings carry no cards: "Monster (20)", "Spell Cards", "Traps: 5"
+    if (/^(monsters?|spells?|traps?|extra deck monsters?)( cards?)?\s*(\(\d+\)|:\s*\d*)?$/i.test(line)) continue;
+    // "3 Ash Blossom", "3x Ash Blossom", "Ash Blossom x3", "Ash Blossom (x3)", "Ash Blossom (3)"
+    const front = /^(\d+)\s*[x×*]?\s+(.+)$/i.exec(line);
+    const back = /^(.+?)\s*(?:[x×*]\s*(\d+)|\((?:x\s*)?(\d+)\))$/i.exec(line);
+    const number = front ? Number(front[1]) : back ? Number(back[2] ?? back[3]) : 0;
+    const named = (front ? front[2] : back ? back[1] : "").replace(/^[-*•]\s*/, "").trim();
+    if (number > 0 && named) {
+      if (number <= 3) entries.push({ section, count: number, name: named });
+    } else if (/[a-z]/i.test(line)) entries.push({ section, count: 1, name: line.replace(/^[-*•]\s*/, "") });
+  }
+  return entries;
+}
+const looksLikeList = (text: string) => text.split(/\r?\n/).filter((line) => /[a-z]{3}/i.test(line)).length >= 2 || /^(main|extra|side)/i.test(text.trim());
+
+// What was pasted or opened, without asking which format it is.
+export type Imported = { deck: Deck } | { unsplit: { mainAndExtra: number[]; side: number[] } } | { list: ListEntry[] };
+export async function importDeck(text: string, fileName = ""): Promise<Imported> {
+  const value = text.trim();
+  if (fileName.toLowerCase().endsWith(".ydk") || /^#(main|created)/im.test(value)) return { deck: parseYdk(value) };
+  if (/^ydke:\/\//i.test(value)) return { deck: parseYdke(value) };
+  if (/^[A-Za-z0-9+/=_-]{16,}$/.test(value)) return { unsplit: await parseOmega(value) };
+  if (looksLikeList(value)) {
+    const list = parseList(value);
+    if (list.length) return { list };
+  }
+  throw new Error("Not a deck: paste a .ydk file, a ydke:// link, a YGO Omega code or a card list (\"3 Ash Blossom & Joyous Spring\")");
+}
+
+// Fusion, Synchro, Xyz and Link Monsters go to the Extra Deck
+export const EXTRA_TYPES = 0x40 | 0x2000 | 0x800000 | 0x4000000;
+
+// ---- shareable replays: a saved test in a link, compressed after "#replay=" (never sent to any server) ----
+const toBase64Url = (bytes: Uint8Array) => toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export async function replayLink(record: TestRecord): Promise<string> {
+  const { options, picks, steps, startHand } = record;
+  const text = JSON.stringify({ v: 1, options, picks, steps: steps.map((step) => [step.text, step.idle ? 1 : 0]), startHand });
+  const packed = await deflate(new TextEncoder().encode(text));
+  return `${location.origin}${location.pathname}#replay=${toBase64Url(packed)}`;
+}
+export async function readReplayLink(hash: string): Promise<TestRecord | null> {
+  const match = /#replay=([A-Za-z0-9_-]+)/.exec(hash);
+  if (!match) return null;
+  const data = JSON.parse(new TextDecoder().decode(await inflate(fromBase64(match[1])))) as {
+    options: TestRecord["options"];
+    picks: TestRecord["picks"];
+    steps: [string, number][];
+    startHand: number[];
+  };
+  return { options: data.options, picks: data.picks, steps: data.steps.map(([text, idle]) => ({ text, idle: !!idle })), startHand: data.startHand };
+}

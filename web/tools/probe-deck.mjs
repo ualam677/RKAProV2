@@ -1,0 +1,245 @@
+// Runs the engine probe (src/engine/probe.ts) on a deck outside the browser.
+// Usage: node --experimental-sqlite tools/probe-deck.mjs <cards.cdb> <CardScripts folder> <YGO Omega code file> [card name ...]
+import fs from "node:fs";
+import path from "node:path";
+import zlib from "node:zlib";
+import { createRequire } from "node:module";
+import { DatabaseSync } from "node:sqlite";
+const [CDB, SCRIPTS, OMEGA, ...only] = process.argv.slice(2);
+const require = createRequire(import.meta.url);
+const { default: createCore } = await import("ocgcore-wasm");
+const { probe, probeDeck } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+
+const db = new DatabaseSync(CDB);
+const cards = new Map(), names = new Map();
+for (const r of db.prepare("select d.id, d.alias, cast(d.setcode as text) setcode, d.type, d.level, d.attribute, cast(d.race as text) race, d.atk, d.def, t.name from datas d join texts t on t.id = d.id").all()) {
+  const set = BigInt.asUintN(64, BigInt(r.setcode));
+  const setcodes = [0n, 1n, 2n, 3n].map((i) => Number((set >> (16n * i)) & 0xffffn)).filter(Boolean);
+  const link = (r.type & 0x4000000) !== 0;
+  cards.set(r.id, { code: r.id, alias: r.alias, setcodes, type: r.type, level: r.level & 0xff, attribute: r.attribute, race: BigInt.asUintN(64, BigInt(r.race)),
+    attack: r.atk, defense: link ? 0 : r.def, lscale: (r.level >> 24) & 0xff, rscale: (r.level >> 16) & 0xff, link_marker: link ? r.def : 0 });
+  names.set(r.id, r.name);
+}
+const known = (code) => { const c0 = cards.get(code); if (c0) return c0.alias && Math.abs(c0.alias - code) < 20 && cards.has(c0.alias) ? c0.alias : code; for (let o = 1; o < 10; o++) { const c = cards.get(code - o); if (c) return c.alias && cards.has(c.alias) ? c.alias : code - o; } return code; };
+const scriptCache = new Map();
+const script = (name) => {
+  name = path.basename(name);
+  if (scriptCache.has(name)) return scriptCache.get(name);
+  let text = "";
+  for (const folder of ["", "official", "pre-release", "unofficial"]) {
+    const file = path.join(SCRIPTS, folder, name);
+    if (fs.existsSync(file)) { text = fs.readFileSync(file, "utf8"); break; }
+  }
+  if (!text && /^c\d+\.lua$/.test(name)) { const alias = cards.get(Number(name.slice(1, -4)))?.alias; if (alias) text = script(`c${alias}.lua`); }
+  scriptCache.set(name, text);
+  return text;
+};
+const wasmBinary = fs.readFileSync(require.resolve("ocgcore-wasm/lib/ocgcore.sync.wasm"));
+const core = await createCore({ sync: true, wasmBinary: wasmBinary.buffer.slice(wasmBinary.byteOffset, wasmBinary.byteOffset + wasmBinary.byteLength) });
+if (process.env.OVERLAY) {
+  const get = core.duelGetMessage.bind(core);
+  let shown = 0;
+  core.duelGetMessage = (duel) => {
+    const messages = get(duel);
+    for (const m of messages) if (m.type === 14 && shown < 6) { shown++; console.log("OPTION", m.player, JSON.stringify(m.options.map(String))); }
+    for (const m of messages) if (m.type === 15 && shown < 3 && m.selects.some((c) => c.overlay_sequence !== undefined || c.location & 0x80)) {
+      shown++;
+      console.log("OVERLAY PICK", JSON.stringify(m.selects.map((c) => ({ code: c.code, location: c.location, sequence: c.sequence, overlay_sequence: c.overlay_sequence }))), "min", m.min, "max", m.max);
+    }
+    return messages;
+  };
+}
+const { readEffects, readSetConstants } = await import(new URL("../src/engine/interruptions.ts", import.meta.url));
+const sets = readSetConstants(script("archetype_setcode_constants.lua"), script("constant.lua"));
+const effectCache = new Map();
+const env = {
+  core, card: (code) => cards.get(code) ?? null, script, name: (code) => names.get(code) ?? `#${code}`,
+  effects: (code) => { if (!effectCache.has(code)) effectCache.set(code, readEffects(script(`c${code}.lua`), cards.get(code)?.type ?? 0, sets)); return effectCache.get(code); },
+  setcodes: (code) => cards.get(code)?.setcodes ?? [],
+};
+
+const raw = zlib.inflateRawSync(Buffer.from(fs.readFileSync(OMEGA, "utf8").trim().split(/\s+/).pop(), "base64"));
+const all = Array.from({ length: raw[0] }, (_, i) => known(raw.readUInt32LE(2 + 4 * i)));
+const unknown = all.filter((c) => !cards.has(c));
+if (unknown.length) console.log(`Not in this database, left out: ${unknown.join(", ")}`);
+const codes = all.filter((c) => cards.has(c));
+const EXTRA = 0x40 | 0x2000 | 0x800000 | 0x4000000;
+const main = codes.filter((c) => !(cards.get(c).type & EXTRA)), extra = codes.filter((c) => cards.get(c).type & EXTRA);
+const rest = (hand) => { const deck = [...main]; for (const c of hand) deck.splice(deck.indexOf(c), 1); return deck; };
+const distinct = [...new Set(main)].filter((c) => !only.length || only.some((n) => names.get(c).toLowerCase().includes(n.toLowerCase())));
+
+// SAVED="hand codes|keys": a saved line replayed from its own hand
+if (process.env.SAVED) {
+  const { playAgainst } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const [handText, keysText] = process.env.SAVED.split("|");
+  const hand = handText.split(",").map(Number).map(known);
+  const r = playAgainst(env, hand, rest(hand), extra, keysText.split(" "), 14558127, -1);
+  console.log("RESULT", r.interruptions, "interruptions; board", r.board.map((c) => names.get(c)).join(", "));
+  process.exit(0);
+}
+// AUDIT="card name,card name": find a line for that hand with the route search, then audit its end board
+if (process.env.AUDIT) {
+  const { routeSearch, auditOnce } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const byName = (name) => [...names].find(([code, n]) => n.toLowerCase() === name.toLowerCase() && cards.has(code))?.[0];
+  const hand = process.env.AUDIT.split(",").map((name) => byName(name.trim()));
+  if (hand.some((code) => !code)) throw new Error(`unknown card in ${process.env.AUDIT}`);
+  let keys = process.env.KEYS?.split(" ");
+  if (!keys) {
+    const steps = routeSearch(env, hand, rest(hand), extra, { goal: 3, targets: [], budget: Number(process.env.BUDGET ?? 300) });
+    let next = steps.next();
+    while (!next.done) next = steps.next();
+    keys = next.value.keys;
+  }
+  console.log("LINE", keys.join(" "));
+  console.log("HAND", hand.join(","));
+  const filler = byName("Mystical Elf");
+  const probes = [["summon", "Mystical Elf"], ["spell", "Pot of Greed"], ["effect", 'Maxx "C"'], ["target-monster", "Forbidden Lance", "Mystical Elf", "summon"], ["target-spell", "Mystical Space Typhoon", "Pot of Greed", "set"], ["destroy-monsters", "Dark Hole"], ["destroy-spells", "Harpie's Feather Duster"]];
+  for (const [action, name, prepName, how] of probes) {
+    const card = byName(name);
+    const prep = prepName ? { card: byName(prepName), how } : undefined;
+    const t = performance.now();
+    const placed = (process.env.PLACED ?? "").split(",").filter(Boolean).map((name) => byName(name.trim()));
+    const r = auditOnce(env, hand, rest(hand), extra, keys, { action, card, filler, prep }, placed);
+    if (action === "summon") console.log("BOARD", r.board.join(","), "HANDEND", JSON.stringify(r.hand), rest(hand).length, extra.length);
+    console.log(`\n== ${action} (${name}) ran=${r.ran} ${Math.round(performance.now() - t)}ms board: ${r.board.map((c) => names.get(c)).join(", ")}`);
+    for (const o of r.offers) console.log(`  offer: ${names.get(o.code)} #${o.description} @${o.location} on ${o.at}`);
+    if (r.targetable) console.log("  targetable:", r.targetable.map((c) => names.get(c)).join(", "), "| face-up:", (r.faceUp ?? []).map((c) => names.get(c)).join(", "), r.negated ? "NEGATED" : "");
+    if (r.before) console.log("  before:", r.before.map((c) => names.get(c)).join(", "), "| after:", (r.after ?? []).map((c) => names.get(c)).join(", "));
+  }
+  process.exit(0);
+}
+console.log(`${main.length} main, ${extra.length} extra\n`);
+const t0 = performance.now();
+const r0 = probe(env, [distinct[0]], rest([distinct[0]]), extra, { budget: 1 });
+console.log(`one branch: ${(performance.now() - t0).toFixed(0)} ms\n`);
+for (const code of distinct) {
+  const t = performance.now();
+  const r = probe(env, [code], rest([code]), extra, { budget: 150, depth: 6 });
+  console.log(`${names.get(code).padEnd(34)} deck ${r.deck} extra ${r.extra}  (${r.tried} tried${r.exhausted ? ", all" : ""}, ${(performance.now() - t).toFixed(0)} ms)  ${r.steps.join(" > ")}${r.taken.length ? `  | took ${r.taken.map((c, i) => `${names.get(c)} (by ${names.get(r.takers?.[i]) ?? "its own rule"})`).join(", ")}` : ""}`);
+}
+
+if (process.env.PAIRS) {
+  const t1 = performance.now();
+  let last;
+  for (const step of probeDeck(env, main, extra)) if (step) last = step;
+  console.log(`\nWhole deck, singles and pairs: ${last.done} duels tried in ${((performance.now() - t1) / 1000).toFixed(1)} s`);
+  for (const e of last.evidence.values()) {
+    if (e.alone.deck > 0) console.log(`  START   ${names.get(e.code)}: alone, ${e.alone.deck} new from the Deck, ${e.alone.extra} Extra Deck summons`);
+    else if (e.partners.length) console.log(`  PARTNER ${names.get(e.code)} with: ${e.partners.map((c) => names.get(c)).join(", ")}`);
+    else console.log(`  none    ${names.get(e.code)} (${e.checked} pairs)`);
+  }
+}
+
+if (process.env.HAND) {
+  const hand = process.env.HAND.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const r = probe(env, hand, rest(hand), extra, { budget: 60, depth: 6, untilDeck: true });
+  console.log("HAND", process.env.HAND, JSON.stringify({ ...r, taken: r.taken.map((c) => names.get(c)) }));
+}
+
+if (process.env.ROUTE) {
+  const { routeSearch, play } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const hand = process.env.ROUTE.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const targets = process.env.TARGET ? [process.env.TARGET.split(",").map((n) => [...names].find(([, name]) => name === n)[0])] : [];
+  const t = performance.now();
+  // PRIOR_FROM: search that hand first and use its line as guidance (as the app does with other starts' lines)
+  let prior = new Set();
+  if (process.env.PRIOR_FROM) {
+    const other = process.env.PRIOR_FROM.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+    const g = routeSearch(env, other, rest(other), extra, { targets, budget: 2500 });
+    let n; while (!(n = g.next()).done);
+    prior = new Set(n.value.keys);
+    console.log("PRIOR", n.value.interruptions.length, "interruptions from", process.env.PRIOR_FROM.split(",")[0], n.value.keys.join(" "));
+  }
+  const steps = routeSearch(env, hand, rest(hand), extra, { targets, prior, budget: Number(process.env.BUDGET ?? 2500), batch: !!process.env.BATCH,
+    trace: process.env.TRACE ? (level, kept) => { console.log(`LEVEL ${level}: ${kept.length} kept`); for (const k of kept.slice(0, Number(process.env.TRACE))) console.log(`   [${k.plan}] ${k.value.toFixed(0)}  ${k.steps.slice(-3).join(" > ")}  || ${k.options.length} options: ${k.options.slice(0, 8).join(" | ")}`); } : undefined });
+  // BATCH=1: the search asks for each level's tries together, as in the app (played here one by one)
+  let next, answer;
+  while (!(next = steps.next(answer)).done) answer = next.value?.need ? next.value.need.map((plan) => play(env, hand, rest(hand), extra, plan)) : undefined;
+  const r = next.value;
+  console.log(`ROUTE ${(performance.now() - t) / 1000 | 0} s, ${r.tried} tried, full ${r.full}, coverage ${(r.coverage * 100).toFixed(0)}%`);
+  console.log("  interruptions:", r.interruptions.map((i) => `${names.get(i.code)} (${i.kind}, ${i.from})`).join("; ") || "none");
+  console.log("  board:", r.board.map((c) => names.get(c)).join(", "));
+  console.log("  steps:", r.steps.join(" > "));
+  console.log("  ui picks:", JSON.stringify(r.ui));
+}
+
+if (process.env.PLAN) {
+  const { play } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const hand = process.env.HAND2.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const plan = process.env.PLAN ? process.env.PLAN.split(",").filter(Boolean).map(Number) : [];
+  for (let n = 0; n <= plan.length; n++) {
+    const s = play(env, hand, rest(hand), extra, plan.slice(0, n));
+    console.log(`after ${n}: failed=${!!s.failed} board=[${s.board.map((c) => names.get(c))}] options=${JSON.stringify(s.options)}`);
+  }
+}
+
+if (process.env.TIMING) {
+  const { play } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const hand = process.env.TIMING.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const plan = (process.env.PLAN2 ?? "").split(",").filter(Boolean).map(Number);
+  let loads = 0, loadMs = 0;
+  const realLoad = core.loadScript.bind(core);
+  core.loadScript = (...a) => { const t = performance.now(); const r = realLoad(...a); loadMs += performance.now() - t; loads++; return r; };
+  for (const n of [0, plan.length]) {
+    loads = 0; loadMs = 0;
+    const t = performance.now();
+    for (let i = 0; i < 20; i++) play(env, hand, rest(hand), extra, plan.slice(0, n));
+    console.log(`plan length ${n}: ${((performance.now() - t) / 20).toFixed(1)} ms per play, top-level script loads ${loads / 20} taking ${(loadMs / 20).toFixed(1)} ms`);
+  }
+}
+
+if (process.env.CHOKE) {
+  const { routeSearch, chokePoints } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const hand = process.env.CHOKE.split(",").map((n) => [...names].find(([c, name]) => name === n && main.includes(c))[0]);
+  const g = routeSearch(env, hand, rest(hand), extra, { targets: [], budget: 2500 });
+  let n; while (!(n = g.next()).done);
+  console.log(`LINE ${n.value.interruptions.length} interruptions: ${n.value.steps.filter((s) => !s.startsWith("pick")).join(" > ")}`);
+  const t = performance.now();
+  // BATCH=1: the check asks for its replays together, as in the app (answered here one by one)
+  const { play, playAgainst } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  if (process.env.FOLLOW) { console.log("KEYS", n.value.keys.join(" ")); const r = playAgainst(env, hand, rest(hand), extra, n.value.keys, 14558127, -1); console.log("FOLLOWED", JSON.stringify(r)); }
+  const c = chokePoints(env, hand, rest(hand), extra, n.value.keys, undefined, { batch: !!process.env.BATCH });
+  let m, answer;
+  while (!(m = c.next(answer)).done) {
+    const v = m.value;
+    answer = v?.need ? v.need.map((p) => play(env, hand, rest(hand), extra, p, v.against)) : v?.follow ? v.follow.map((j) => playAgainst(env, hand, rest(hand), extra, j.keys, j.trap, j.at, j.fixed)) : undefined;
+  }
+  console.log(`choke points in ${((performance.now() - t) / 1000).toFixed(1)} s`);
+  for (const one of m.value) {
+    const worst = one.windows.reduce((a, w) => (a && a.interruptions <= w.interruptions ? a : w), null);
+    console.log(`  ${names.get(one.trap)}: clean ${one.clean}; ${one.windows.length} moments; ` + one.windows.map((w) => `${w.at} -> ${w.interruptions}`).join("; "));
+  }
+}
+
+if (process.env.CUT) {
+  // CUT="start|card,card": a line for the start, then the same line replayed without each card
+  const { routeSearch, playAgainst } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const [startName, cutNames] = process.env.CUT.split("|");
+  const find = (n) => [...names].find(([c, name]) => name === n && (main.includes(c) || extra.includes(c)))[0];
+  const start = find(startName);
+  const g = routeSearch(env, [start], rest([start]), extra, { targets: [], budget: Number(process.env.BUDGET ?? 800) });
+  let n; while (!(n = g.next()).done);
+  const line = n.value;
+  const play = (deck) => playAgainst(env, [start], deck, extra, line.keys, 14558127, -1);
+  console.log(`LINE ${names.get(start)}: ${line.interruptions.length} (replayed: ${play(rest([start])).interruptions})`);
+  for (const cutName of cutNames.split(",")) {
+    const cut = find(cutName);
+    const deck = rest([start]); const at = deck.indexOf(cut); if (at >= 0) deck.splice(at, 1);
+    console.log(`  without ${cutName}: ${play(deck).interruptions}`);
+  }
+}
+
+if (process.env.COMBO) {
+  const { routeSearch, chokeCombo } = await import(new URL("../src/engine/probe.ts", import.meta.url));
+  const find = (n) => [...names].find(([c, name]) => name === n && (main.includes(c) || cards.has(c)))[0];
+  const hand = process.env.COMBO.split(",").map(find);
+  const traps = (process.env.TRAPS ?? "Ash Blossom & Joyous Spring,Infinite Impermanence").split(",").map((n) => [...names].find(([, name]) => name === n)[0]);
+  const g = routeSearch(env, hand, rest(hand), extra, { targets: [], budget: 2500 });
+  let n; while (!(n = g.next()).done);
+  console.log(`LINE ${n.value.interruptions.length} interruptions`);
+  const t = performance.now();
+  const c = chokeCombo(env, hand, rest(hand), extra, n.value.keys, traps);
+  let m; while (!(m = c.next()).done);
+  const r = m.value;
+  console.log(`COMBO ${traps.map((c) => names.get(c)).join(" + ")} in ${((performance.now() - t) / 1000).toFixed(1)} s: ${r.steps.map((s) => `${names.get(s.trap)} on ${s.at}`).join(", then ")} -> ${r.interruptions} interruptions; board ${r.board.map((c) => names.get(c)).join(", ")}${r.unused.length ? `; never usable: ${r.unused.map((c) => names.get(c)).join(", ")}` : ""}`);
+}

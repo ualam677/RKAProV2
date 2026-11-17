@@ -1,0 +1,1822 @@
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { parseYdk, shuffled } from "./deck";
+import { Duel, MuteButton, cueTime, duelOverlay } from "./Duel";
+import { SettingsScreen } from "./Settings";
+import { getSettings } from "./settings";
+import { DeckEditor } from "./DeckEditor";
+import { CardArt, setArtworkOriginals } from "./CardArt";
+import { RoleCounts } from "./CardGlyphs";
+import { EXTRA_TYPES, deckSignature, importDeck, keepTest, loadDecks, newId, scoredByCount, storeDecks, freezeDecks, type SavedDeck, type SavedTest, type TestResult } from "./decks";
+import type { CardInfo, CardSearch, CardText, DuelView, FromWorker, TestRecord, ToWorker } from "./engine/protocol";
+import type { Piece } from "./engine/interruptions";
+import { CHOKE_TRAPS } from "./engine/probe";
+import { hasRole, secondOnly } from "./optimiser";
+import { Optimiser, Stepper, testOverlay } from "./Optimiser";
+import { Tests } from "./Tests";
+import { canLinkFolder, downloadBackup, driveDownload, driveReady, driveSignIn, driveSignedIn, driveUpload, preloadGoogle, linkFolder, linkedFolder, makeBackup, mergeBackup, readFolder, unlinkFolder, writeFolderFile } from "./sync";
+import { readReplayLink, replayLink, toYdk } from "./decks";
+import { recordVideo } from "./video";
+import "./style.css";
+
+// EDOPro's card back, from Project Ignis like the scripts and card data; every face-down card uses it
+const COVER_URL = import.meta.env.VITE_COVER_URL ?? "https://raw.githubusercontent.com/ProjectIgnis/Distribution/master/textures/cover.png";
+document.documentElement.style.setProperty("--cover", `url("${COVER_URL}")`);
+
+// works offline once opened online (public/sw.js); not in development, where it would serve stale code
+if (import.meta.env.PROD && "serviceWorker" in navigator) void navigator.serviceWorker.register("./sw.js").catch(() => {});
+// the browser's own "install this app" offer, kept for the Install button
+let installOffer: (Event & { prompt(): Promise<void> }) | null = null;
+const installListeners = new Set<() => void>();
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installOffer = event as typeof installOffer;
+  installListeners.forEach((listener) => listener());
+});
+
+// hand test settings, remembered on this device only
+const SAVED = "rka.handtest";
+// the rules boards are counted by (negate types, rank-ups, once per turn by name, protection): older counts are redone
+const COUNTING = 2;
+interface Saved {
+  deckId: string;
+  hand: number;
+  chosen: number[];
+  ignoreHandTraps: boolean;
+  // the computer opponent: "none", "copy" (of the deck being tested) or a saved deck's id
+  opponent?: string;
+  opponentHandTraps?: boolean;
+  // the opponent opens with the deck's chosen hand traps (the ones Optimise checks against), not random draws
+  fixedTraps?: boolean;
+  goSecond?: boolean;
+  // before decks were saved in a list, the last opened .ydk was kept here
+  deckText?: string;
+  deckName?: string;
+}
+function loadSaved(): Partial<Saved> {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function save(value: Saved) {
+  try {
+    localStorage.setItem(SAVED, JSON.stringify(value));
+  } catch {
+    // private mode or storage full: settings just are not remembered
+  }
+}
+
+function startingDecks(saved: Partial<Saved>): SavedDeck[] {
+  const decks = loadDecks();
+  if (decks.length || !saved.deckText) return decks;
+  // the deck opened before the deck list existed becomes the first saved deck
+  return [{ ...parseYdk(saved.deckText), id: newId(), name: saved.deckName || "My deck", updated: Date.now() }];
+}
+
+// The start a test was for: the Test button's card, else the first card in the hand tagged (or found by the engine) as one
+function startOf(owner: SavedDeck, hand: number[], testOf?: number): number | undefined {
+  const starter = (code: number) => ["starter", "pair"].includes(owner.tags?.[code]?.role ?? "") || !!owner.engine?.evidence.some((entry) => entry.code === code && entry.alone.deck > 0);
+  return testOf ?? hand.find(starter);
+}
+
+function App() {
+  const worker = useRef<Worker | null>(null);
+  const saved = useMemo(loadSaved, []);
+  const [status, setStatus] = useState("Starting");
+  const [ready, setReady] = useState(false);
+  const [decks, setDecks] = useState<SavedDeck[]>(() => startingDecks(saved));
+  const decksRef = useRef(decks);
+  decksRef.current = decks;
+  const [deckId, setDeckId] = useState(saved.deckId ?? decks[0]?.id ?? "");
+  const [editing, setEditing] = useState(false);
+  // "Install app": shown when the browser offers it (Chrome / Edge / Android); iPhone uses Share > Add to Home Screen
+  const [canInstall, setCanInstall] = useState(!!installOffer);
+  useEffect(() => {
+    const listener = () => setCanInstall(true);
+    installListeners.add(listener);
+    return () => void installListeners.delete(listener);
+  }, []);
+  // the main menu, or one of its sections
+  const [screen, setScreen] = useState<"menu" | "decks" | "test" | "replays" | "sync" | "settings">("menu");
+  // the editor opens on the deck (Edit deck) or on the optimiser (Optimise)
+  const openEditor = (optimise: boolean) => {
+    try {
+      sessionStorage.setItem("rka.optimising", optimise ? "1" : "0");
+    } catch {
+      // the editor opens on the deck
+    }
+    setEditing(true);
+  };
+  const [pasting, setPasting] = useState(false);
+  const [paste, setPaste] = useState("");
+  const [hand, setHand] = useState(saved.hand ?? 5);
+  const [chosen, setChosen] = useState<number[]>(saved.chosen ?? []);
+  const [ignoreHandTraps, setIgnoreHandTraps] = useState(saved.ignoreHandTraps ?? false);
+  // choke points marked in the test on screen
+  const [marks, setMarks] = useState(0);
+  const [markNote, setMarkNote] = useState("");
+  const markWaiting = useRef(0);
+  // the Test screen's hand picker, open or not
+  const [picking, setPicking] = useState(false);
+  // leaving the editor: a "+ New" deck left untouched isn't kept (it would become the deck in use, empty)
+  const closeEditor = () => {
+    setEditing(false);
+    if (deck && deck.name === "New deck" && !deck.main.length && !deck.extra.length && !deck.side.length && !deck.tests?.length)
+      setDecks((all) => all.filter((one) => one.id !== deck.id));
+  };
+  // signed in to Google Drive this session (the sign-in itself stays in memory)
+  const [driveIn, setDriveIn] = useState(driveSignedIn());
+  useEffect(() => {
+    if (screen === "sync") preloadGoogle();
+  }, [screen]);
+  // every screen opens at its top; a reload doesn't carry the last screen's scroll onto the menu
+  useEffect(() => {
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+    // a phone browser can still put the old scroll back while the page loads, or when it comes back from the
+    // back/forward cache: to the top each time
+    const top = () => window.scrollTo(0, 0);
+    window.addEventListener("load", top);
+    window.addEventListener("pageshow", top);
+    return () => (window.removeEventListener("load", top), window.removeEventListener("pageshow", top));
+  }, []);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [screen]);
+  // the cards finishing loading changes the page's height: back to the top on the menu once more
+  useEffect(() => {
+    if (ready && screen === "menu") window.scrollTo(0, 0);
+  }, [ready]);
+  // a duel on its way (the first one downloads card scripts): a small "loading" note until its first screen arrives
+  const [loadingDuel, setLoadingDuel] = useState(false);
+  // the deck whose ⋯ is open on the Decks screen
+  const [deckMenu, setDeckMenu] = useState<string | null>(null);
+  const [opponent, setOpponent] = useState(saved.opponent ?? "copy");
+  const [opponentHandTraps, setOpponentHandTraps] = useState(saved.opponentHandTraps ?? false);
+  const [fixedTraps, setFixedTraps] = useState(saved.fixedTraps ?? true);
+  const [goSecond, setGoSecond] = useState(saved.goSecond ?? false);
+  const [view, setView] = useState<DuelView | null>(null);
+  const [texts, setTexts] = useState(new Map<number, CardText>());
+  const [cards, setCards] = useState(new Map<number, CardInfo>());
+  // what each card does for deckbuilding (read by the worker from its text)
+  const [traits, setTraits] = useState(new Map<number, string[]>());
+  // the cut test on screen: a card, and what each of your lines loses without it
+  const [cutResult, setCutResult] = useState<{ id: number; deckId: string; cut: number; lines?: { start: number; before: number; after: number; board: number[] }[] } | null>(null);
+  const cutTest = (target: SavedDeck, cut: number) => {
+    const lines = Object.entries(target.routes ?? {}).flatMap(([start, route]) => (route.source === "replay" && route.keys ? [{ start: Number(start), hand: route.record.startHand, keys: route.keys }] : []));
+    const id = (cutResult?.id ?? 0) + 1;
+    setCutResult({ id, deckId: target.id, cut });
+    post({ type: "cut", id, main: target.main, extra: target.extra, cut, lines });
+  };
+  // card pictures: an alternate artwork the picture servers lack shows the original card's picture
+  setArtworkOriginals((code) => {
+    const card = cards.get(code);
+    return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
+  });
+  const [banlist, setBanlist] = useState<{ name: string; limits: Record<number, number> }>({ name: "", limits: {} });
+  const [error, setError] = useState("");
+  const deck = decks.find((one) => one.id === deckId) ?? decks[0] ?? null;
+  // the engine checking a deck's cards in the background (one deck at a time; a newer request replaces it)
+  const [probe, setProbe] = useState<{ id: number; deckId: string; signature: string; done: number; total: number } | null>(null);
+  const probeRef = useRef(probe);
+  probeRef.current = probe;
+  // the hand test on screen, saved with its deck as it is played (not while a saved one is being watched)
+  // `from`: choices replayed from a saved test, not saved again until you make one of your own
+  const test = useRef<{ id: string; deckId: string; date: number; testOf?: number; worked?: boolean; board?: number[]; pieces?: Piece[]; from: number; marks?: { at: string; step: number; traps?: number[] }[] } | null>(null);
+  const [record, setRecord] = useState<TestRecord | null>(null);
+  const lastRecord = useRef<TestRecord | null>(null);
+  const [worked, setWorked] = useState(false);
+  // what marking the test as working did: became a start's line, the start kept a better one, or no start in the hand
+  // a line just marked as working, while the engine audits its end board (the "Analysing" note); then its line is shown
+  const [analysing, setAnalysing] = useState<string | null>(null);
+  const analysingRef = useRef<string | null>(null);
+  analysingRef.current = analysing;
+  const scrollToLine = useRef<string | null>(null);
+  const audited = useRef(new Set<string>());
+  const [workedNote, setWorkedNote] = useState<{ testId: string; count: number; kind: "line" | "kept" | "nostart"; start?: number; best?: number } | null>(null);
+  // watching a saved test: its choices are made one by one; any tap of yours takes over from there
+  const [replay, setReplay] = useState<{ picks: (number[] | null)[]; at: number } | null>(null);
+  const replayRef = useRef(replay);
+  replayRef.current = replay;
+
+  const post = (message: ToWorker) => worker.current?.postMessage(message);
+  // each saved line's needs, measured once per line and deck version (in the background, by the engine)
+  const needsJobs = useRef(new Map<number, string>());
+  const needsAsked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!ready || !deck?.routes) return;
+    const signature = deckSignature(deck);
+    const lines = Object.entries(deck.routes).flatMap(([key, route]) => {
+      const asked = `${deck.id}:${key}:${route.testId ?? route.date}:${signature}`;
+      if (route.source !== "replay" || !route.keys?.length || !route.record?.startHand?.length || route.needsFor === signature || needsAsked.current.has(asked)) return [];
+      needsAsked.current.add(asked);
+      return [{ key, hand: route.record.startHand, keys: route.keys }];
+    });
+    if (!lines.length) return;
+    const id = Date.now() + Math.random();
+    needsJobs.current.set(id, deck.id);
+    post({ type: "needs", id, main: deck.main, extra: deck.extra, lines });
+  }, [ready, deck]);
+
+
+  // replies the worker sends back to a request: searches by id, card details in the order they were asked
+  const searches = useRef(new Map<number, (result: { results: CardInfo[]; more: boolean }) => void>());
+  const searchId = useRef(0);
+  const infoWaiting = useRef<((found: (CardInfo & { asked: number })[]) => void)[]>([]);
+  const search = useCallback(
+    (query: CardSearch) =>
+      new Promise<{ results: CardInfo[]; more: boolean }>((resolve) => {
+        const id = ++searchId.current;
+        searches.current.set(id, resolve);
+        post({ type: "search", id, search: query });
+      }),
+    [],
+  );
+  // deck list names to cards, in the order asked
+  const namesWaiting = useRef(new Map<string, (cards: (CardInfo | null)[]) => void>());
+  const names = useCallback(
+    (list: string[]) =>
+      new Promise<(CardInfo | null)[]>((resolve) => {
+        const id = newId();
+        namesWaiting.current.set(id, resolve);
+        post({ type: "names", id, names: list });
+      }),
+    [],
+  );
+  const info = useCallback(
+    (codes: number[]) =>
+      new Promise<(CardInfo & { asked: number })[]>((resolve) => {
+        infoWaiting.current.push(resolve);
+        post({ type: "info", codes });
+      }),
+    [],
+  );
+
+  // Views sent mid-play are shown one after another, each held only as long as its animation;
+  // a tap skips straight to the newest one.
+  const queue = useRef<DuelView[]>([]);
+  const timer = useRef(0);
+  const playNext = useCallback(() => {
+    timer.current = 0;
+    const next = queue.current.shift();
+    if (!next) return;
+    setView(next);
+    // a view with an animation stays up for it, even if the next view has not arrived yet
+    const hold = cueTime(next.events);
+    if (hold) timer.current = window.setTimeout(playNext, hold);
+    else if (queue.current.length) playNext();
+  }, []);
+  const receive = useCallback(
+    (next: DuelView) => {
+      queue.current.push(next);
+      if (!timer.current) playNext();
+    },
+    [playNext],
+  );
+  const skip = useCallback(() => {
+    window.clearTimeout(timer.current);
+    timer.current = 0;
+    const last = queue.current.pop();
+    queue.current = [];
+    setView((shown) => {
+      const latest = last ?? shown;
+      return latest && { ...latest, events: [] };
+    });
+  }, []);
+
+  useEffect(() => {
+    const instance = new Worker(new URL("./engine/worker.ts", import.meta.url), { type: "module" });
+    worker.current = instance;
+    instance.onmessage = (event: MessageEvent<FromWorker>) => {
+      const message = event.data;
+      if (message.type === "progress") setStatus(message.text);
+      else if (message.type === "ready") {
+        setReady(true);
+        setBanlist(message.banlist);
+        setStatus(`${message.cards.toLocaleString()} cards loaded`);
+        // another ban list chosen in Settings
+        if (getSettings().banlist !== "0TCG") instance.postMessage({ type: "banlist", file: getSettings().banlist } satisfies ToWorker);
+      } else if (message.type === "banlist") {
+        setBanlist(message.banlist);
+      } else if (message.type === "view") {
+        setLoadingDuel(false);
+        receive(message.view);
+      }
+      else if (message.type === "record") {
+        lastRecord.current = message.record;
+        if (!replayRef.current) setRecord(message.record);
+      }
+      else if (message.type === "text") setTexts((known) => new Map(known).set(message.card.code, message.card));
+      else if (message.type === "search") {
+        // results are remembered too, so adding one knows whether it belongs in the Extra Deck
+        setCards((known) => {
+          const next = new Map(known);
+          for (const card of message.results) next.set(card.code, card);
+          return next;
+        });
+        searches.current.get(message.id)?.(message);
+        searches.current.delete(message.id);
+      } else if (message.type === "info") {
+        setCards((known) => {
+          const next = new Map(known);
+          // a code the database doesn't have (YGO Omega's own alternate artworks) points at the card it stands for
+          for (const card of message.cards) next.set(card.asked, { ...card, code: card.asked, alias: card.asked !== card.code ? card.alias || card.code : card.alias });
+          return next;
+        });
+        infoWaiting.current.shift()?.(message.cards);
+      } else if (message.type === "route") {
+        const job = routingRef.current;
+        if (!job || job.id !== message.id) return;
+        if (!message.done) return setRouting({ ...job, tried: message.tried });
+        const { route, record: line } = message.done;
+        setDecks((all) =>
+          all.map((one) => {
+            if (one.id !== job.deckId) return one;
+            const aimed = (one.tests ?? []).some((test) => test.worked && test.board?.length);
+            // a second round keeps the earlier line if it was better
+            const before = one.routes?.[job.code];
+            if (before && before.signature === deckSignature(one) && (before.interruptions?.length ?? 0) >= route.interruptions.length && before.date > job.started) return one;
+            const saved = { keys: route.keys, board: route.board, interruptions: route.interruptions, protection: route.protection, nibiru: route.nibiru, coverage: route.coverage, full: route.full, aimed, tried: route.tried, date: Date.now(), signature: deckSignature(one), record: line };
+            return { ...one, routes: { ...one.routes, [job.code]: saved } };
+          }),
+        );
+        // on to the next start waiting, if any (a second-round start that already reached a full board is skipped)
+        let rest = job.queue;
+        const target = decksRef.current.find((one) => one.id === job.deckId);
+        while (rest.length && target) {
+          const [next, ...after] = rest;
+          rest = after;
+          const found = next.code === job.code ? message.done.route : target.routes?.[next.code];
+          if (next.retry && found && (found.interruptions?.length ?? 0) >= (target.fullAt ?? 3)) continue;
+          return searchRoute(target, next.code, next.hand, rest);
+        }
+        setRouting(null);
+        // every line found: now where hand traps hurt each of them
+        const done = decksRef.current.find((one) => one.id === job.deckId);
+        if (done) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? done, allStarts.current), 50);
+      } else if (message.type === "moment") {
+        const current = test.current;
+        if (!current || markWaiting.current !== message.id) return;
+        markWaiting.current = 0;
+        current.marks = [...(current.marks ?? []).filter((mark) => mark.step !== message.step), { at: message.at, step: message.step, traps: message.traps }];
+        setMarks(current.marks.length);
+        setMarkNote(message.traps.length ? `Marked: ${message.at}` : `Marked: ${message.at} (no hand trap held could answer here)`);
+        const played = lastRecord.current;
+        if (played) keep(current.deckId, { ...played, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces, marks: current.marks });
+      } else if (message.type === "needs") {
+        // each line filed under a card it needs (the start you pressed ▶ on, or the first starter in the hand, may not be)
+        const deckId = needsJobs.current.get(message.id);
+        needsJobs.current.delete(message.id);
+        setDecks((all) =>
+          all.map((one) => {
+            if (one.id !== deckId || !one.routes) return one;
+            const routes = { ...one.routes };
+            for (const line of message.lines) {
+              const route = routes[line.key];
+              if (!route) continue;
+              // a replay short of the board it reached proves nothing about what it needs
+              const faithful = line.before >= (route.interruptions?.length ?? 0);
+              const measured = faithful ? { ...route, needs: line.needs, any: line.any, needsFor: deckSignature(one), unreplayable: false } : { ...route, needs: undefined, any: undefined, needsFor: deckSignature(one), unreplayable: true };
+              if (!faithful) {
+                routes[line.key] = measured;
+                continue;
+              }
+              const starts = (code: number) => ["starter", "pair"].includes(one.tags?.[code]?.role ?? "") || !!one.engine?.evidence.some((entry) => entry.code === code && (entry.alone.deck > 0 || entry.partners.length > 0));
+              const key = line.needs.includes(Number(line.key)) || !line.needs.length ? Number(line.key) : (line.needs.find(starts) ?? line.needs[0]);
+              if (key !== Number(line.key)) {
+                delete routes[line.key];
+                const there = routes[key];
+                // a card can hold one line: the better one stays
+                if (!there || (there.interruptions?.length ?? 0) <= (route.interruptions?.length ?? 0)) routes[key] = measured;
+              } else routes[line.key] = measured;
+            }
+            return { ...one, routes };
+          }),
+        );
+      } else if (message.type === "cut") {
+        setCutResult((now) => (now && now.id === message.id ? { ...now, lines: message.lines } : now));
+      } else if (message.type === "traits") {
+        setTraits((known) => new Map([...known, ...message.traits]));
+      } else if (message.type === "names") {
+        namesWaiting.current.get(message.id)?.(message.cards);
+        namesWaiting.current.delete(message.id);
+      } else if (message.type === "views") {
+        videoWaiting.current.get(message.id)?.({ views: message.views, marks: message.marks });
+        videoWaiting.current.delete(message.id);
+      } else if (message.type === "interruptions" && message.id.startsWith("outcome:")) {
+        // a finished test, counted at the end of your first turn
+        const id = message.id.slice(8);
+        const pending = outcomes.current.get(id);
+        outcomes.current.delete(id);
+        if (!pending) return;
+        setDecks((all) =>
+          all.map((one) => {
+            if (one.id !== pending.deckId || one.results?.some((result) => result.id === id)) return one;
+            const goal = one.fullAt ?? 3;
+            const count = message.list.length;
+            // scored by the board it reached; saving it as a working line only keeps the line
+            const kind: TestResult["kind"] = count >= goal ? "full" : pending.start === undefined ? "brick" : pending.trap ? "handtrap" : "short";
+            const why =
+              kind === "full" ? `Full board: ${count} interruption${count === 1 ? "" : "s"}` : kind === "brick" ? "No start in the opening hand" : kind === "handtrap" ? `${pending.trap}: ended on ${count} of ${goal}` : `Fell short: ${count} of ${goal} interruptions`;
+            const result: TestResult = { id, date: pending.date, start: pending.start, hand: pending.hand, interruptions: count, kind, why, held: pending.held };
+            return { ...one, results: [result, ...(one.results ?? [])].slice(0, 300) };
+          }),
+        );
+      } else if (message.type === "interruptions") {
+        // a working test's board, counted: kept with the test
+        setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === message.id) ? { ...one, tests: one.tests.map((test) => (test.id === message.id ? { ...test, interruptions: message.list, protection: message.protection, nibiru: message.nibiru, counted: COUNTING } : test)) } : one)));
+        // a test saved as a working line: it becomes its start's line (checked against hand traps); its result stays what its board scored
+        window.setTimeout(() => {
+          const owner = decksRef.current.find((one) => one.tests?.some((test) => test.id === message.id));
+          const test = owner?.tests?.find((one) => one.id === message.id);
+          if (!owner || !test?.worked) return;
+          const results = owner.results ?? [];
+          // filed under a start for now (or the hand's first card if none is known yet); once the engine has measured
+          // which hand cards the line needs, it is filed under one of those
+          const start = startOf(owner, test.startHand, test.testOf) ?? test.startHand[0];
+          const before = start === undefined ? undefined : owner.routes?.[start];
+          const count = message.list.length;
+          if (start === undefined) {
+            setDecks((all) => all.map((one) => (one.id === owner.id ? { ...one, results } : one)));
+            setWorkedNote({ testId: test.id, count, kind: "nostart" });
+            setAnalysing((now) => (now === test.id ? null : now));
+            return;
+          }
+          // the start keeps its best worked line
+          if (before?.source === "replay" && before.testId !== test.id && before.signature === deckSignature(owner) && (before.interruptions?.length ?? 0) > count) {
+            setDecks((all) => all.map((one) => (one.id === owner.id ? { ...one, results } : one)));
+            setWorkedNote({ testId: test.id, count, kind: "kept", start, best: before.interruptions?.length ?? 0 });
+            setAnalysing((now) => (now === test.id ? null : now));
+            return;
+          }
+          const keys = test.steps.flatMap((step) => (!step.code ? [] : step.idle ? [`${step.text.split(/[ :]/)[0]}:${step.code}`] : [`pick:${step.hint ?? 0}:${step.code}`]));
+          const line = {
+            keys, marks: test.marks, board: test.board ?? [], interruptions: message.list, protection: message.protection, nibiru: message.nibiru, coverage: 1, full: count >= (owner.fullAt ?? 3),
+            aimed: true, tried: 0, date: Date.now(), signature: deckSignature(owner), record: { options: test.options, picks: test.picks, steps: test.steps, startHand: test.startHand }, source: "replay" as const, testId: test.id,
+          };
+          const updated = { ...owner, results, routes: { ...owner.routes, [start]: line } };
+          setDecks((all) => all.map((one) => (one.id === owner.id ? updated : one)));
+          setWorkedNote({ testId: test.id, count, kind: "line", start });
+          // the engine's look at its end board on the opponent's turn
+          audited.current.add(test.id);
+          post({ type: "audit", id: test.id, main: owner.main, extra: owner.extra, hand: test.startHand, keys, board: test.board ?? [], pieces: test.pieces });
+          // its hand trap check: now, or after the one running
+          if (!chokingRef.current) checkChokes(updated, [{ code: start, hand: test.startHand }]);
+          else if (!chokingRef.current.queue.some((one) => one.code === start)) chokingRef.current.queue.push({ code: start, hand: test.startHand });
+        }, 50);
+      } else if (message.type === "choke") {
+        const job = chokingRef.current;
+        if (!job || job.id !== message.id || !message.done) return;
+        const chokes = message.done;
+        const combo = message.combo;
+        setDecks((all) => all.map((one) => (one.id === job.deckId && one.routes?.[job.code] ? { ...one, routes: { ...one.routes, [job.code]: { ...one.routes[job.code], chokes, combo } } } : one)));
+        const target = decksRef.current.find((one) => one.id === job.deckId);
+        if (target) window.setTimeout(() => checkChokes(decksRef.current.find((one) => one.id === job.deckId) ?? target, job.queue), 50);
+        else setChoking(null);
+      } else if (message.type === "probe") {
+        const job = probeRef.current;
+        if (!job || job.id !== message.id) return;
+        if (message.evidence) {
+          const evidence = message.evidence;
+          setDecks((all) => all.map((one) => (one.id === job.deckId ? { ...one, engine: { signature: job.signature, evidence } } : one)));
+          setProbe(null);
+        } else setProbe({ ...job, done: message.done, total: message.total });
+      } else if (message.type === "audit") {
+        const audit = message.audit;
+        if (audit) setDecks((all) => all.map((one) => (Object.values(one.routes ?? {}).some((route) => route.testId === message.id) ? { ...one, routes: Object.fromEntries(Object.entries(one.routes ?? {}).map(([key, route]) => [key, route.testId === message.id ? { ...route, audit } : route])) } : one)));
+        if (analysingRef.current === message.id) finishAnalysing.current(message.id);
+      } else if (message.type === "error") {
+        setLoadingDuel(false);
+        setAnalysing(null);
+        setError(message.text);
+      }
+    };
+    // a crash in the worker posts no "error" message, so the loading note is dropped here too
+    instance.onerror = instance.onmessageerror = () => (setLoadingDuel(false), setAnalysing(null));
+    instance.postMessage({ type: "init" } satisfies ToWorker);
+    return () => instance.terminate();
+  }, []);
+
+  useEffect(() => storeDecks(decks), [decks]);
+  useEffect(() => save({ deckId: deck?.id ?? "", hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond }), [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond]);
+  // names for the hand trap chips on the Test screen
+  useEffect(() => {
+    if (ready && screen === "test" && CHOKE_TRAPS.some((code) => !cards.has(code))) void info(CHOKE_TRAPS);
+  }, [ready, screen]);
+  // the opponent for a test: a dud deck, 40 cards of Marshmallon (does nothing on its own) with the hand traps you picked on
+  // top (in its opening hand, and the only ones it uses); none picked, no hand traps at all
+  const opponentDeck = () => {
+    const traps = (deck?.opponentTraps ?? [14558127, 10045474]).slice(0, 3);
+    return {
+      opponent: { main: [...traps, ...Array.from({ length: 40 - traps.length }, () => 31305911)], extra: [] as number[] },
+      opponentHandTraps: traps.length > 0,
+      opponentTraps: traps,
+      trapTiming: deck?.trapTiming ?? ("smart" as const),
+      // your saved lines' hand trap checks, so the smart opponent waits for the moment that hurts each line most
+      trapPlans: Object.entries(deck?.routes ?? {}).flatMap(([start, route]) =>
+        route.source === "replay" && !route.unreplayable ? (route.chokes ?? []).filter((choke) => choke.clean >= (route.interruptions?.length ?? 0)).map((choke) => ({ start: Number(start), needs: route.needs, marks: route.marks?.map((mark) => ({ at: mark.at, traps: mark.traps ?? [] })), trap: choke.trap, clean: choke.clean, windows: choke.windows.map((window) => ({ at: window.at, interruptions: window.interruptions })) })) : [],
+      ),
+      goSecond: false,
+    };
+  };
+
+  // errors clear themselves so they never sit over the field for long
+  useEffect(() => {
+    if (!error || !view) return;
+    const clear = window.setTimeout(() => setError(""), 6000);
+    return () => window.clearTimeout(clear);
+  }, [error, view]);
+
+  // card names for the opening hand picker come from the worker once the cards are loaded
+  const unique = useMemo(() => [...new Set(deck?.main ?? [])], [deck]);
+  // what every card of the chosen deck is (which artwork of which card), for pictures in the duel as well
+  useEffect(() => {
+    if (!ready || !deck) return;
+    const missing = [...new Set([...deck.main, ...deck.extra, ...deck.side])].filter((code) => !cards.has(code));
+    if (missing.length) void info(missing);
+  }, [ready, deck?.id]);
+  useEffect(() => {
+    if (!ready) return;
+    // and for saved tests: what they opened with and the boards they ended on (Extra Deck monsters too)
+    const named = new Set([...unique, ...(deck?.tests ?? []).flatMap((one) => [...one.startHand, ...(one.board ?? [])])]);
+    named.forEach((code) => texts.has(code) || post({ type: "text", code }));
+  }, [ready, unique, deck?.tests]);
+
+  const pickDeck = (id: string) => {
+    setDeckId(id);
+    setChosen([]);
+  };
+  const changeDeck = (next: SavedDeck) => setDecks((all) => all.map((one) => (one.id === next.id ? next : one)));
+  const addDeck = (next: Omit<SavedDeck, "id" | "updated">) => {
+    const made = { ...next, id: newId(), updated: Date.now() };
+    setDecks((all) => [made, ...all]);
+    pickDeck(made.id);
+    return made;
+  };
+
+  // a deck from any of the formats, Main and Extra split by card type when the format keeps them together (Omega)
+  // Every card is translated to one the database knows: YGO Omega's own artwork numbers become the real card, and
+  // anything that can't be matched is named in a notice instead of being kept as an unreadable number.
+  const readDeck = async (text: string, fileName = "") => {
+    const imported = await importDeck(text, fileName);
+    const name = fileName.replace(/\.(ydk|txt)$/i, "") || "Imported deck";
+    if ("list" in imported) {
+      // card names to cards; Extra Deck monsters go to the Extra Deck unless the list put them in the Side
+      const found = await names(imported.list.map((entry) => entry.name));
+      const unknown = imported.list.filter((_, index) => !found[index]).map((entry) => entry.name);
+      if (unknown.length) setError(`Not found in the card database, left out: ${unknown.join(", ")}`);
+      const deck = { name, main: [] as number[], extra: [] as number[], side: [] as number[] };
+      imported.list.forEach((entry, index) => {
+        const card = found[index];
+        if (!card) return;
+        const section = entry.section === "side" ? "side" : card.type & EXTRA_TYPES ? "extra" : "main";
+        for (let copy = 0; copy < entry.count; copy++) deck[section].push(card.code);
+      });
+      setCards((known) => {
+        const next = new Map(known);
+        found.forEach((card) => card && next.set(card.code, card));
+        return next;
+      });
+      return deck;
+    }
+    const asked = "deck" in imported ? [...imported.deck.main, ...imported.deck.extra, ...imported.deck.side] : [...imported.unsplit.mainAndExtra, ...imported.unsplit.side];
+    const found = await info([...new Set(asked)]);
+    const known = new Map(found.map((card) => [card.asked, card]));
+    const missing = [...new Set(asked.filter((code) => !known.has(code)))];
+    if (missing.length) setError(`${missing.length} card${missing.length > 1 ? "s" : ""} in this deck aren't in the card database and were left out: ${missing.join(", ")}`);
+    const real = (codes: number[]) => codes.flatMap((code) => (known.has(code) ? [known.get(code)!.code] : []));
+    if ("deck" in imported) return { name, main: real(imported.deck.main), extra: real(imported.deck.extra), side: real(imported.deck.side) };
+    const isExtra = (code: number) => ((known.get(code)?.type ?? 0) & EXTRA_TYPES) !== 0;
+    return { name, main: real(imported.unsplit.mainAndExtra.filter((code) => !isExtra(code))), extra: real(imported.unsplit.mainAndExtra.filter(isExtra)), side: real(imported.unsplit.side) };
+  };
+  const importText = async (text: string, fileName = "") => {
+    try {
+      addDeck(await readDeck(text, fileName));
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    }
+  };
+
+  // ---- keeping decks elsewhere: backup file, a linked deck folder, Google Drive ----
+  const [syncNote, setSyncNote] = useState("");
+  const [folderName, setFolderName] = useState<string | null>(null);
+  useEffect(() => void linkedFolder().then((handle) => setFolderName(handle?.name ?? null)), []);
+  const note = (text: string) => setSyncNote(text);
+  const failed = (problem: unknown) => setError(problem instanceof Error ? problem.message : String(problem));
+  const restore = (text: string) => {
+    const merged = mergeBackup(text, decksRef.current);
+    setDecks(merged);
+    note(`Restored: ${merged.length} deck${merged.length === 1 ? "" : "s"}`);
+  };
+  // the folder's deck files come in (new or changed there); decks changed here go out as .ydk
+  const syncFolder = async (relink = false) => {
+    try {
+      const handle = !relink && (await linkedFolder()) ? (await linkedFolder())! : await linkFolder();
+      setFolderName(handle.name);
+      const files = await readFolder(handle);
+      let next = [...decksRef.current];
+      let came = 0, went = 0;
+      for (const file of files) {
+        const mine = next.find((one) => one.file === file.name);
+        if (mine && !(file.modified > (mine.fileSynced ?? 0) && mine.updated <= (mine.fileSynced ?? 0))) continue;
+        const read = await readDeck(file.text, file.name).catch(() => null);
+        if (!read) continue;
+        came++;
+        next = mine
+          ? next.map((one) => (one.id === mine.id ? { ...one, main: read.main, extra: read.extra, side: read.side, updated: Date.now(), fileSynced: Date.now() } : one))
+          : [{ ...read, id: newId(), updated: file.modified, file: file.name, fileSynced: Date.now() }, ...next];
+      }
+      const taken = new Set(next.map((one) => one.file).filter(Boolean));
+      for (const one of next) {
+        if (one.file && one.fileSynced && one.updated <= one.fileSynced) continue;
+        if (!one.file) {
+          let name = `${(one.name || "deck").replace(/[\\/:*?"<>|]/g, "")}.ydk`;
+          for (let n = 2; taken.has(name); n++) name = `${(one.name || "deck").replace(/[\\/:*?"<>|]/g, "")} (${n}).ydk`;
+          taken.add(name);
+          one.file = name;
+        }
+        await writeFolderFile(handle, one.file, toYdk(one));
+        one.fileSynced = Date.now();
+        went++;
+      }
+      setDecks(next.map((one) => ({ ...one })));
+      note(`Deck folder "${handle.name}": ${came} deck${came === 1 ? "" : "s"} in, ${went} written`);
+    } catch (problem) {
+      if (!(problem instanceof DOMException && problem.name === "AbortError")) failed(problem);
+    }
+  };
+  const openMany = async (files: FileList) => {
+    let count = 0;
+    for (const file of Array.from(files)) {
+      try {
+        const read = await readDeck(await file.text(), file.name);
+        setDecks((all) => [{ ...read, id: newId(), updated: Date.now() }, ...all]);
+        count++;
+      } catch {
+        // not a deck: skipped
+      }
+    }
+    note(`${count} deck${count === 1 ? "" : "s"} opened`);
+  };
+
+  const copies = (code: number) => deck?.main.filter((card) => card === code).length ?? 0;
+  const picked = (code: number) => chosen.filter((card) => card === code).length;
+  const choose = (code: number) => {
+    if (chosen.length < hand && picked(code) < copies(code)) setChosen([...chosen, code]);
+  };
+  const unchoose = (slot: number) => setChosen(chosen.filter((_, index) => index !== slot));
+  const pickHand = (size: number) => {
+    setHand(size);
+    setChosen(chosen.slice(0, size));
+  };
+
+  // a test from the optimiser deals exactly the cards it names (5 cards, hand traps held back) and stays set for New hand
+  // route searches, one start at a time: the queue holds the starts still to search and the hand each starts from
+  // a queued start with `retry` is a second round: searched again, guided by every line found, if it fell short
+  type Queued = { code: number; hand: number[]; retry?: boolean };
+  const [routing, setRouting] = useState<{ id: number; deckId: string; code: number; tried: number; queue: Queued[]; started: number } | null>(null);
+  const routingRef = useRef(routing);
+  routingRef.current = routing;
+  const searchRoute = (target: SavedDeck, code: number, hand: number[], queue: Queued[] = []) => {
+    const id = (routingRef.current?.id ?? 0) + 1;
+    const next = { id, deckId: target.id, code, tried: 0, queue, started: Date.now() };
+    routingRef.current = next;
+    setRouting(next);
+    const worked = (target.tests ?? []).filter((one) => one.worked);
+    const targets = worked.flatMap((one) => (one.board?.length ? [one.board] : []));
+    // your actions ("Activate:<card>") and your picks ("pick:<card>": what you added, what you sent) in working lines
+    const signature = deckSignature(target);
+    const prior = [
+      ...new Set([
+        ...worked.flatMap((one) => one.steps.filter((step) => step.code).map((step) => (step.idle ? `${step.text.split(/[ :]/)[0]}:${step.code}` : `pick:${step.hint ?? 0}:${step.code}`))),
+        // the lines found for the other starts: a start that searches into one of them (Galaxy Wizard into Orbital 7)
+        // follows it from there
+        ...Object.entries(target.routes ?? {}).flatMap(([start, route]) => (Number(start) !== code && route.signature === signature ? route.keys ?? [] : [])),
+      ]),
+    ];
+    post({ type: "route", id, main: target.main, extra: target.extra, hand, targets, prior, goal: target.fullAt ?? 3 });
+  };
+  // choke points, one start at a time, once its line is found (the hand trap check runs after all lines are in)
+  const [choking, setChoking] = useState<{ id: number; deckId: string; code: number; queue: { code: number; hand: number[] }[] } | null>(null);
+  const chokingRef = useRef(choking);
+  chokingRef.current = choking;
+  const checkChokes = (target: SavedDeck, queue: { code: number; hand: number[] }[]) => {
+    const [first, ...rest] = queue;
+    const route = first && target.routes?.[first.code];
+    if (!first) return setChoking(null);
+    if (!route?.keys) return checkChokes(target, rest);
+    const id = (chokingRef.current?.id ?? 0) + 1;
+    const next = { id, deckId: target.id, code: first.code, queue: rest };
+    chokingRef.current = next;
+    setChoking(next);
+    // the hand traps to check: the ones this deck tags as hand traps (they're the ones you expect), then the common staples
+    const tagged = Object.entries(target.tags ?? {}).filter(([, tag]) => hasRole(tag, "handtrap") && !secondOnly(tag)).map(([code]) => Number(code));
+    post({ type: "choke", id, main: target.main, extra: target.extra, hand: first.hand, keys: route.keys, goal: target.fullAt ?? 3, combo: target.opponentTraps ?? [14558127, 10045474], traps: [...new Set([...tagged, ...CHOKE_TRAPS])] });
+  };
+  const allStarts = useRef<{ code: number; hand: number[] }[]>([]);
+  const findLines = (target: SavedDeck, starts: { code: number; hand: number[] }[]) => {
+    allStarts.current = starts;
+    if (!starts.length) return;
+    // every start once, then a second round for the ones that fell short, now guided by the others' lines
+    const queue: Queued[] = [...starts.slice(1), ...(starts.length > 1 ? starts.map((one) => ({ ...one, retry: true })) : [])];
+    searchRoute(target, starts[0].code, starts[0].hand, queue);
+  };
+
+  const checkDeck = useCallback((target: SavedDeck) => {
+    const signature = deckSignature(target);
+    const running = probeRef.current;
+    if (running && running.deckId === target.id && running.signature === signature) return;
+    const id = (running?.id ?? 0) + 1;
+    setProbe({ id, deckId: target.id, signature, done: 0, total: 0 });
+    probeRef.current = { id, deckId: target.id, signature, done: 0, total: 0 };
+    post({ type: "probe", id, main: target.main, extra: target.extra });
+  }, []);
+
+  const keep = (deckIdToSave: string, entry: SavedTest) =>
+    setDecks((all) => all.map((one) => (one.id === deckIdToSave ? { ...one, tests: keepTest(one.tests, entry) } : one)));
+  // every choice made is saved straight away, so leaving or closing the page loses nothing
+  useEffect(() => {
+    const current = test.current;
+    if (!record || !current || record.picks.length <= current.from) return;
+    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces, marks: current.marks });
+  }, [record]);
+  // a test you played (made choices of your own in), counted once you move on from it
+  const outcomes = useRef(new Map<string, { deckId: string; date: number; start?: number; hand: number[]; trap?: string; held: number[] }>());
+  const finishTest = () => {
+    const current = test.current;
+    const played = lastRecord.current;
+    if (!current || !played || played.picks.length <= current.from || !played.steps.some((step) => step.idle)) return;
+    const owner = decksRef.current.find((one) => one.id === current.deckId);
+    if (!owner || owner.results?.some((one) => one.id === current.id) || outcomes.current.has(current.id)) return;
+    const saved: SavedTest = { ...played, id: current.id, date: current.date, testOf: current.testOf };
+    outcomes.current.set(current.id, { deckId: owner.id, date: current.date, start: startOf(owner, played.startHand, current.testOf), hand: played.startHand, held: played.options.opponentTraps ?? [] });
+    void (async () => {
+      const { views } = await replayViews(saved);
+      // your first turn, to its last moment
+      const first = views.find((one) => one.turnPlayer === 0 && one.turn > 0)?.turn;
+      const turn = views.filter((one) => one.turn === first);
+      const end = turn.at(-1) ?? views.at(-1);
+      if (!end) return outcomes.current.delete(current.id);
+      // a hand trap the opponent used in it, and what it answered
+      let last = "";
+      let trap: string | undefined;
+      for (const event of turn.flatMap((one) => one.events)) {
+        if ((event.kind === "activate" || event.kind === "summon") && event.controller === 0) last = event.name;
+        if (event.kind === "activate" && event.controller === 1 && !trap) trap = last ? `${event.name} on ${last}` : event.name;
+      }
+      const pending = outcomes.current.get(current.id);
+      if (pending) pending.trap = trap;
+      post({ type: "interruptions", id: `outcome:${current.id}`, pieces: piecesOf(end), startHand: played.startHand, used: usedIn(played.steps) });
+    })();
+  };
+  const newTest = (testOf?: number, from = 0) => {
+    finishTest();
+    test.current = deck ? { id: newId(), deckId: deck.id, date: Date.now(), testOf, from } : null;
+    setMarks(0);
+    setMarkNote("");
+    setRecord(null);
+    setWorked(false);
+  };
+  // the audit is done: back from the duel (or Replays) to the lines, scrolled to this one
+  const finishAnalysing = useRef((_id: string) => {});
+  finishAnalysing.current = (id: string) => {
+    setAnalysing(null);
+    scrollToLine.current = id;
+    // marked from the replay viewer or the Replays list: the lines are on the Test screen
+    if (viewing) (setViewing(null), setScreen("test"));
+    else if (view) (finishTest(), skip(), setReplay(null), setView(null));
+    else if (screen === "replays") setScreen("test");
+  };
+  // never stuck on "Analysing": a minute at most
+  useEffect(() => {
+    if (!analysing) return;
+    const timer = window.setTimeout(() => setAnalysing(null), 60000);
+    return () => window.clearTimeout(timer);
+  }, [analysing]);
+  useEffect(() => {
+    if (view || !scrollToLine.current) return;
+    const id = scrollToLine.current;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      const line = document.querySelector(`[data-line="${id}"]`);
+      if (line || ++tries > 40) {
+        window.clearInterval(timer);
+        scrollToLine.current = null;
+      }
+      if (line) {
+        line.scrollIntoView({ block: "center", behavior: "smooth" });
+        line.classList.add("line-new");
+      }
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, [view, screen]);
+  // lines saved before the audit existed: audited in the background, one after another (a line the older replay
+  // couldn't follow too: this one follows more, and if it can't either, the scripts are read for the saved board)
+  useEffect(() => {
+    if (!ready || !deck?.routes) return;
+    const waiting = Object.values(deck.routes).find((route) => route.source === "replay" && route.testId && (route.audit?.v ?? 0) < 2 && route.keys?.length && route.record?.startHand?.length && !audited.current.has(route.testId));
+    if (!waiting?.testId) return;
+    audited.current.add(waiting.testId);
+    const pieces = deck.tests?.find((one) => one.id === waiting.testId)?.pieces;
+    post({ type: "audit", id: waiting.testId, main: deck.main, extra: deck.extra, hand: waiting.record.startHand, keys: waiting.keys!, board: waiting.board, pieces });
+  }, [ready, deck]);
+  const analysingNote = analysing && (
+    <div className="duel-loading" role="status" aria-live="polite">
+      <span className="duel-loading-spin" aria-hidden="true" />
+      <span>
+        <b>Analysing</b>
+        <small>Playing out the opponent's turn…</small>
+      </span>
+    </div>
+  );
+  const markWorked = () => {
+    const current = test.current;
+    if (!current || !record || !view) return;
+    current.worked = !current.worked;
+    if (!current.worked) {
+      const owner = decksRef.current.find((one) => one.id === current.deckId);
+      if (owner) changeDeck(withoutWorked(owner, current.id));
+    }
+    const mine = view.players[0];
+    current.board = current.worked ? [...mine.monsters, ...mine.spells].flatMap((card) => (card?.code ? [card.code] : [])) : undefined;
+    // everything that can matter on the opponent's turn, to count the board's interruptions
+    current.pieces = current.worked
+      ? [
+          ...mine.monsters.flatMap((card) => (card?.code ? [{ code: card.code, location: 4, materials: card.overlay?.length ?? 0 }] : [])),
+          ...mine.spells.flatMap((card) => (card?.code ? [{ code: card.code, location: 8, materials: 0 }] : [])),
+          ...mine.hand.flatMap((card) => (card.code ? [{ code: card.code, location: 2, materials: 0 }] : [])),
+          ...mine.grave.flatMap((card) => (card.code ? [{ code: card.code, location: 16, materials: 0 }] : [])),
+          ...mine.extra.flatMap((card) => (card.code ? [{ code: card.code, location: 64, materials: 0 }] : [])),
+        ]
+      : undefined;
+    setWorked(current.worked);
+    setAnalysing(current.worked ? current.id : null);
+    if (!current.worked) {
+      setWorkedNote(null);
+      const owner = decksRef.current.find((one) => one.id === current.deckId);
+      if (owner) changeDeck({ ...owner, routes: Object.fromEntries(Object.entries(owner.routes ?? {}).filter(([, route]) => route.testId !== current.id)) });
+    }
+    keep(current.deckId, { ...record, id: current.id, date: current.date, testOf: current.testOf, worked: current.worked, board: current.board, pieces: current.pieces, marks: current.marks });
+    if (current.pieces) void countBoard({ ...record, id: current.id, date: current.date }).then((counted) => counted?.send());
+  };
+  // going back: the duel is rebuilt from your choices up to the point asked for
+  const rewind = (to: "action" | "turn") => {
+    const current = lastRecord.current;
+    if (!current || !view) return;
+    const steps = current.steps;
+    let at = 0;
+    if (to === "action") {
+      // before your last action, and every choice that came with it
+      for (let index = steps.length - 1; index >= 0; index--)
+        if (steps[index].idle) {
+          at = index;
+          break;
+        }
+    } else {
+      // the start of this turn; if nothing was chosen in it yet, the start of the turn before
+      const turns = steps.map((step) => step.turn ?? 0);
+      const latest = turns.includes(view.turn) ? view.turn : Math.max(0, ...turns.filter((one) => one < view.turn));
+      at = Math.max(0, turns.findIndex((one) => one >= latest));
+    }
+    // the same test carries on: it isn't scored or saved as a separate replay. Going back below where you took over a
+    // replay makes those choices yours; a line saved from this test no longer stands once you go back from it.
+    if (test.current) {
+      test.current.from = Math.min(test.current.from, at);
+      // choke points marked after the point you went back to no longer happened
+      if (test.current.marks) test.current.marks = test.current.marks.filter((mark) => mark.step <= at);
+      if (test.current.worked) {
+        const owner = decksRef.current.find((one) => one.id === test.current!.deckId);
+        if (owner) changeDeck(withoutWorked(owner, test.current.id));
+        test.current.worked = false;
+        test.current.board = undefined;
+        test.current.pieces = undefined;
+        setWorked(false);
+      }
+    }
+    const saved: SavedTest = { ...current, id: test.current?.id ?? newId(), date: Date.now(), testOf: test.current?.testOf, worked: false, board: undefined, pieces: undefined };
+    if (at > 0) return watch(saved, at, true);
+    // back to the very start: the same hand, the same order, no animations to sit through
+    setRecord(null);
+    lastRecord.current = null;
+    post({ ...saved.options, type: "start" });
+  };
+  // save states: where the duel on screen is now, kept with the deck; loading one rebuilds it choice by choice
+  const saveState = () => {
+    const current = lastRecord.current;
+    const target = test.current && decks.find((one) => one.id === test.current!.deckId);
+    if (!current || !target || !view) return;
+    const state = { id: newId(), date: Date.now(), name: `Turn ${view.turn} · ${view.phase} · ${current.picks.length} choice${current.picks.length === 1 ? "" : "s"}`, record: current };
+    changeDeck({ ...target, saves: [state, ...(target.saves ?? [])].slice(0, 20) });
+    return state.name;
+  };
+  const loadState = (id: string) => {
+    const state = (test.current ? decks.find((one) => one.id === test.current!.deckId) : deck)?.saves?.find((one) => one.id === id);
+    if (state) watch({ ...state.record, id: newId(), date: Date.now() }, state.record.picks.length);
+  };
+  // a saved test as a video file: the worker replays it out of sight, the page draws and records every moment
+  const [video, setVideo] = useState<{ id: string; share: number } | null>(null);
+  const videoWaiting = useRef(new Map<string, (replay: { views: DuelView[]; marks: number[] }) => void>());
+  const replayViews = (saved: SavedTest, reveal = false) => {
+    const id = newId();
+    const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false };
+    return new Promise<{ views: DuelView[]; marks: number[] }>((resolve) => {
+      videoWaiting.current.set(id, resolve);
+      // the request's own type last: a saved duel's settings must never turn it into something else
+      post({ ...options, picks: saved.picks, reveal, type: "views", id });
+    });
+  };
+
+  // ---- the replay viewer: every play of a saved test, stepped through with every card shown ----
+  type Frame = { index: number; label: string; picks: number };
+  // fast: playing straight through, nothing described until paused; mini: the bar folded down to one line
+  const [viewing, setViewing] = useState<{ test: SavedTest; views: DuelView[]; frames: Frame[]; at: number; back: boolean; playing: boolean; fast?: boolean; mini?: boolean } | null>(null);
+  // the phone's back button steps back through the app (replay, duel, editor, a section) and only leaves it from the menu
+  const goBack = useRef<() => boolean>(() => false);
+  goBack.current = () => {
+    if (viewing) return setViewing(null), true;
+    if (view && duelOverlay.close()) return true;
+    if (view) return finishTest(), skip(), setReplay(null), setView(null), true;
+    if (screen === "test" && picking) return setPicking(false), true;
+    if (screen === "test" && testOverlay.close()) return true;
+    if (editing) return closeEditor(), true;
+    if (screen !== "menu") return setScreen("menu"), true;
+    return false;
+  };
+  useEffect(() => {
+    history.pushState({ rka: true }, "");
+    const onBack = () => {
+      if (goBack.current()) history.pushState({ rka: true }, "");
+    };
+    window.addEventListener("popstate", onBack);
+    return () => window.removeEventListener("popstate", onBack);
+  }, []);
+  // what matters on the opponent's turn, from a view: field (with Xyz Materials), hand, GY
+  const piecesOf = (shown: DuelView) => {
+    const mine = shown.players[0];
+    return [
+      ...mine.monsters.flatMap((card) => (card?.code ? [{ code: card.code, location: 4, materials: card.overlay?.length ?? 0 }] : [])),
+      ...mine.spells.flatMap((card) => (card?.code ? [{ code: card.code, location: 8, materials: 0 }] : [])),
+      ...mine.hand.flatMap((card) => (card.code ? [{ code: card.code, location: 2, materials: 0 }] : [])),
+      ...mine.grave.flatMap((card) => (card.code ? [{ code: card.code, location: 16, materials: 0 }] : [])),
+      // for rank-ups on their turn (Eternal Galaxy into Number 90)
+      ...mine.extra.flatMap((card) => (card.code ? [{ code: card.code, location: 64, materials: 0 }] : [])),
+    ];
+  };
+  // a saved test counted: replayed out of sight for its end board and for the moment of your 5th summon (Nibiru)
+  const countBoard = async (saved: SavedTest, views?: DuelView[]) => {
+    const all = views ?? (await replayViews(saved)).views;
+    const last = all.at(-1);
+    if (!last) return null;
+    let summons = 0;
+    let fifth: ReturnType<typeof piecesOf> | undefined;
+    for (const one of all) {
+      summons += one.events.filter((event) => event.kind === "summon" && event.controller === 0).length;
+      if (summons >= 5 && !fifth) fifth = piecesOf(one);
+    }
+    const pieces = piecesOf(last);
+    const board = [...last.players[0].monsters, ...last.players[0].spells].flatMap((card) => (card?.code ? [card.code] : []));
+    // sent once the test is kept, so the answer finds it
+    const send = () => post({ type: "interruptions", id: saved.id, pieces, startHand: saved.startHand, used: usedIn(saved.steps), summons, fifth });
+    return { last, pieces, board, send };
+  };
+  // the effects a test activated, for what they leave in place on the opponent's turn
+  const usedIn = (steps: { text: string; idle: boolean; code?: number }[]) => steps.flatMap((step) => (step.idle && step.code && /^Activate/.test(step.text) ? [{ code: step.code }] : []));
+  // mark a saved test as working (or not) after the fact: its end is the board it worked to
+  // a test no longer marked as working: its start's line goes, and its result is scored by its interruptions again
+  const withoutWorked = (target: SavedDeck, id: string): SavedDeck => {
+    const goal = target.fullAt ?? 3;
+    const routes = Object.fromEntries(Object.entries(target.routes ?? {}).filter(([, route]) => route.testId !== id));
+    const results = (target.results ?? []).map((one) => (one.id === id ? scoredByCount(one, goal) : one));
+    return { ...target, routes, results };
+  };
+  const markTestWorked = async (saved: SavedTest, views?: DuelView[]) => {
+    const target = decks.find((one) => one.tests?.some((test) => test.id === saved.id)) ?? deck;
+    if (!target) return;
+    if (saved.worked) {
+      const without = withoutWorked(target, saved.id);
+      changeDeck({ ...without, tests: (without.tests ?? []).map((test) => (test.id === saved.id ? { ...test, worked: false, board: undefined, pieces: undefined, interruptions: undefined } : test)) });
+      return;
+    }
+    setAnalysing(saved.id);
+    const counted = await countBoard(saved, views);
+    if (!counted) return setAnalysing(null);
+    const { pieces, board } = counted;
+    const latest = decksRef.current.find((one) => one.id === target.id) ?? target;
+    const known = latest.tests?.some((test) => test.id === saved.id);
+    const marked = { ...saved, worked: true, board, pieces };
+    changeDeck({ ...latest, tests: known ? (latest.tests ?? []).map((test) => (test.id === saved.id ? marked : test)) : keepTest(latest.tests, marked) });
+    window.setTimeout(counted.send, 0);
+  };
+  const [loadingReplay, setLoadingReplay] = useState(false);
+  // worked tests saved before boards were counted: replayed out of sight, one at a time, and counted
+  const counting = useRef(new Set<string>());
+  useEffect(() => {
+    if (screen !== "replays" || !deck || !ready) return;
+    const waiting = (deck.tests ?? []).filter((one) => one.worked && (!one.interruptions || one.counted !== COUNTING) && !counting.current.has(one.id));
+    if (!waiting.length) return;
+    void (async () => {
+      for (const saved of waiting) {
+        counting.current.add(saved.id);
+        const counted = await countBoard(saved);
+        if (!counted) continue;
+        const { pieces, board } = counted;
+        setDecks((all) => all.map((one) => (one.tests?.some((test) => test.id === saved.id) ? { ...one, tests: one.tests.map((test) => (test.id === saved.id ? { ...test, pieces, board: test.board?.length ? test.board : board } : test)) } : one)));
+        counted.send();
+      }
+    })();
+  }, [screen, deck, ready]);
+  const describeEvents = (events: DuelView["events"]) => {
+    const parts = events.flatMap((event) => {
+      if (event.kind === "summon") return [`Summoned ${event.name}`];
+      if (event.kind === "activate") return [`Activated ${event.name}${event.text ? `: ${event.text}` : ""}`];
+      if (event.kind === "added") return [`Added ${event.name} to the hand`];
+      if (event.kind === "negated") return [`${event.name} negated`];
+      if (event.kind === "attack") return [`${event.name || "a monster"} attacks${event.target ? "" : " directly"}`];
+      return [];
+    });
+    return parts.join(" · ");
+  };
+  const openViewer = async (saved: SavedTest) => {
+    setLoadingReplay(true);
+    try {
+      const { views, marks } = await replayViews(saved, true);
+      // a step per play of yours (declining to chain, zones and positions are part of the play around them), then one per
+      // action of the opponent's that followed it, then your next turn when it comes back to you
+      const minor = (text: string) => /^(Don't chain|Cancel|Select a zone|Select the battle position|Confirm)/.test(text) || /^(Yes|No)$/.test(text) || /: (Yes|No)$/.test(text);
+      const frames: Frame[] = [{ index: Math.max(0, marks[0] - 1), label: "Start of the duel", picks: 0 }];
+      let pending = "";
+      for (let pick = 0; pick + 1 < marks.length; pick++) {
+        const first = marks[pick], last = marks[pick + 1] - 1;
+        // a test you played names each choice; an engine line's steps don't line up with its choices one to one, so
+        // its plays are described by what happened
+        const aligned = saved.steps.length === saved.picks.length;
+        const happened = describeEvents(views.slice(first, last + 1).filter((view) => view.turnPlayer === 0).flatMap((view) => view.events));
+        const text = aligned ? saved.steps[pick]?.text ?? `Play ${pick + 1}` : happened || "Don't chain";
+        // your part: the views of this play still on your turn
+        let mine = first - 1;
+        while (mine + 1 <= last && views[mine + 1].turnPlayer === 0) mine++;
+        if (!minor(text)) pending = text;
+        if (pending && (mine >= first || pick + 2 === marks.length || views[last].turnPlayer !== 0)) {
+          frames.push({ index: Math.max(first, Math.min(mine, last)), label: pending, picks: pick + 1 });
+          pending = "";
+        } else if (!minor(text) || mine < last) {
+          // nothing to show apart from the choice itself: it shows with the next step
+        }
+        // the opponent's actions that followed
+        let theirs = false;
+        for (let index = Math.max(first, mine + 1); index <= last; index++) {
+          const view = views[index];
+          if (view.turnPlayer !== 1) continue;
+          theirs = true;
+          const said = describeEvents(view.events);
+          if (said) frames.push({ index, label: `Opponent: ${said}`, picks: pick + 1 });
+        }
+        // back to you after their turn
+        if (theirs && views[last].turnPlayer === 0) frames.push({ index: last, label: `Your turn ${views[last].turn}`, picks: pick + 1 });
+      }
+      if (pending) frames.push({ index: marks[marks.length - 1] - 1, label: pending, picks: marks.length - 1 });
+      setViewing({ test: saved, views, frames, at: 0, back: false, playing: false });
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setLoadingReplay(false);
+    }
+  };
+  const viewTo = (at: number, playing?: boolean) =>
+    setViewing((now) => (now ? { ...now, at: Math.max(0, Math.min(now.frames.length - 1, at)), back: at < now.at, playing: playing ?? now.playing } : now));
+  // playing: the next step once this one's animations have been seen
+  useEffect(() => {
+    if (!viewing?.playing) return;
+    if (viewing.at >= viewing.frames.length - 1) return setViewing({ ...viewing, playing: false, fast: false });
+    const shown = viewing.views[viewing.frames[viewing.at].index];
+    // fast forward: a play every tenth of a second, nothing described or animated until paused
+    const wait = window.setTimeout(() => viewTo(viewing.at + 1), viewing.fast ? 110 : Math.max(800, cueTime(shown?.events ?? []) + 350));
+    return () => window.clearTimeout(wait);
+  }, [viewing]);
+  // a link to this test's replay, shared or copied
+  const shareReplay = async (saved: SavedTest) => {
+    try {
+      const url = await replayLink(saved);
+      if (navigator.share) await navigator.share({ title: "RKAPro replay", url });
+      else {
+        await navigator.clipboard.writeText(url);
+        setSyncNote("Replay link copied");
+        setError("Replay link copied: anyone who opens it watches this test in their browser.");
+      }
+    } catch (problem) {
+      if (!(problem instanceof DOMException && problem.name === "AbortError")) setError(problem instanceof Error ? problem.message : String(problem));
+    }
+  };
+  // opened from a shared link: watch it as soon as the cards are loaded
+  useEffect(() => {
+    if (!ready || !location.hash.startsWith("#replay=")) return;
+    void readReplayLink(location.hash)
+      .then((shared) => {
+        history.replaceState(null, "", location.pathname);
+        if (shared) void openViewer({ ...shared, id: newId(), date: Date.now() });
+      })
+      .catch(() => setError("This replay link is damaged or incomplete."));
+  }, [ready]);
+  const saveVideo = async (saved: SavedTest) => {
+    setVideo({ id: saved.id, share: 0 });
+    try {
+      const { views } = await replayViews(saved);
+      const { blob, extension } = await recordVideo(views, (share) => setVideo({ id: saved.id, share }));
+      const url = URL.createObjectURL(blob);
+      const name = `${deck?.name ?? "RKAPro"} ${new Date(saved.date).toISOString().slice(0, 16).replace("T", " ").replace(":", "-")}.${extension}`;
+      Object.assign(document.createElement("a"), { href: url, download: name }).click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setVideo(null);
+    }
+  };
+  const watch = (saved: SavedTest, from = 0, same = false, play = false) => {
+    setError("");
+    if (!view) setLoadingDuel(true);
+    if (same) setRecord(null);
+    else newTest(saved.testOf, from > 0 || play ? from : saved.picks.length);
+    window.clearTimeout(timer.current);
+    timer.current = 0;
+    queue.current = [];
+    // a test saved without an opponent (or a line the route search found) gets today's opponent, without hand traps
+    // on your turn, so your recorded choices still play the same and you can go on into their turn
+    const options = saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false };
+    // "from": jump straight to that choice and carry on from there yourself; otherwise watch it play
+    lastRecord.current = null;
+    if (from > 0 || play) post({ ...options, picks: saved.picks.slice(0, from), type: "jump" });
+    else {
+      setReplay({ picks: saved.picks, at: 0 });
+      post({ ...options, type: "start" });
+    }
+  };
+  // the next recorded choice, once the prompt it answers is on screen and the animations before it have played
+  useEffect(() => {
+    if (!replay || !view?.prompt || queue.current.length || timer.current) return;
+    // played to the end: the test on screen is that line, so "This worked" can keep it
+    if (replay.at >= replay.picks.length) return setReplay(null), setRecord(lastRecord.current);
+    const wait = window.setTimeout(() => {
+      post({ type: "answer", picks: replay.picks[replay.at] });
+      setReplay({ ...replay, at: replay.at + 1 });
+    }, 450);
+    return () => window.clearTimeout(wait);
+  }, [view, replay]);
+
+  const startedWith = useRef<{ chosen: number[] } | undefined>(undefined);
+  const start = useCallback((test?: { chosen: number[] }) => {
+    if (!deck) return;
+    setLoadingDuel(true);
+    setReplay(null);
+    newTest(test ? test.chosen[0] : undefined);
+    // a start's ▶ deals its own hand (and New hand deals it again); the screen's own settings stay as you left them
+    startedWith.current = test;
+    // a start's ▶ deals exactly the cards it needs (no filler)
+    const use = test ? { hand: test.chosen.length, chosen: test.chosen, ignoreHandTraps: true } : { hand, chosen, ignoreHandTraps };
+    setError("");
+    // a test started from the editor returns to it when you leave the duel
+    // whatever was still being shown from the last hand is dropped
+    window.clearTimeout(timer.current);
+    timer.current = 0;
+    queue.current = [];
+    lastRecord.current = null;
+    post({ type: "start", main: shuffled(deck.main), extra: deck.extra, ...use, ...opponentDeck(), seed: Math.floor(Math.random() * 2 ** 31) });
+  }, [deck, hand, chosen, ignoreHandTraps, opponent, opponentHandTraps, fixedTraps, goSecond, decks]);
+
+  // a line whose hand trap check doesn't start from the board it reached (checked before replays were fixed, or filed
+  // under another card since) is checked again, once
+  const rechecked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!ready || !deck?.routes || choking) return;
+    const stale = Object.entries(deck.routes).filter(([key, route]) => {
+      const id = `${deck.id}:${key}:${route.testId ?? route.date}`;
+      if (route.source !== "replay" || route.unreplayable || !route.keys?.length || !route.record?.startHand?.length || rechecked.current.has(id)) return false;
+      const mismatch = !route.chokes || route.chokes.some((choke) => choke.clean !== (route.interruptions?.length ?? 0));
+      if (mismatch) rechecked.current.add(id);
+      return mismatch;
+    });
+    if (stale.length) checkChokes(deck, stale.map(([key, route]) => ({ code: Number(key), hand: route.record.startHand })));
+  }, [ready, deck, choking]);
+
+  const requestText = useCallback(
+    (code: number) => {
+      if (!texts.has(code)) post({ type: "text", code });
+    },
+    [texts],
+  );
+
+  if (viewing) {
+    const frame = viewing.frames[viewing.at];
+    const previous = viewing.frames[viewing.at - 1];
+    // going forward shows what happened since the last step; going back or jumping shows the position only
+    // fast forward keeps the small animations on the board (summons, attacks) and skips the big ones
+    const between = !viewing.back && previous ? viewing.views.slice(previous.index + 1, frame.index + 1).flatMap((one) => one.events) : [];
+    const events = viewing.fast && viewing.playing ? between.filter((event) => event.kind === "summon" || event.kind === "attack") : between;
+    const shown = { ...viewing.views[frame.index], prompt: null, events };
+    const undone = viewing.back ? viewing.frames[viewing.at + 1]?.label : null;
+    const fastForward = viewing.fast && viewing.playing;
+    const caption = fastForward ? <span className="ff-blink" aria-label="Fast forwarding">⏩</span> : undone ? `Undone: ${undone}` : frame.label;
+    const saved = viewing.test.id && decks.some((one) => one.tests?.some((test) => test.id === viewing.test.id)) ? (deck?.tests ?? []).find((test) => test.id === viewing.test.id) : undefined;
+    const isWorked = !!(saved ?? viewing.test).worked;
+    const where = `Turn ${shown.turn} · ${shown.turnPlayer === 0 ? "You" : "Opponent"} · ${shown.phase}`;
+    // the caption strip of the saved videos: what just happened, and where in the duel
+    const strip = (
+      <div className="viewer-strip">
+        <p className="viewer-caption">{caption}</p>
+        {!fastForward && (
+          <small>
+            {where} · step {viewing.at} of {viewing.frames.length - 1}
+          </small>
+        )}
+      </div>
+    );
+    const playButton = (
+      <button className="button small primary" onClick={() => setViewing({ ...viewing, playing: !viewing.playing, fast: false, back: false })} aria-label={viewing.playing ? "Pause" : "Play"}>
+        {viewing.playing ? "⏸" : "▶︎"}
+      </button>
+    );
+    const controls = viewing.mini ? (
+      <div className="viewer mini">
+        {strip}
+        {playButton}
+        <button className="button small" onClick={() => setViewing({ ...viewing, mini: false })} aria-label="Show the controls">
+          ⌃
+        </button>
+      </div>
+    ) : (
+      <div className="viewer">
+        {strip}
+        <input className="viewer-scrub" type="range" min={0} max={viewing.frames.length - 1} value={viewing.at} onChange={(event) => viewTo(Number(event.target.value), false)} aria-label="Step" />
+        <div className="viewer-buttons">
+          <button className="button small" onClick={() => viewTo(0, false)} aria-label="Start">⏮</button>
+          <button className="button small" onClick={() => viewTo(viewing.at - 1, false)} aria-label="Back a play">◀</button>
+          {playButton}
+          <button className="button small" onClick={() => viewTo(viewing.at + 1, false)} aria-label="Forward a play">▶</button>
+          <button className={`button small ${viewing.fast && viewing.playing ? "on" : ""}`} onClick={() => setViewing({ ...viewing, playing: !(viewing.fast && viewing.playing), fast: !(viewing.fast && viewing.playing), back: false })} aria-label="Fast forward">
+            ⏩
+          </button>
+          <button className="button small" onClick={() => viewTo(viewing.frames.length - 1, false)} aria-label="End">⏭</button>
+          <button className="button small" onClick={() => setViewing({ ...viewing, mini: true })} aria-label="Minimise">
+            ⌄
+          </button>
+        </div>
+      </div>
+    );
+    // marking it as working and playing on from here sit in the menu
+    const viewerMenu = (
+      <>
+        <button
+          className={`button ${isWorked ? "on" : ""}`}
+          onClick={async () => {
+            await markTestWorked({ ...viewing.test, ...(saved ?? {}) }, viewing.views.slice(0, viewing.frames[viewing.frames.length - 1].index + 1));
+            setViewing((now) => now && { ...now, test: { ...now.test, worked: !isWorked } });
+          }}
+        >
+          {isWorked ? "✓ Worked" : "Mark as working"}
+        </button>
+        <button
+          className="button"
+          onClick={() => {
+            const { test: saved } = viewing;
+            setViewing(null);
+            if (frame.picks > 0) watch(saved, frame.picks);
+            else {
+              newTest(saved.testOf);
+              post({ ...(saved.options.opponent ? saved.options : { ...saved.options, ...opponentDeck(), opponentHandTraps: false, goSecond: false }), type: "start" });
+            }
+          }}
+        >
+          Play from here
+        </button>
+      </>
+    );
+    return (
+      <>
+      {analysingNote}
+      <Duel
+        view={shown}
+        texts={texts}
+        requestText={requestText}
+        answer={() => {}}
+        restart={() => {}}
+        leave={() => setViewing(null)}
+        skip={() => {}}
+        worked={false}
+        replaying={null}
+        states={[]}
+        onSaveState={() => undefined}
+        onLoadState={() => {}}
+        viewer={controls}
+        viewerMenu={viewerMenu}
+      />
+      </>
+    );
+  }
+
+  if (view) {
+    return (
+      <>
+        {error && (
+          <p className="error toast" onClick={() => setError("")}>
+            {error}
+          </p>
+        )}
+        {analysingNote}
+        <Duel
+          view={view}
+          texts={texts}
+          requestText={requestText}
+          answer={(picks) => {
+            // a choice of yours while a saved test plays: you take over from here, as a new test
+            if (replayRef.current) {
+              setReplay(null);
+              newTest(test.current?.testOf, replayRef.current.at);
+            }
+            post({ type: "answer", picks });
+          }}
+          restart={() => start(startedWith.current)}
+          leave={() => (finishTest(), skip(), setReplay(null), setView(null))}
+          skip={skip}
+          worked={worked}
+          onWorked={record && !replay ? markWorked : undefined}
+          onMark={record && !replay ? () => { markWaiting.current = Date.now(); post({ type: "moment", id: markWaiting.current }); } : undefined}
+          marks={marks}
+          markNote={markNote}
+          workedText={(() => {
+            const note = workedNote && workedNote.testId === test.current?.id ? workedNote : null;
+            if (!note) return "Saved, counting…";
+            const name = note.start ? (cards.get(note.start)?.name ?? texts.get(note.start)?.name ?? "This start") : "";
+            const n = `${note.count} interruption${note.count === 1 ? "" : "s"}`;
+            return note.kind === "line" ? `${name}'s line · ${n}` : note.kind === "kept" ? `Saved · ${name} keeps its ${note.best}-interruption line` : `Saved · ${n} · no starter in this hand`;
+          })()}
+          replaying={replay ? { at: replay.at, of: replay.picks.length, stop: () => (setReplay(null), newTest(test.current?.testOf, replay.at)) } : null}
+          states={(decks.find((one) => one.id === test.current?.deckId) ?? deck)?.saves ?? []}
+          onSaveState={saveState}
+          onLoadState={loadState}
+          onRewind={replay ? undefined : rewind}
+        />
+      </>
+    );
+  }
+
+  if (editing && deck) {
+    return (
+      <DeckEditor
+        deck={deck}
+        cards={cards}
+        texts={texts}
+        banlist={banlist}
+        requestInfo={(codes) => void info(codes)}
+        traits={traits}
+        cutResult={cutResult && cutResult.deckId === deck.id ? cutResult : null}
+        onCutTest={(code) => cutTest(deck, code)}
+        requestTraits={(codes) => post({ type: "traits", codes })}
+        requestText={requestText}
+        search={search}
+        onChange={changeDeck}
+        onClose={closeEditor}
+        onTest={(chosen) => start(chosen ? { chosen } : undefined)}
+        engineProgress={probe && probe.deckId === deck.id ? probe : null}
+        routing={routing && routing.deckId === deck.id ? { code: routing.code, tried: routing.tried, waiting: routing.queue.map((one) => one.code) } : null}
+        choking={choking && choking.deckId === deck.id ? { code: choking.code, waiting: choking.queue.map((one) => one.code) } : null}
+        onFindLines={(starts) => findLines(deck, starts)}
+        onCheckChokes={(starts) => checkChokes(deck, starts)}
+        onWatchLine={(line, code) => openViewer({ ...line, id: newId(), date: Date.now(), testOf: code })}
+        onCheck={() => checkDeck(deck)}
+      />
+    );
+  }
+
+  const nameOf = (code: number) => texts.get(code)?.name ?? cards.get(code)?.name ?? `#${code}`;
+  // the first-turn combo odds the Optimiser last worked out for this deck
+  const menuSummary = (() => {
+    if (!deck || screen !== "menu") return null;
+    try {
+      const value = localStorage.getItem(`rka.summary.${deck.id}`);
+      return value ? (JSON.parse(value) as { first: number; total: number; nonEngine: number; tally: Record<string, number> }) : null;
+    } catch {
+      return null;
+    }
+  })();
+  const menuOdds = (() => {
+    if (!deck || screen !== "menu") return null;
+    try {
+      const value = localStorage.getItem(`rka.odds.${deck.id}`);
+      return value === null ? null : Number(value);
+    } catch {
+      return null;
+    }
+  })();
+  return (
+    <main className={`start ${screen === "menu" ? "menu-screen" : ""}`}>
+      {analysingNote}
+      {loadingDuel && (
+        <div className="duel-loading" role="status" aria-live="polite">
+          <span className="duel-loading-spin" aria-hidden="true" />
+          <span>
+            <b>Loading duel</b>
+            <small>Setting up the cards…</small>
+          </span>
+        </div>
+      )}
+      <header>
+        <h1 className="logo">
+          RKA<em>PRO</em>
+        </h1>
+        <p className="status">{status}</p>
+        {screen === "menu" && (
+          <button className="icon-button settings-button" onClick={() => setScreen("settings")} aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+            </svg>
+          </button>
+        )}
+      </header>
+      {error && (
+        <p className="error" onClick={() => setError("")}>
+          {error}
+        </p>
+      )}
+
+      {screen === "menu" && <span className="version">{__APP_VERSION__}</span>}
+      {screen === "menu" && (
+        <nav className="main-menu">
+          {deck ? (
+            <button className="deck-card" disabled={!ready} onClick={() => openEditor(false)} aria-label={`Edit "${deck.name}"`}>
+              <span className="deck-cover">{(deck.extra[0] ?? deck.main[0]) ? <CardArt code={deck.extra[0] ?? deck.main[0]} /> : null}</span>
+              <span className="deck-card-text">
+                <b>{deck.name}</b>
+                <span className="deck-counts" aria-label={`${deck.main.length} Main, ${deck.extra.length} Extra, ${deck.side.length} Side`}>
+                  {deck.main.length} · {deck.extra.length} · {deck.side.length}
+                </span>
+              </span>
+              <svg className="deck-card-edit" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" />
+              </svg>
+            </button>
+          ) : (
+            <button className="deck-card" onClick={() => setScreen("decks")}>
+              <b>Choose or import a deck</b>
+            </button>
+          )}
+          {/* the other decks: tap one to switch to it, anywhere else for the full list */}
+          {deck && (
+            <div className="decks-strip" role="button" tabIndex={0} onClick={() => setScreen("decks")} onKeyDown={(event) => event.key === "Enter" && setScreen("decks")} aria-label="All decks">
+              <span className="decks-strip-label">DECKS</span>
+              <span className="decks-strip-cards">
+                {decks
+                  .filter((one) => one.id !== deck.id)
+                  .slice(0, 4)
+                  .map((one) => (
+                    <button key={one.id} className="decks-strip-deck" onClick={(event) => (event.stopPropagation(), pickDeck(one.id))} aria-label={`Switch to "${one.name}"`}>
+                      <span className="hand-mini">{(one.extra[0] ?? one.main[0]) ? <CardArt code={one.extra[0] ?? one.main[0]} /> : null}</span>
+                      <small>{one.name}</small>
+                    </button>
+                  ))}
+                {decks.length < 2 && <small className="decks-strip-none">New or import</small>}
+              </span>
+              <span className="decks-strip-more" aria-hidden="true">›</span>
+            </div>
+          )}
+          <button className="menu-tile optimise-tile" disabled={!ready || !deck} onClick={() => openEditor(true)}>
+            <span className="optimise-head">
+              <span>
+                <b>Optimise</b>
+                <span className="tile-number">{menuSummary ? <>{(menuSummary.first * 100).toFixed(1)}<small>%</small></> : <small className="tile-hint">Open to work out</small>}</span>
+                {menuSummary && <small className="optimise-sub">going first, opens a combo</small>}
+              </span>
+              {menuSummary && (
+                <span className="engine-split" aria-label={`Engine ${menuSummary.total - menuSummary.nonEngine}, non-engine ${menuSummary.nonEngine}`}>
+                  <span><b>{menuSummary.total - menuSummary.nonEngine}</b><small>engine</small></span>
+                  <span><b>{menuSummary.nonEngine}</b><small>non-engine</small></span>
+                </span>
+              )}
+            </span>
+            {menuSummary && <RoleCounts tally={menuSummary.tally} />}
+          </button>
+          <div className="menu-grid">
+            <button className="menu-tile" disabled={!deck} onClick={() => setScreen("replays")}>
+              <b>Replays</b>
+              <span className="tile-number">
+                {deck?.tests?.length ?? 0}
+                {Object.keys(deck?.routes ?? {}).length > 0 && <small className="good">{Object.keys(deck?.routes ?? {}).length} working</small>}
+              </span>
+            </button>
+            <button className="menu-tile" onClick={() => setScreen("sync")}>
+              <b>Sync</b>
+              <svg className="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12a8 8 0 0 1 14-5.3M20 4v5h-5M20 12a8 8 0 0 1-14 5.3M4 20v-5h5" />
+              </svg>
+            </button>
+          </div>
+          <div className="menu-dock">
+            <button className="menu-tile primary" disabled={!ready || !deck?.main.length} onClick={() => setScreen("test")}>
+              <b>Test</b>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 4v16l13-8z" />
+              </svg>
+            </button>
+          </div>
+        </nav>
+      )}
+
+      {screen === "decks" && (
+        <div className="decks-screen">
+          <div className="screen-head">
+            <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
+              ‹
+            </button>
+            <h2>Decks</h2>
+          </div>
+          <div className="deck-actions">
+            <button className="button" onClick={() => (addDeck({ name: "New deck", main: [], extra: [], side: [] }), setEditing(true))} disabled={!ready}>
+              + New
+            </button>
+            <label className="button">
+              Open file
+              <input type="file" accept=".ydk,.txt" hidden onChange={async (event) => { const file = event.target.files?.[0]; if (file) await importText(await file.text(), file.name); event.target.value = ""; }} />
+            </label>
+            <button className={`button ${pasting ? "on" : ""}`} onClick={() => setPasting(!pasting)}>
+              Paste
+            </button>
+          </div>
+          {pasting && (
+            <div className="paste">
+              <textarea value={paste} onChange={(event) => setPaste(event.target.value)} placeholder={"A card list (\"Main: 3 Mulcharmy Fuwalos\", \"3x Ash Blossom\"), a ydke:// link, a YGO Omega deck code, or the text of a .ydk file"} rows={3} />
+              <button className="button primary" disabled={!paste.trim() || !ready} onClick={async () => { await importText(paste); setPaste(""); setPasting(false); }}>
+                Import
+              </button>
+            </div>
+          )}
+          {!decks.length && !pasting && <p className="muted">No decks yet: + New, open a .ydk file, or paste a ydke:// link or YGO Omega code.</p>}
+          <div className="deck-list-cards">
+            {decks.map((one) => (
+              <div key={one.id} className={`deck-item ${one.id === deck?.id ? "on" : ""}`}>
+                <button className="deck-card" onClick={() => (pickDeck(one.id), setScreen("menu"))} aria-label={`Use "${one.name}"`}>
+                  <span className="deck-cover">{(one.extra[0] ?? one.main[0]) ? <CardArt code={one.extra[0] ?? one.main[0]} /> : null}</span>
+                  <span className="deck-card-text">
+                    <b>{one.name}</b>
+                    <span className="deck-counts">
+                      {one.main.length} · {one.extra.length} · {one.side.length}
+                      {one.id === deck?.id && <em className="deck-current"> · in use</em>}
+                    </span>
+                  </span>
+                </button>
+                <button className="icon-button" onClick={() => setDeckMenu(deckMenu === one.id ? null : one.id)} aria-label={`More for ${one.name}`} aria-expanded={deckMenu === one.id}>
+                  ⋯
+                </button>
+                {deckMenu === one.id && (
+                  <div className="deck-more">
+                    <button className="button danger" onClick={() => { if (confirm(`Delete "${one.name}"?`)) { setDecks((all) => all.filter((other) => other.id !== one.id)); setDeckMenu(null); } }}>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {screen === "settings" && (
+        <SettingsScreen
+          banlistName={banlist.name}
+          deckName={deck?.name}
+          canInstall={canInstall}
+          onInstall={async () => {
+            await installOffer?.prompt();
+            installOffer = null;
+            setCanInstall(false);
+          }}
+          onBanlist={(file) => post({ type: "banlist", file })}
+          onClearDeck={
+            deck
+              ? () => {
+                  if (!window.confirm(`Clear every replay, working line and result saved for "${deck.name}"? The deck itself stays.`)) return;
+                  changeDeck({ ...deck, tests: [], routes: {}, results: [] });
+                }
+              : undefined
+          }
+          onResetAll={() => {
+            if (!window.confirm("Reset everything? All decks, replays, lines and settings on this device are deleted. A backup from Sync can bring them back.")) return;
+            freezeDecks();
+            try {
+              localStorage.clear();
+              sessionStorage.clear();
+            } catch {
+              // nothing more can be cleared
+            }
+            window.location.reload();
+          }}
+          onBack={() => setScreen("menu")}
+        />
+      )}
+
+      {screen === "sync" && (
+        <>
+          <div className="screen-head">
+            <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
+              ‹
+            </button>
+            <h2>Sync</h2>
+          </div>
+      <details className="box sync" open>
+        <summary>
+          <h2>Sync</h2>
+          {syncNote && <span className="muted">{syncNote}</span>}
+        </summary>
+        <div className="row wrap">
+          <button className="button small" onClick={downloadBackup}>
+            Back up everything
+          </button>
+          <label className="button small">
+            Restore a backup
+            <input type="file" accept=".json" hidden onChange={async (event) => { const file = event.target.files?.[0]; if (file) try { restore(await file.text()); } catch (problem) { failed(problem); } event.target.value = ""; }} />
+          </label>
+        </div>
+        <p className="muted">One file with your decks and everything learned about them (tags, tests, lines, save states). Restoring merges it in: the newer copy of each deck wins.</p>
+        {canLinkFolder() ? (
+          <>
+            <div className="row wrap">
+              <button className="button small" onClick={() => syncFolder()}>
+                {folderName ? `Sync "${folderName}"` : "Link a deck folder"}
+              </button>
+              {folderName && (
+                <>
+                  <button className="button small ghost" onClick={() => syncFolder(true)}>
+                    Change folder
+                  </button>
+                  <button className="button small ghost" onClick={() => (unlinkFolder(), setFolderName(null))}>
+                    Unlink
+                  </button>
+                </>
+              )}
+            </div>
+            <p className="muted">A folder of .ydk files, like YGO Omega's or EDOPro's deck folder: its decks come in, and decks you change here are written back as .ydk.</p>
+          </>
+        ) : (
+          <>
+            <label className="button small">
+              Open several deck files
+              <input type="file" accept=".ydk,.txt" multiple hidden onChange={async (event) => { if (event.target.files) await openMany(event.target.files); event.target.value = ""; }} />
+            </label>
+            <p className="muted">Linking a whole deck folder works in Chrome or Edge on a computer. Here, pick several .ydk files at once.</p>
+          </>
+        )}
+        <div className="drive">
+          <h3 className="section-label">GOOGLE DRIVE</h3>
+          {!driveReady() ? (
+            <details className="drive-setup">
+              <summary>Needs a one-time setup for this site</summary>
+              <ol>
+                <li>Google Cloud console › APIs &amp; Services: enable the Google Drive API.</li>
+                <li>OAuth consent screen: External, scope drive.appdata, add yourself as a test user.</li>
+                <li>Credentials › Create OAuth client ID › Web application, authorised JavaScript origin https://ualam677.github.io</li>
+                <li>GitHub repository › Settings › Secrets and variables › Actions › Variables: add VITE_GOOGLE_CLIENT_ID with that ID, then re-run the Web build.</li>
+              </ol>
+            </details>
+          ) : !driveIn ? (
+            <button className="button drive-sign-in" onClick={async () => { try { await driveSignIn(); setDriveIn(true); note("Signed in to Google Drive"); } catch (problem) { failed(problem); } }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.7 3h8.6l5.2 9-4.3 7.5H6.8L2.5 12zM7.7 3l8.6 15M16.3 3 7.7 18M2.5 12h19" /></svg>
+              Sign in with Google
+            </button>
+          ) : (
+            <div className="row wrap">
+              <span className="drive-on">✓ Signed in</span>
+              <button className="button" onClick={async () => { try { await driveUpload(JSON.stringify(makeBackup())); note("Saved to Google Drive"); } catch (problem) { failed(problem); setDriveIn(driveSignedIn()); } }}>
+                Save to Drive
+              </button>
+              <button className="button" onClick={async () => { try { const text = await driveDownload(); if (text) restore(text); else note("Nothing saved in Google Drive yet"); } catch (problem) { failed(problem); setDriveIn(driveSignedIn()); } }}>
+                Load from Drive
+              </button>
+            </div>
+          )}
+        </div>
+      </details>
+        </>
+      )}
+
+      {screen === "test" && deck && (
+        <div className="test-screen">
+          <div className="screen-head">
+            <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
+              ‹
+            </button>
+            <h2>Test</h2>
+          </div>
+          <Optimiser
+            only="lines"
+            setup={
+              <>
+                <Stepper label="HAND" value={hand} min={1} max={6} onChange={pickHand} />
+                <button className={`setup-toggle ${ignoreHandTraps ? "" : "on"}`} onClick={() => setIgnoreHandTraps(!ignoreHandTraps)} title="Off: on your turn, hand traps in your own hand never ask to be chained, so a combo test is not interrupted by Ash or Fuwalos. On the opponent's turn they always can." aria-pressed={!ignoreHandTraps}>
+                  MY ✋ {ignoreHandTraps ? "SKIP" : "CHAIN"}
+                </button>
+              </>
+            }
+            play={
+              picking ? (
+                <section className="hand-picker">
+                  <div className="slots">
+                    {Array.from({ length: hand }, (_, slot) => {
+                      const code = chosen[slot];
+                      return code ? (
+                        <button key={slot} className="slot filled" onClick={() => unchoose(slot)} aria-label={`Remove ${nameOf(code)}`}>
+                          <CardArt code={code} />
+                          <span className="slot-name">{nameOf(code)}</span>
+                        </button>
+                      ) : (
+                        <span key={slot} className="slot">
+                          ?
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <div className="pick-grid">
+                    {unique.map((code) => {
+                      const left = copies(code) - picked(code);
+                      return (
+                        <button key={code} className="pick-card" disabled={left === 0 || chosen.length >= hand} onClick={() => choose(code)} aria-label={`${nameOf(code)}, ${left} left`}>
+                          <span className="pick-art">
+                            <CardArt code={code} />
+                            <b>×{left}</b>
+                          </span>
+                          <span className="pick-name">{nameOf(code)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null
+            }
+            deck={deck}
+            cards={cards}
+            nameKey={(code) => {
+              const card = cards.get(code);
+              return card?.alias && Math.abs(card.alias - code) < 20 ? card.alias : code;
+            }}
+            room={() => 0}
+            onChange={changeDeck}
+            onShow={() => {}}
+            requestInfo={(codes) => void info(codes)}
+            traits={traits}
+            requestTraits={(codes) => post({ type: "traits", codes })}
+            cutResult={cutResult && cutResult.deckId === deck.id ? cutResult : null}
+            onCutTest={(code) => cutTest(deck, code)}
+            onTest={(picked) => start(picked ? { chosen: picked } : undefined)}
+            engineProgress={probe && probe.deckId === deck.id ? probe : null}
+            routing={null}
+            choking={choking && choking.deckId === deck.id ? { code: choking.code, waiting: choking.queue.map((one) => one.code) } : null}
+            onFindLines={() => {}}
+            onCheckChokes={(starts) => checkChokes(deck, starts)}
+            onWatchLine={(line, code) => openViewer({ ...line, id: newId(), date: Date.now(), testOf: code })}
+            onCheck={() => checkDeck(deck)}
+          />
+          <div className="play-bar">
+            <button className={`button pick-toggle ${picking || chosen.length ? "on" : ""}`} onClick={() => setPicking(!picking)} aria-expanded={picking}>
+              {picking ? "Done" : chosen.length ? `Hand ${chosen.length}/${hand}` : "Pick hand"}
+            </button>
+            {chosen.length > 0 && (
+              <button className="button ghost small" onClick={() => setChosen([])} aria-label="Clear the picked cards">
+                ✕
+              </button>
+            )}
+            <button className="button primary start-test" disabled={!ready || deck.main.length === 0} onClick={() => start()}>
+              {chosen.length === 0 ? "Random hand" : chosen.length < hand ? "Fill + play" : "Play hand"}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 4v16l13-8z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {screen === "replays" && deck && (
+        <>
+          <div className="screen-head">
+            <button className="icon-button" onClick={() => setScreen("menu")} aria-label="Menu">
+              ‹
+            </button>
+            <h2>Replays</h2>
+          </div>
+          {deck.tests?.length ? (
+            <Tests tests={deck.tests} nameOf={nameOf} onWatch={(saved, from) => (from !== undefined ? watch(saved, from, false, true) : openViewer(saved))} loading={loadingReplay} onVideo={saveVideo} onShare={shareReplay} onWorked={(saved) => void markTestWorked(saved)} video={video} onDelete={(id) => {
+              const without = withoutWorked(deck, id);
+              changeDeck({ ...without, tests: (without.tests ?? []).filter((one) => one.id !== id) });
+            }} />
+          ) : (
+            <p className="muted">No saved tests yet. Every hand you test is saved here as you play.</p>
+          )}
+        </>
+      )}
+    </main>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);

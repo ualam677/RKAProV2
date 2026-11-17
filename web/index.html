@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>RKAPro</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <!-- the display face for numbers and headings; offline it falls back to the system font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Exo+2:ital,wght@1,700;1,800&display=swap" />
+    <link rel="icon" href="./icon-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <meta name="theme-color" content="#04060b" />
+    <!-- the app always opens on the menu: never put back the scroll of the screen you reloaded on -->
+    <script>
+      if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+      // running as the installed app (not in a browser tab): the menu is locked to the screen (style.css, html.app)
+      if (matchMedia("(display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui)").matches || navigator.standalone) document.documentElement.classList.add("app");
+      // full-screen pages are sized to what's actually visible: after a reload, an installed app on Android can report
+      // a 100dvh that runs under the navigation bar, so the visible height is measured instead, and again whenever it
+      // changes (and a few times while the page settles)
+      (function () {
+        var fit = function () {
+          var height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+          // the smallest of the browser's own measures: one of them can count the area under the navigation bar
+          var shown = Math.min(height, window.innerHeight, document.documentElement.clientHeight || height);
+          document.documentElement.style.setProperty("--app-h", Math.round(shown) + "px");
+        };
+        fit();
+        window.addEventListener("resize", fit);
+        window.addEventListener("pageshow", fit);
+        window.addEventListener("load", fit);
+        if (window.visualViewport) window.visualViewport.addEventListener("resize", fit);
+        [100, 400, 1200].forEach(function (ms) { setTimeout(fit, ms); });
+      })();
+    </script>
+  </head>
+  <body style="background: #03060c">
+    <div id="root"></div>
+    <script>
+      // If the app's code can't load (an old copy of this page asking for files a newer deploy replaced), forget the
+      // saved copies and load the page fresh, once.
+      window.addEventListener(
+        "error",
+        function (event) {
+          var target = event.target;
+          if (!target || (target.tagName !== "SCRIPT" && target.tagName !== "LINK")) return;
+          if (sessionStorage.getItem("rka.recovered")) return;
+          sessionStorage.setItem("rka.recovered", "1");
+          var done = function () { location.reload(); };
+          var clear = window.caches ? caches.keys().then(function (keys) { return Promise.all(keys.map(function (key) { return caches.delete(key); })); }) : Promise.resolve();
+          var unregister = navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(function (all) { return Promise.all(all.map(function (one) { return one.unregister(); })); }) : Promise.resolve();
+          Promise.all([clear, unregister]).then(done, done);
+        },
+        true,
+      );
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
