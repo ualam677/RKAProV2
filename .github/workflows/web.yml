@@ -5,7 +5,14 @@ on:
     paths:
       - "web/**"
       - ".github/workflows/web.yml"
+  # started by hand, or each day by the small "meta-poke" workflow on master (scheduled: true), which redeploys only
+  # when the Meta data is a week old or the TCG ban list changed
   workflow_dispatch:
+    inputs:
+      scheduled:
+        description: "Started by the daily check: deploy only if the Meta data was refreshed"
+        type: boolean
+        default: false
 permissions:
   contents: read
   pages: write
@@ -26,7 +33,15 @@ jobs:
         node-version: 22
         cache: npm
         cache-dependency-path: web/package-lock.json
+    # the Meta screen's data (yugiohmeta.com): kept while under a week old and the ban list is unchanged; never fails
+    - name: Meta data
+      id: meta
+      continue-on-error: true
+      env:
+        LIVE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/meta.json
+      run: node web/tools/fetch-meta.mjs
     - name: Build
+      if: ${{ !inputs.scheduled || steps.meta.outputs.fresh == 'true' }}
       working-directory: web
       env:
         # Google Drive sync: the site's Google sign-in ID (a repository variable; empty until set up, see web/README.md)
@@ -34,9 +49,12 @@ jobs:
       run: |
         npm ci
         npm run build
-    - uses: actions/configure-pages@v5
-    - uses: actions/upload-pages-artifact@v3
+    - if: ${{ !inputs.scheduled || steps.meta.outputs.fresh == 'true' }}
+      uses: actions/configure-pages@v5
+    - if: ${{ !inputs.scheduled || steps.meta.outputs.fresh == 'true' }}
+      uses: actions/upload-pages-artifact@v3
       with:
         path: web/dist
     - id: deployment
+      if: ${{ !inputs.scheduled || steps.meta.outputs.fresh == 'true' }}
       uses: actions/deploy-pages@v4
