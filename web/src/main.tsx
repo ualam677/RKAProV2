@@ -867,8 +867,8 @@ function App() {
       }
     })();
   }, [screen, ready, meta]);
-  // a deck's face card: a monster carrying the archetype's name (never a Spell, Trap or hand trap), the highest
-  // Level / Rank first, then the most played; with no monster of that name, its highest-Level monster
+  // a deck's face card: a monster in every list of the deck (never a Spell, Trap or hand trap), carrying the
+  // archetype's name if one does, the highest Level / Rank first
   const metaFace = (type: MetaType): number | null => {
     const GENERIC = new Set(["the", "of", "and", "deck", "ritual", "fusion", "synchro", "xyz", "link", "pendulum"]);
     const words = type.name.toLowerCase().split(/[\s-]+/).filter((word) => word.length >= 3 && !GENERIC.has(word));
@@ -888,8 +888,10 @@ function App() {
       if (!named && words.some((word) => new RegExp(`\\b${word.replace(/[^a-z0-9]/g, "")}`).test(lower))) named = 1;
       return [{ code, named, level: card.level & 0xff, pct }];
     });
-    // no monster of the deck's name: one of its staples (in 90% of its lists or more) before a less played one
-    const best = monsters.sort((a, b) => b.named - a.named || Number(b.named === 0 && b.pct >= 90) - Number(a.named === 0 && a.pct >= 90) || b.level - a.level || b.pct - a.pct)[0];
+    // only cards in every list (99% allows for rounding); a deck with none falls back to its most played monsters
+    const top = Math.max(0, ...monsters.map((one) => one.pct));
+    const always = monsters.filter((one) => one.pct >= Math.min(99, top));
+    const best = always.sort((a, b) => b.named - a.named || b.level - a.level || b.pct - a.pct)[0];
     return best?.code ?? null;
   };
   const metaHandTraps = useMemo(
