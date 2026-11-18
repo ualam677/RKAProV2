@@ -1312,16 +1312,17 @@ html.app main.menu-screen .main-menu > .optimise-tile, html.app main.menu-screen
 
 /* ==== The background on every screen: a faint blue grid drifting slowly across very dark navy, a soft glow in the
    middle that breathes. Transform and opacity only (cheap to animate); still for anyone who asks for less motion. ==== */
-html { background: var(--bg); }
+/* almost black, a touch of blue: the panels stand out from it */
+html { background: #010207; }
 body { background: transparent; }
 body::before {
   content: ""; position: fixed; inset: -192px; z-index: -1; pointer-events: none;
   /* fine lines every 48px, a stronger one every 4 cells */
   background:
-    repeating-linear-gradient(0deg, rgba(90, 150, 240, 0.16) 0 1px, transparent 1px 192px),
-    repeating-linear-gradient(90deg, rgba(90, 150, 240, 0.16) 0 1px, transparent 1px 192px),
-    repeating-linear-gradient(0deg, rgba(61, 127, 214, 0.09) 0 1px, transparent 1px 48px),
-    repeating-linear-gradient(90deg, rgba(61, 127, 214, 0.09) 0 1px, transparent 1px 48px);
+    repeating-linear-gradient(0deg, rgba(90, 150, 240, 0.085) 0 1px, transparent 1px 192px),
+    repeating-linear-gradient(90deg, rgba(90, 150, 240, 0.085) 0 1px, transparent 1px 192px),
+    repeating-linear-gradient(0deg, rgba(61, 127, 214, 0.045) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(90deg, rgba(61, 127, 214, 0.045) 0 1px, transparent 1px 48px);
   animation: grid-drift 64s linear infinite;
   will-change: transform;
 }
@@ -1329,8 +1330,8 @@ body::after {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
     /* a soft band of light sweeping down the screen */
-    linear-gradient(180deg, transparent 0%, rgba(90, 160, 255, 0.07) 48%, rgba(120, 180, 255, 0.12) 50%, rgba(90, 160, 255, 0.07) 52%, transparent 100%) 0 0 / 100% 300% no-repeat,
-    radial-gradient(90% 60% at 50% 45%, rgba(29, 78, 160, 0.3), transparent 70%);
+    linear-gradient(180deg, transparent 0%, rgba(90, 160, 255, 0.035) 48%, rgba(120, 180, 255, 0.06) 50%, rgba(90, 160, 255, 0.035) 52%, transparent 100%) 0 0 / 100% 300% no-repeat,
+    radial-gradient(90% 60% at 50% 45%, rgba(20, 50, 110, 0.14), transparent 70%);
   animation: grid-sweep 9s linear infinite, grid-glow 12s ease-in-out infinite alternate;
 }
 /* one large cell (4 small ones) each loop, so it repeats seamlessly */
