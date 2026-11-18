@@ -25,6 +25,8 @@ export function CardArt({ code, onLoad }: { code: number; onLoad?: () => void })
   return (
     <img
       className="art"
+      // which card it is: a tap on a card shown on its own (not part of a button) opens its details (main.tsx)
+      data-code={code}
       src={SOURCES[which](source < SOURCES.length ? code : original)}
       alt=""
       loading="lazy"

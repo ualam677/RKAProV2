@@ -835,6 +835,9 @@ function App() {
       </span>
     </div>
   );
+  // any card shown on its own (a picture that isn't part of a button) opens its details when tapped, on every screen
+  // but the duel and the deck editor, which have their own
+  const [cardSheet, setCardSheet] = useState<number | null>(null);
   // the Meta screen's report (meta.json, refreshed weekly by the deploy) and its card names as this database's cards
   const [meta, setMeta] = useState<MetaData | null>(null);
   const [metaFailed, setMetaFailed] = useState(false);
@@ -1021,6 +1024,7 @@ function App() {
   // the phone's back button steps back through the app (replay, duel, editor, a section) and only leaves it from the menu
   const goBack = useRef<() => boolean>(() => false);
   goBack.current = () => {
+    if (cardSheet) return setCardSheet(null), true;
     if (viewing) return setViewing(null), true;
     if (view && duelOverlay.close()) return true;
     if (view) return finishTest(), skip(), setReplay(null), setView(null), true;
@@ -1292,6 +1296,20 @@ function App() {
     },
     [texts],
   );
+  useEffect(() => {
+    if (view || viewing || editing) return;
+    const tap = (event: MouseEvent) => {
+      const picture = (event.target as Element | null)?.closest?.("[data-code]") as HTMLElement | null;
+      if (!picture || picture.closest("button, a, input, label, .sheet")) return;
+      const code = Number(picture.dataset.code);
+      if (!code) return;
+      event.preventDefault();
+      requestText(code);
+      setCardSheet(code);
+    };
+    document.addEventListener("click", tap);
+    return () => document.removeEventListener("click", tap);
+  }, [view, viewing, editing, requestText]);
 
   if (viewing) {
     const frame = viewing.frames[viewing.at];
@@ -1498,6 +1516,26 @@ function App() {
   return (
     <main className={`start ${screen === "menu" ? "menu-screen" : ""}`}>
       {analysingNote}
+      {cardSheet !== null && (
+        <>
+          <div className="scrim dim" onClick={() => setCardSheet(null)} />
+          <div className="sheet card-sheet" role="dialog" aria-label={texts.get(cardSheet)?.name ?? "Card"}>
+            <div className="info-head">
+              <div className="info-art">
+                <CardArt key={cardSheet} code={cardSheet} />
+              </div>
+              <div>
+                <h2>{texts.get(cardSheet)?.name ?? cards.get(cardSheet)?.name ?? "…"}</h2>
+                {texts.get(cardSheet)?.line && <p className="muted">{texts.get(cardSheet)!.line}</p>}
+              </div>
+            </div>
+            {texts.get(cardSheet)?.text ? <p className="card-text">{texts.get(cardSheet)!.text}</p> : <p className="muted">Loading the card text…</p>}
+            <button className="button ghost" onClick={() => setCardSheet(null)}>
+              Close
+            </button>
+          </div>
+        </>
+      )}
       {loadingDuel && (
         <div className="duel-loading" role="status" aria-live="polite">
           <span className="duel-loading-spin" aria-hidden="true" />
