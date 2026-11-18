@@ -849,7 +849,7 @@ function App() {
           ...read.types.flatMap((type) => [...type.core, ...type.flex].map((one) => one.name)),
           ...read.types.flatMap((type) => (type.list ? [...type.list.main, ...type.list.extra, ...type.list.side].map((one) => one.name) : [])),
           ...Object.keys(read.cards),
-          ...read.types.flatMap((type) => (type.side ?? []).map((one) => one.name)),
+          ...read.types.flatMap((type) => [...(type.side ?? []), ...(type.extra ?? [])].map((one) => one.name)),
           ...(read.sided ?? []).map((one) => one.name),
           ...Object.keys(read.previous?.cards ?? {}),
           ...(read.banChanges?.changes.map((one) => one.name) ?? []),

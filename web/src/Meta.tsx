@@ -16,6 +16,8 @@ export interface MetaType {
   wins: number;
   core: MetaCard[];
   flex: MetaCard[];
+  // its Extra Deck (in 40% of its lists or more)
+  extra?: MetaCard[];
   // what it sides in (a third of its side decks or more)
   side?: MetaCard[];
   list: { main: { name: string; amount: number }[]; extra: { name: string; amount: number }[]; side: { name: string; amount: number }[]; placement?: number; event: string; url: string } | null;
@@ -210,6 +212,14 @@ export function MetaScreen({ meta, failed, codeOf, unmatched, handTraps, yourCha
                       <>
                         <p className="meta-label">Flex</p>
                         <Minis cards={type.flex} codeOf={codeOf} />
+                      </>
+                    )}
+                    {type.extra && type.extra.length > 0 && (
+                      <>
+                        <p className="meta-label">
+                          Extra Deck <small>% of its lists</small>
+                        </p>
+                        <Minis cards={type.extra} codeOf={codeOf} />
                       </>
                     )}
                     {type.side && type.side.length > 0 && (

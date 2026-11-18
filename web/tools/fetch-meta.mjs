@@ -12,7 +12,7 @@ const HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; deck-tool)", Accept: "
 // a little under a week: the daily check runs at a fixed time, so a full 7 days would often wait for day 8
 const WEEK = 6.5 * 24 * 3600 * 1000;
 // bumped when the file's shape changes, so the live copy is fetched again instead of kept
-const FORMAT = 5;
+const FORMAT = 6;
 const force = process.argv.includes("--force");
 const output = (key, value) => process.env.GITHUB_OUTPUT && fs.appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
 
@@ -67,6 +67,12 @@ async function main() {
         wins: mine.filter((one) => one.tournamentPlacement === 1).length,
         core: spread.filter((one) => one.pct >= 90).slice(0, 12),
         flex: spread.filter((one) => one.pct >= 40 && one.pct < 90).slice(0, 10),
+        // its Extra Deck: the cards in at least 40% of its lists
+        extra: (() => {
+          const seenExtra = new Map();
+          for (const one of mine) for (const name of new Set(named(one.extra).map((entry) => entry.name))) seenExtra.set(name, (seenExtra.get(name) ?? 0) + 1);
+          return [...seenExtra].map(([name, count]) => ({ name, pct: pct(count, mine.length) })).filter((one) => one.pct >= 40).sort((a, b) => b.pct - a.pct).slice(0, 15);
+        })(),
         // what this deck sides in: the cards in at least a third of its side decks
         side: (() => {
           const sided = new Map();
@@ -96,7 +102,7 @@ async function main() {
     // every card named above, with its passcode (konamiID): the card database can use another translation of a new
     // card's name ("Theorealize Medius"), the passcode is the same
     const allNames = new Set([
-      ...types.flatMap((type) => [...type.core, ...type.flex, ...type.side].map((one) => one.name)),
+      ...types.flatMap((type) => [...type.core, ...type.flex, ...type.extra, ...type.side].map((one) => one.name)),
       ...types.flatMap((type) => (type.list ? [...type.list.main, ...type.list.extra, ...type.list.side].map((one) => one.name) : [])),
       ...Object.keys(cards),
       ...sided.map((one) => one.name),
