@@ -1300,3 +1300,12 @@ html.app main.menu-screen .main-menu > .optimise-tile, html.app main.menu-screen
   html.app .menu-tile.primary { min-height: 64px; }
 }
 .meta-warn { color: #f2b544 !important; }
+.meta-note { margin: 0; font-size: 13px; color: var(--sub); }
+.meta-moves { display: flex; flex-wrap: wrap; gap: 6px; }
+.meta-move { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--surface); }
+.meta-move b { font-family: var(--display); font-weight: 600; font-size: 15px; color: var(--label); }
+.meta-move i { font-style: normal; font-family: var(--display); font-weight: 700; font-size: 14px; }
+.meta-move.up i, .meta-mini b.up { color: #6fd39b; }
+.meta-move.down i, .meta-mini b.down { color: #f2b544; }
+.meta-warn { font-size: 12px; line-height: 1.35; }
+.meta-warn summary { cursor: pointer; }

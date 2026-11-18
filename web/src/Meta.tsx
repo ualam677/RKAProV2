@@ -16,6 +16,8 @@ export interface MetaType {
   wins: number;
   core: MetaCard[];
   flex: MetaCard[];
+  // what it sides in (a third of its side decks or more)
+  side?: MetaCard[];
   list: { main: { name: string; amount: number }[]; extra: { name: string; amount: number }[]; side: { name: string; amount: number }[]; placement?: number; event: string; url: string } | null;
 }
 export interface MetaData {
@@ -29,6 +31,26 @@ export interface MetaData {
   types: MetaType[];
   cards: Record<string, number>;
   banChanges: { date: string; changes: { name: string; from: string; to: string }[] } | null;
+  // the most sided cards across every list
+  sided?: MetaCard[];
+  // last week's numbers: each deck's share, each card's share of lists
+  previous?: { fetched: string; shares: Record<string, number>; cards: Record<string, number> } | null;
+}
+
+// what moved since last week: decks by share points, cards by share of lists
+function moves(meta: MetaData) {
+  const before = meta.previous;
+  if (!before) return null;
+  const decks = meta.types
+    .map((type) => ({ name: type.name, now: type.share, delta: Math.round((type.share - (before.shares[type.name] ?? 0)) * 10) / 10, isNew: before.shares[type.name] === undefined }))
+    .filter((one) => one.isNew || Math.abs(one.delta) >= 0.5)
+    .sort((a, b) => b.delta - a.delta);
+  const names = new Set([...Object.keys(meta.cards), ...Object.keys(before.cards)]);
+  const cards = [...names]
+    .map((name) => ({ name, now: meta.cards[name] ?? 0, delta: (meta.cards[name] ?? 0) - (before.cards[name] ?? 0) }))
+    .filter((one) => Math.abs(one.delta) >= 5)
+    .sort((a, b) => b.delta - a.delta);
+  return { since: before.fetched, decks, up: cards.filter((one) => one.delta > 0).slice(0, 8), down: cards.filter((one) => one.delta < 0).reverse().slice(0, 8) };
 }
 
 interface Props {
@@ -51,7 +73,7 @@ interface Props {
 
 const when = (iso: string) => new Date(iso).toLocaleDateString([], { day: "numeric", month: "short" });
 
-function Minis({ cards, codeOf }: { cards: MetaCard[]; codeOf: (name: string) => number | null }) {
+function Minis({ cards, codeOf, sign }: { cards: MetaCard[]; codeOf: (name: string) => number | null; sign?: boolean }) {
   return (
     <div className="meta-minis">
       {cards.map((one) => {
@@ -59,7 +81,11 @@ function Minis({ cards, codeOf }: { cards: MetaCard[]; codeOf: (name: string) =>
         return (
           <span key={one.name} className="meta-mini" title={one.name}>
             {code ? <CardArt code={code} /> : <span className="meta-unknown">{one.name}</span>}
-            <b>{one.pct}%</b>
+            <b className={sign ? (one.pct > 0 ? "up" : "down") : ""}>
+              {sign && one.pct > 0 ? "+" : ""}
+              {one.pct}
+              {sign ? "" : "%"}
+            </b>
           </span>
         );
       })}
@@ -89,8 +115,54 @@ export function MetaScreen({ meta, failed, codeOf, unmatched, handTraps, yourCha
                 {meta.source}
               </a>
             </small>
-            {unmatched.length > 0 && <small className="meta-warn">Not in this card database yet, left out of imports: {unmatched.join(", ")}</small>}
+            {unmatched.length > 0 && (
+              <details className="meta-warn">
+                <summary>
+                  {unmatched.length} new card{unmatched.length === 1 ? "" : "s"} not in the card database yet: left out of imports
+                </summary>
+                {unmatched.join(", ")}
+              </details>
+            )}
           </div>
+
+          {(() => {
+            const moved = moves(meta);
+            if (!moved) return <p className="meta-note">What moved since last week shows here after the next weekly update.</p>;
+            const sign = (delta: number) => `${delta > 0 ? "▲ +" : "▼ "}${delta}`;
+            return (
+              <>
+                <p className="section-label">
+                  Since {when(moved.since)} <small>share of tops</small>
+                </p>
+                {moved.decks.length ? (
+                  <div className="meta-moves">
+                    {moved.decks.map((one) => (
+                      <span key={one.name} className={`meta-move ${one.delta > 0 || one.isNew ? "up" : "down"}`}>
+                        <b>{one.name}</b>
+                        <i>{one.isNew ? "NEW" : `${sign(one.delta)}%`}</i>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="meta-note">No deck moved by half a point or more.</p>
+                )}
+                {moved.up.length > 0 && (
+                  <>
+                    <p className="meta-label">
+                      Played more <small>change in % of lists</small>
+                    </p>
+                    <Minis cards={moved.up.map((one) => ({ name: one.name, pct: one.delta }))} codeOf={codeOf} sign />
+                  </>
+                )}
+                {moved.down.length > 0 && (
+                  <>
+                    <p className="meta-label">Played less</p>
+                    <Minis cards={moved.down.map((one) => ({ name: one.name, pct: one.delta }))} codeOf={codeOf} sign />
+                  </>
+                )}
+              </>
+            );
+          })()}
 
           <p className="section-label">Top decks</p>
           {meta.types.map((type, rank) => {
@@ -128,6 +200,14 @@ export function MetaScreen({ meta, failed, codeOf, unmatched, handTraps, yourCha
                       <>
                         <p className="meta-label">Flex</p>
                         <Minis cards={type.flex} codeOf={codeOf} />
+                      </>
+                    )}
+                    {type.side && type.side.length > 0 && (
+                      <>
+                        <p className="meta-label">
+                          Side <small>% of its side decks</small>
+                        </p>
+                        <Minis cards={type.side} codeOf={codeOf} />
                       </>
                     )}
                     {type.list && (
@@ -168,6 +248,15 @@ export function MetaScreen({ meta, failed, codeOf, unmatched, handTraps, yourCha
               <button className="button primary meta-wide" onClick={() => onTraps(handTraps.slice(0, 3).flatMap((one) => codeOf(one.name) ?? []))}>
                 Use the top 3 as your opponent's hand traps
               </button>
+            </>
+          )}
+
+          {meta.sided && meta.sided.length > 0 && (
+            <>
+              <p className="section-label">
+                Most sided <small>% of side decks</small>
+              </p>
+              <Minis cards={meta.sided.slice(0, 12)} codeOf={codeOf} />
             </>
           )}
 
