@@ -33,6 +33,8 @@ export interface MetaData {
   banChanges: { date: string; changes: { name: string; from: string; to: string }[] } | null;
   // the most sided cards across every list
   sided?: MetaCard[];
+  // every ranked deck's share this week (the top 10 above are the first of these)
+  shares?: Record<string, number>;
   // last week's numbers: each deck's share, each card's share of lists
   previous?: { fetched: string; shares: Record<string, number>; cards: Record<string, number> } | null;
 }
@@ -41,13 +43,17 @@ export interface MetaData {
 function moves(meta: MetaData) {
   const before = meta.previous;
   if (!before) return null;
-  const decks = meta.types
-    .map((type) => ({ name: type.name, now: type.share, delta: Math.round((type.share - (before.shares[type.name] ?? 0)) * 10) / 10, isNew: before.shares[type.name] === undefined }))
-    .filter((one) => one.isNew || Math.abs(one.delta) >= 0.5)
-    .sort((a, b) => b.delta - a.delta);
+  // every ranked deck, both weeks: one not ranked last week is new, one not ranked now is at 0
+  const now = meta.shares ?? Object.fromEntries(meta.types.map((type) => [type.name, type.share]));
+  const decks = [...new Set([...Object.keys(now), ...Object.keys(before.shares)])]
+    .map((name) => ({ name, now: now[name] ?? 0, delta: Math.round(((now[name] ?? 0) - (before.shares[name] ?? 0)) * 10) / 10, isNew: before.shares[name] === undefined }))
+    .filter((one) => (one.isNew && one.now >= 1) || Math.abs(one.delta) >= 0.5)
+    .sort((a, b) => b.delta - a.delta)
+    .slice(0, 10);
   const names = new Set([...Object.keys(meta.cards), ...Object.keys(before.cards)]);
   const cards = [...names]
-    .map((name) => ({ name, now: meta.cards[name] ?? 0, delta: (meta.cards[name] ?? 0) - (before.cards[name] ?? 0) }))
+    // a card missing from a week's list was under its 5% cut-off: counted as 4, the most it could have been
+    .map((name) => ({ name, now: meta.cards[name] ?? 4, delta: (meta.cards[name] ?? 4) - (before.cards[name] ?? 4) }))
     .filter((one) => Math.abs(one.delta) >= 5)
     .sort((a, b) => b.delta - a.delta);
   return { since: before.fetched, decks, up: cards.filter((one) => one.delta > 0).slice(0, 8), down: cards.filter((one) => one.delta < 0).reverse().slice(0, 8) };
@@ -132,14 +138,14 @@ export function MetaScreen({ meta, failed, codeOf, unmatched, handTraps, yourCha
             return (
               <>
                 <p className="section-label">
-                  Since {when(moved.since)} <small>share of tops</small>
+                  Since {when(moved.since)} <small>share of tops, in points</small>
                 </p>
                 {moved.decks.length ? (
                   <div className="meta-moves">
                     {moved.decks.map((one) => (
                       <span key={one.name} className={`meta-move ${one.delta > 0 || one.isNew ? "up" : "down"}`}>
                         <b>{one.name}</b>
-                        <i>{one.isNew ? "NEW" : `${sign(one.delta)}%`}</i>
+                        <i>{one.isNew ? "NEW" : `${sign(one.delta)} pts`}</i>
                       </span>
                     ))}
                   </div>

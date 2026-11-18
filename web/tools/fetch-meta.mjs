@@ -9,9 +9,10 @@ const OUT = new URL("../public/meta.json", import.meta.url);
 const API = "https://www.yugiohmeta.com/api/v1";
 const LFLIST = "https://raw.githubusercontent.com/ProjectIgnis/LFLists/master/0TCG.lflist.conf";
 const HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; deck-tool)", Accept: "application/json" };
-const WEEK = 7 * 24 * 3600 * 1000;
+// a little under a week: the daily check runs at a fixed time, so a full 7 days would often wait for day 8
+const WEEK = 6.5 * 24 * 3600 * 1000;
 // bumped when the file's shape changes, so the live copy is fetched again instead of kept
-const FORMAT = 3;
+const FORMAT = 4;
 const force = process.argv.includes("--force");
 const output = (key, value) => process.env.GITHUB_OUTPUT && fs.appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
 
@@ -69,8 +70,9 @@ async function main() {
         // what this deck sides in: the cards in at least a third of its side decks
         side: (() => {
           const sided = new Map();
-          for (const one of mine) for (const name of new Set(named(one.side).map((entry) => entry.name))) sided.set(name, (sided.get(name) ?? 0) + 1);
-          return [...sided].map(([name, count]) => ({ name, pct: pct(count, mine.length) })).filter((one) => one.pct >= 33).sort((a, b) => b.pct - a.pct).slice(0, 10);
+          const withSide = mine.filter((one) => one.side?.length);
+          for (const one of withSide) for (const name of new Set(named(one.side).map((entry) => entry.name))) sided.set(name, (sided.get(name) ?? 0) + 1);
+          return [...sided].map(([name, count]) => ({ name, pct: pct(count, withSide.length) })).filter((one) => one.pct >= 33).sort((a, b) => b.pct - a.pct).slice(0, 10);
         })(),
         list: best ? { main: named(best.main), extra: named(best.extra), side: named(best.side), placement: best.tournamentPlacement, event: best.tournamentType?.name ?? "", url: best.url ? `https://www.yugiohmeta.com${best.url}` : "" } : null,
       };
@@ -81,14 +83,17 @@ async function main() {
     const cards = Object.fromEntries([...everywhere].filter(([, count]) => pct(count, lists.length) >= 5).map(([name, count]) => [name, pct(count, lists.length)]));
     // the most sided cards across every list
     const sidedAll = new Map();
-    for (const one of lists) for (const name of new Set(named(one.side).map((entry) => entry.name))) sidedAll.set(name, (sidedAll.get(name) ?? 0) + 1);
-    const sided = [...sidedAll].map(([name, count]) => ({ name, pct: pct(count, lists.length) })).sort((a, b) => b.pct - a.pct).slice(0, 15);
+    const withSide = lists.filter((one) => one.side?.length);
+    for (const one of withSide) for (const name of new Set(named(one.side).map((entry) => entry.name))) sidedAll.set(name, (sidedAll.get(name) ?? 0) + 1);
+    const sided = [...sidedAll].map(([name, count]) => ({ name, pct: pct(count, withSide.length) })).sort((a, b) => b.pct - a.pct).slice(0, 15);
     // last week's numbers, for what moved: the live copy once it is about a week old, otherwise what it carried
-    const summary = (copy) => ({ fetched: copy.fetched, shares: Object.fromEntries(copy.types.map((type) => [type.name, type.share])), cards: copy.cards });
-    const previous = live?.types && live.v >= 2 ? (Date.now() - Date.parse(live.fetched) >= 6 * 24 * 3600 * 1000 ? summary(live) : live.previous ?? null) : null;
+    // every ranked deck's share (not only the top 10 shown), so a deck entering or leaving the top 10 compares right
+    const shares = Object.fromEntries(ranking.deckTypes.map(({ deckType, decksCount }) => [deckType.name, Math.round((1000 * decksCount) / ranking.totalDecks) / 10]));
+    const summary = (copy) => ({ fetched: copy.fetched, shares: copy.shares ?? Object.fromEntries(copy.types.map((type) => [type.name, type.share])), cards: copy.cards });
+    const previous = live?.types && live.v >= 2 ? (Date.now() - Date.parse(live.fetched) >= WEEK ? summary(live) : live.previous ?? null) : null;
     const latest = changes[0];
     const banChanges = latest ? { date: latest.date.slice(0, 10), changes: (latest.changes ?? []).map((one) => ({ name: one.card?.name, from: one.from ?? "Unlimited", to: one.to ?? "Unlimited" })).filter((one) => one.name) } : null;
-    const meta = { v: FORMAT, fetched: new Date().toISOString(), source: "yugiohmeta.com", banlist, range: ranking.range, totalDecks: ranking.totalDecks, lists: lists.length, newest: newest.slice(0, 10), types, cards, sided, banChanges, previous };
+    const meta = { v: FORMAT, fetched: new Date().toISOString(), source: "yugiohmeta.com", banlist, range: ranking.range, totalDecks: ranking.totalDecks, lists: lists.length, newest: newest.slice(0, 10), types, shares, cards, sided, banChanges, previous };
     fs.writeFileSync(OUT, JSON.stringify(meta));
     console.log(`meta: fetched ${lists.length} lists, ${types.length} deck types, newest ${meta.newest}, ${banlist}`);
     output("fresh", "true");
