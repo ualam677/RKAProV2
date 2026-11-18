@@ -61,6 +61,8 @@ export interface SavedDeck extends Deck {
   // what the engine found each card starts, for the deck as it was (`signature`)
   engine?: { signature: string; evidence: CardEvidence[] };
   tests?: SavedTest[];
+  // a top deck from the Meta screen the computer opponent plays (its own turn), with your chosen hand traps on top
+  metaOpponent?: { name: string; main: number[]; extra: number[] };
   // the line the route search found from each start's test hand, for the deck as it was (`signature`)
   routes?: Record<string, SavedRoute>;
   // a full board: at least this many interruptions (default 3)

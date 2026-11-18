@@ -32,9 +32,11 @@ async function main() {
   }
   try {
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-    const [tops, rankings] = await Promise.all([
+    const [tops, rankings, changes] = await Promise.all([
       getJson(query("top-decks", { ocg: "false", "uploaded[$gte]": since, limit: "0" })),
       getJson(query("deck-types/rankings", { ocg: "false", t3Only: "false", range: "Last 1 month", limit: "1" })),
+      // the latest TCG ban list change: what moved (the app shows which of your cards are among them)
+      getJson(query("banlist-changes", { format: "TCG", "date[$lte]": new Date().toISOString().slice(0, 10), limit: "1", "sort[date]": "-1" })).catch(() => []),
     ]);
     // standard TCG only: Genesys is a format of its own
     const lists = tops.filter((one) => !one.ocg && !/genesys/i.test(one.tournamentType?.name ?? "") && one.deckType?.name && one.main?.length);
@@ -68,7 +70,9 @@ async function main() {
     const everywhere = new Map();
     for (const one of lists) for (const name of new Set(named(one.main).map((entry) => entry.name))) everywhere.set(name, (everywhere.get(name) ?? 0) + 1);
     const cards = Object.fromEntries([...everywhere].filter(([, count]) => pct(count, lists.length) >= 5).map(([name, count]) => [name, pct(count, lists.length)]));
-    const meta = { fetched: new Date().toISOString(), source: "yugiohmeta.com", banlist, range: ranking.range, totalDecks: ranking.totalDecks, lists: lists.length, newest: newest.slice(0, 10), types, cards };
+    const latest = changes[0];
+    const banChanges = latest ? { date: latest.date.slice(0, 10), changes: (latest.changes ?? []).map((one) => ({ name: one.card?.name, from: one.from ?? "Unlimited", to: one.to ?? "Unlimited" })).filter((one) => one.name) } : null;
+    const meta = { fetched: new Date().toISOString(), source: "yugiohmeta.com", banlist, range: ranking.range, totalDecks: ranking.totalDecks, lists: lists.length, newest: newest.slice(0, 10), types, cards, banChanges };
     fs.writeFileSync(OUT, JSON.stringify(meta));
     console.log(`meta: fetched ${lists.length} lists, ${types.length} deck types, newest ${meta.newest}, ${banlist}`);
     output("fresh", "true");

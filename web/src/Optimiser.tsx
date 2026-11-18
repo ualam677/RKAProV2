@@ -615,6 +615,16 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
               )}
               <span className="setup-change">{picking ? "Done" : "Change"}</span>
             </button>
+            {deck.metaOpponent && (
+              <div className="setup-meta">
+                <span>
+                  Opponent plays <b>{deck.metaOpponent.name}</b> on its turn
+                </span>
+                <button className="button small ghost" onClick={() => onChange({ ...deck, metaOpponent: undefined, updated: Date.now() })} aria-label={`Stop playing against ${deck.metaOpponent.name}`}>
+                  ✕
+                </button>
+              </div>
+            )}
             {holding.length > 0 && (
               <div className="segmented two trap-timing" role="group" aria-label="How the opponent uses its hand traps">
                 {(["smart", "instant"] as const).map((timing) => (

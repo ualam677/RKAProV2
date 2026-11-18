@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { parseYdk, shuffled } from "./deck";
 import { Duel, MuteButton, cueTime, duelOverlay } from "./Duel";
 import { SettingsScreen } from "./Settings";
+import { MetaScreen, type MetaData, type MetaType } from "./Meta";
+import { isHandTrap } from "./engine/handtraps";
 import { getSettings } from "./settings";
 import { DeckEditor } from "./DeckEditor";
 import { CardArt, setArtworkOriginals } from "./CardArt";
@@ -99,7 +101,7 @@ function App() {
     return () => void installListeners.delete(listener);
   }, []);
   // the main menu, or one of its sections
-  const [screen, setScreen] = useState<"menu" | "decks" | "test" | "replays" | "sync" | "settings">("menu");
+  const [screen, setScreen] = useState<"menu" | "decks" | "test" | "replays" | "sync" | "settings" | "meta">("menu");
   // the editor opens on the deck (Edit deck) or on the optimiser (Optimise)
   const openEditor = (optimise: boolean) => {
     try {
@@ -509,7 +511,10 @@ function App() {
   const opponentDeck = () => {
     const traps = (deck?.opponentTraps ?? [14558127, 10045474]).slice(0, 3);
     return {
-      opponent: { main: [...traps, ...Array.from({ length: 40 - traps.length }, () => 31305911)], extra: [] as number[] },
+      // a meta deck from the Meta screen plays its own turn; otherwise the opponent is only its hand traps
+      opponent: deck?.metaOpponent
+        ? { main: [...traps, ...deck.metaOpponent.main], extra: deck.metaOpponent.extra }
+        : { main: [...traps, ...Array.from({ length: 40 - traps.length }, () => 31305911)], extra: [] as number[] },
       opponentHandTraps: traps.length > 0,
       opponentTraps: traps,
       trapTiming: deck?.trapTiming ?? ("smart" as const),
@@ -830,6 +835,52 @@ function App() {
       </span>
     </div>
   );
+  // the Meta screen's report (meta.json, refreshed weekly by the deploy) and its card names as this database's cards
+  const [meta, setMeta] = useState<MetaData | null>(null);
+  const [metaFailed, setMetaFailed] = useState(false);
+  const [metaCodes, setMetaCodes] = useState(new Map<string, number>());
+  useEffect(() => {
+    if (screen !== "meta" || !ready || meta) return;
+    setMetaFailed(false);
+    void (async () => {
+      try {
+        const read = (await (await fetch("./meta.json", { cache: "no-cache" })).json()) as MetaData;
+        const all = new Set<string>([
+          ...read.types.flatMap((type) => [...type.core, ...type.flex].map((one) => one.name)),
+          ...read.types.flatMap((type) => (type.list ? [...type.list.main, ...type.list.extra, ...type.list.side].map((one) => one.name) : [])),
+          ...Object.keys(read.cards),
+          ...(read.banChanges?.changes.map((one) => one.name) ?? []),
+        ]);
+        const list = [...all];
+        const found = await names(list);
+        setMetaCodes(new Map(list.flatMap((name, at) => (found[at] ? [[name, found[at]!.code] as [string, number]] : []))));
+        setMeta(read);
+      } catch {
+        setMetaFailed(true);
+      }
+    })();
+  }, [screen, ready, meta]);
+  const metaHandTraps = useMemo(
+    () =>
+      meta
+        ? Object.entries(meta.cards)
+            .filter(([name]) => { const code = metaCodes.get(name); return code !== undefined && isHandTrap(code); })
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 6)
+            .map(([name, pct]) => ({ name, pct }))
+        : [],
+    [meta, metaCodes],
+  );
+  // which of your decks' cards the latest ban list moved
+  const metaYourChanges = useMemo(() => {
+    if (!meta?.banChanges) return [];
+    const nameIn = (code: number) => cards.get(code)?.name ?? texts.get(code)?.name ?? "";
+    return meta.banChanges.changes.flatMap((change) => {
+      const code = metaCodes.get(change.name);
+      const holding = decks.filter((one) => [...one.main, ...one.extra, ...(one.side ?? [])].some((card) => card === code || nameIn(card) === change.name)).map((one) => one.name);
+      return holding.length ? [{ ...change, decks: holding }] : [];
+    });
+  }, [meta, metaCodes, decks, cards, texts]);
   const markWorked = () => {
     const current = test.current;
     if (!current || !record || !view) return;
@@ -1510,6 +1561,12 @@ function App() {
                 <path d="M4 12a8 8 0 0 1 14-5.3M20 4v5h-5M20 12a8 8 0 0 1-14 5.3M4 20v-5h5" />
               </svg>
             </button>
+            <button className="menu-tile meta-tile" onClick={() => setScreen("meta")}>
+              <b>Meta</b>
+              <svg className="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 20V10M10 20V4M16 20v-8M22 20H2" />
+              </svg>
+            </button>
           </div>
           <div className="menu-dock">
             <button className="menu-tile primary" disabled={!ready || !deck?.main.length} onClick={() => setScreen("test")}>
@@ -1578,6 +1635,35 @@ function App() {
             ))}
           </div>
         </div>
+      )}
+
+      {screen === "meta" && (
+        <MetaScreen
+          meta={meta}
+          failed={metaFailed}
+          codeOf={(name) => metaCodes.get(name) ?? null}
+          handTraps={metaHandTraps}
+          yourChanges={metaYourChanges}
+          opponent={deck?.metaOpponent?.name}
+          onImport={(type) => {
+            const codes = (cards: { name: string; amount: number }[]) => cards.flatMap((one) => { const code = metaCodes.get(one.name); return code ? Array.from({ length: one.amount }, () => code) : []; });
+            if (!type.list) return;
+            addDeck({ name: `${type.name} (meta)`, main: codes(type.list.main), extra: codes(type.list.extra), side: codes(type.list.side) });
+            setScreen("menu");
+          }}
+          onOpponent={(type) => {
+            if (!deck || !type.list) return;
+            const codes = (cards: { name: string; amount: number }[]) => cards.flatMap((one) => { const code = metaCodes.get(one.name); return code ? Array.from({ length: one.amount }, () => code) : []; });
+            changeDeck({ ...deck, metaOpponent: deck.metaOpponent?.name === type.name ? undefined : { name: type.name, main: codes(type.list.main), extra: codes(type.list.extra) } });
+            if (deck.metaOpponent?.name !== type.name) setScreen("test");
+          }}
+          onTraps={(codes) => {
+            if (!deck || !codes.length) return;
+            changeDeck({ ...deck, opponentTraps: codes });
+            setScreen("test");
+          }}
+          onBack={() => setScreen("menu")}
+        />
       )}
 
       {screen === "settings" && (
