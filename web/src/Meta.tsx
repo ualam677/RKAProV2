@@ -48,8 +48,10 @@ function moves(meta: MetaData) {
   const decks = [...new Set([...Object.keys(now), ...Object.keys(before.shares)])]
     .map((name) => ({ name, now: now[name] ?? 0, delta: Math.round(((now[name] ?? 0) - (before.shares[name] ?? 0)) * 10) / 10, isNew: before.shares[name] === undefined }))
     .filter((one) => (one.isNew && one.now >= 1) || Math.abs(one.delta) >= 0.5)
-    .sort((a, b) => b.delta - a.delta)
-    .slice(0, 10);
+    // the ten biggest moves either way, then risers first
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+    .slice(0, 10)
+    .sort((a, b) => b.delta - a.delta);
   const names = new Set([...Object.keys(meta.cards), ...Object.keys(before.cards)]);
   const cards = [...names]
     // a card missing from a week's list was under its 5% cut-off: counted as 4, the most it could have been
