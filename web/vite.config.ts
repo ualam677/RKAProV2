@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
@@ -31,12 +32,21 @@ function localData(): Plugin {
   };
 }
 
-// The version shown on the menu
+// The version shown on the menu: major.minor from package.json (bumped by hand for a batch of features), and the last
+// number counting every commit since that bump, so each update shows a higher number; then the commit it was built from
 const run = process.env.GITHUB_RUN_NUMBER;
 const commit = (process.env.GITHUB_SHA ?? "").slice(0, 7);
-// the release (package.json) and the commit it was built from; "dev" locally
 const release = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string }).version;
-const version = run ? `v${release}${commit ? ` · ${commit}` : ""}` : "dev";
+const since = (() => {
+  try {
+    const bumped = execSync(`git log -1 --format=%H -G'"version"' -- package.json`, { cwd: path.dirname(new URL(import.meta.url).pathname) }).toString().trim();
+    return bumped ? Number(execSync(`git rev-list --count ${bumped}..HEAD`).toString().trim()) : 0;
+  } catch {
+    return 0;
+  }
+})();
+const [major, minor] = release.split(".");
+const version = run ? `v${major}.${minor}.${since}${commit ? ` · ${commit}` : ""}` : `dev ${major}.${minor}.${since}`;
 
 export default defineConfig({
   base: "./",
