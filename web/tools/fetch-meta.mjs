@@ -12,7 +12,7 @@ const HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; deck-tool)", Accept: "
 // a little under a week: the daily check runs at a fixed time, so a full 7 days would often wait for day 8
 const WEEK = 6.5 * 24 * 3600 * 1000;
 // bumped when the file's shape changes, so the live copy is fetched again instead of kept
-const FORMAT = 4;
+const FORMAT = 5;
 const force = process.argv.includes("--force");
 const output = (key, value) => process.env.GITHUB_OUTPUT && fs.appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
 
@@ -93,7 +93,26 @@ async function main() {
     const previous = live?.types && live.v >= 2 ? (Date.now() - Date.parse(live.fetched) >= WEEK ? summary(live) : live.previous ?? null) : null;
     const latest = changes[0];
     const banChanges = latest ? { date: latest.date.slice(0, 10), changes: (latest.changes ?? []).map((one) => ({ name: one.card?.name, from: one.from ?? "Unlimited", to: one.to ?? "Unlimited" })).filter((one) => one.name) } : null;
-    const meta = { v: FORMAT, fetched: new Date().toISOString(), source: "yugiohmeta.com", banlist, range: ranking.range, totalDecks: ranking.totalDecks, lists: lists.length, newest: newest.slice(0, 10), types, shares, cards, sided, banChanges, previous };
+    // every card named above, with its passcode (konamiID): the card database can use another translation of a new
+    // card's name ("Theorealize Medius"), the passcode is the same
+    const allNames = new Set([
+      ...types.flatMap((type) => [...type.core, ...type.flex, ...type.side].map((one) => one.name)),
+      ...types.flatMap((type) => (type.list ? [...type.list.main, ...type.list.extra, ...type.list.side].map((one) => one.name) : [])),
+      ...Object.keys(cards),
+      ...sided.map((one) => one.name),
+      ...(banChanges?.changes.map((one) => one.name) ?? []),
+    ]);
+    const codes = {};
+    const names = [...allNames];
+    for (let at = 0; at < names.length; at += 40) {
+      const batch = names.slice(at, at + 40);
+      const params = new URLSearchParams({ limit: "0", "fields[name]": "1", "fields[konamiID]": "1" });
+      batch.forEach((name, index) => params.append(`name[$in][${index}]`, name));
+      const found = await getJson(`${API}/cards?${params}`).catch(() => []);
+      for (const one of found) if (one.konamiID && Number(one.konamiID) > 0) codes[one.name] = Number(one.konamiID);
+    }
+    console.log(`meta: ${Object.keys(codes).length} of ${names.length} cards have a passcode`);
+    const meta = { v: FORMAT, fetched: new Date().toISOString(), source: "yugiohmeta.com", banlist, range: ranking.range, totalDecks: ranking.totalDecks, lists: lists.length, newest: newest.slice(0, 10), types, shares, cards, sided, banChanges, previous, codes };
     fs.writeFileSync(OUT, JSON.stringify(meta));
     console.log(`meta: fetched ${lists.length} lists, ${types.length} deck types, newest ${meta.newest}, ${banlist}`);
     output("fresh", "true");

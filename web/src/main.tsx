@@ -856,7 +856,8 @@ function App() {
         ]);
         const list = [...all];
         const found = await names(list);
-        setMetaCodes(new Map(list.flatMap((name, at) => (found[at] ? [[name, found[at]!.code] as [string, number]] : []))));
+        // the passcode the report carries first (a new card's name can differ in this database), then the name
+        setMetaCodes(new Map(list.flatMap((name, at) => { const code = read.codes?.[name] ?? found[at]?.code; return code ? [[name, code] as [string, number]] : []; })));
         setMeta(read);
       } catch {
         setMetaFailed(true);

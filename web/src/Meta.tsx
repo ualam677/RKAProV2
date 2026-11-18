@@ -33,6 +33,8 @@ export interface MetaData {
   banChanges: { date: string; changes: { name: string; from: string; to: string }[] } | null;
   // the most sided cards across every list
   sided?: MetaCard[];
+  // each card's passcode, by its name here (a card's name in the card database can differ)
+  codes?: Record<string, number>;
   // every ranked deck's share this week (the top 10 above are the first of these)
   shares?: Record<string, number>;
   // last week's numbers: each deck's share, each card's share of lists
