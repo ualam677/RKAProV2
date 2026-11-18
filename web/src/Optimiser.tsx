@@ -393,7 +393,8 @@ export function Optimiser({ only, setup, play, cutResult, onCutTest, traits, req
     }
   };
   // the hand traps to check against: the ones you tag as hand traps, then the common staples
-  const trapChoices = [...new Set([...main.filter((card) => hasRole(card.tag, "handtrap") && !secondOnly(card.tag)).map((card) => card.code), ...CHOKE_TRAPS])];
+  // (what's held now is always offered too, so one set from the Meta screen can be switched off again)
+  const trapChoices = [...new Set([...(deck.opponentTraps ?? []), ...main.filter((card) => hasRole(card.tag, "handtrap") && !secondOnly(card.tag)).map((card) => card.code), ...CHOKE_TRAPS])];
   const warnings = [
     untagged > 0 && { text: `${untagged} card${untagged === 1 ? "" : "s"} not tagged`, glyphs: ["dead"], value: `${untagged} ?`, action: { label: "Tag as Other", run: tagRest } },
     normalCount > normalLimit(total) && { text: `${normalCount} Normal Summon cards (two in hand: ${pct(first.normal2)})`, glyphs: ["n", "n"], value: pct(first.normal2) },

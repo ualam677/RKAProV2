@@ -513,7 +513,7 @@ function App() {
     return {
       // a meta deck from the Meta screen plays its own turn; otherwise the opponent is only its hand traps
       opponent: deck?.metaOpponent
-        ? { main: [...traps, ...deck.metaOpponent.main], extra: deck.metaOpponent.extra }
+        ? { main: [...traps, ...shuffled(deck.metaOpponent.main)], extra: deck.metaOpponent.extra }
         : { main: [...traps, ...Array.from({ length: 40 - traps.length }, () => 31305911)], extra: [] as number[] },
       opponentHandTraps: traps.length > 0,
       opponentTraps: traps,
@@ -1642,13 +1642,19 @@ function App() {
           meta={meta}
           failed={metaFailed}
           codeOf={(name) => metaCodes.get(name) ?? null}
+          unmatched={meta ? [...new Set(meta.types.flatMap((type) => (type.list ? [...type.list.main, ...type.list.extra, ...type.list.side].map((one) => one.name) : [])))].filter((name) => !metaCodes.has(name)) : []}
           handTraps={metaHandTraps}
           yourChanges={metaYourChanges}
           opponent={deck?.metaOpponent?.name}
           onImport={(type) => {
             const codes = (cards: { name: string; amount: number }[]) => cards.flatMap((one) => { const code = metaCodes.get(one.name); return code ? Array.from({ length: one.amount }, () => code) : []; });
             if (!type.list) return;
-            addDeck({ name: `${type.name} (meta)`, main: codes(type.list.main), extra: codes(type.list.extra), side: codes(type.list.side) });
+            // imported again: the same deck is brought up to date rather than added twice
+            const name = `${type.name} (meta)`;
+            const cardsOf = { main: codes(type.list.main), extra: codes(type.list.extra), side: codes(type.list.side) };
+            const there = decks.find((one) => one.name === name);
+            if (there) (changeDeck({ ...there, ...cardsOf, updated: Date.now() }), pickDeck(there.id));
+            else addDeck({ name, ...cardsOf });
             setScreen("menu");
           }}
           onOpponent={(type) => {

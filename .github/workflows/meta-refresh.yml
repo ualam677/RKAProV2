@@ -1,5 +1,5 @@
-# The Meta screen's weekly refresh. GitHub only runs schedules from the default branch, so this one file lives on
-# master as .github/workflows/meta-refresh.yml. Each day it starts the deploy ("Deploy web app") on the branch the
+# The Meta screen's weekly refresh. GitHub only runs schedules from the default branch (master), so this file only
+# starts working once it is on master. Each day it starts the deploy ("Deploy web app") on the branch the
 # site was last deployed from; that deploy fetches new Meta data only when its copy is a week old or the TCG ban list
 # changed, and otherwise skips publishing. Nothing else on master is needed.
 name: Meta refresh

@@ -10,6 +10,8 @@ const API = "https://www.yugiohmeta.com/api/v1";
 const LFLIST = "https://raw.githubusercontent.com/ProjectIgnis/LFLists/master/0TCG.lflist.conf";
 const HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; deck-tool)", Accept: "application/json" };
 const WEEK = 7 * 24 * 3600 * 1000;
+// bumped when the file's shape changes, so the live copy is fetched again instead of kept
+const FORMAT = 2;
 const force = process.argv.includes("--force");
 const output = (key, value) => process.env.GITHUB_OUTPUT && fs.appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
 
@@ -25,7 +27,7 @@ async function main() {
   // the live copy, kept while it is fresh and the ban list is the same
   let live = null;
   if (process.env.LIVE_URL) live = await getJson(process.env.LIVE_URL).catch(() => null);
-  if (live && !force && Date.now() - Date.parse(live.fetched) < WEEK && live.banlist === banlist) {
+  if (live && !force && live.v === FORMAT && Date.now() - Date.parse(live.fetched) < WEEK && live.banlist === banlist) {
     fs.writeFileSync(OUT, JSON.stringify(live));
     console.log(`meta: live copy kept (${live.fetched.slice(0, 10)}, ${banlist})`);
     return output("fresh", "false");
@@ -54,7 +56,8 @@ async function main() {
       for (const one of mine) for (const name of new Set(named(one.main).map((entry) => entry.name))) seen.set(name, (seen.get(name) ?? 0) + 1);
       const spread = [...seen].map(([name, count]) => ({ name, pct: pct(count, mine.length) })).sort((a, b) => b.pct - a.pct);
       // the list shown and imported: the best finish, the newest of those
-      const best = [...mine].sort((a, b) => (a.tournamentPlacement ?? 99) - (b.tournamentPlacement ?? 99) || (b.uploaded > a.uploaded ? 1 : -1))[0];
+      // (a list the site marks illegal, from before the current ban list, is never the one used)
+      const best = mine.filter((one) => !one.illegal && !one.incomplete).sort((a, b) => (a.tournamentPlacement ?? 99) - (b.tournamentPlacement ?? 99) || (b.uploaded > a.uploaded ? 1 : -1))[0];
       return {
         name: deckType.name,
         count: decksCount,
@@ -72,7 +75,7 @@ async function main() {
     const cards = Object.fromEntries([...everywhere].filter(([, count]) => pct(count, lists.length) >= 5).map(([name, count]) => [name, pct(count, lists.length)]));
     const latest = changes[0];
     const banChanges = latest ? { date: latest.date.slice(0, 10), changes: (latest.changes ?? []).map((one) => ({ name: one.card?.name, from: one.from ?? "Unlimited", to: one.to ?? "Unlimited" })).filter((one) => one.name) } : null;
-    const meta = { fetched: new Date().toISOString(), source: "yugiohmeta.com", banlist, range: ranking.range, totalDecks: ranking.totalDecks, lists: lists.length, newest: newest.slice(0, 10), types, cards, banChanges };
+    const meta = { v: FORMAT, fetched: new Date().toISOString(), source: "yugiohmeta.com", banlist, range: ranking.range, totalDecks: ranking.totalDecks, lists: lists.length, newest: newest.slice(0, 10), types, cards, banChanges };
     fs.writeFileSync(OUT, JSON.stringify(meta));
     console.log(`meta: fetched ${lists.length} lists, ${types.length} deck types, newest ${meta.newest}, ${banlist}`);
     output("fresh", "true");

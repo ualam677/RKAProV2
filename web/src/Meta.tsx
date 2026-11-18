@@ -36,6 +36,8 @@ interface Props {
   failed: boolean;
   // card name → passcode (null: not in this card database)
   codeOf: (name: string) => number | null;
+  // cards in the decks' lists this card database doesn't know (left out of an import or an opponent)
+  unmatched: string[];
   // the hand traps among the field's cards, most played first
   handTraps: MetaCard[];
   // ban list changes that touch your decks: the card, the move, the decks it is in
@@ -65,7 +67,7 @@ function Minis({ cards, codeOf }: { cards: MetaCard[]; codeOf: (name: string) =>
   );
 }
 
-export function MetaScreen({ meta, failed, codeOf, handTraps, yourChanges, opponent, onImport, onOpponent, onTraps, onBack }: Props) {
+export function MetaScreen({ meta, failed, codeOf, unmatched, handTraps, yourChanges, opponent, onImport, onOpponent, onTraps, onBack }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <>
@@ -87,6 +89,7 @@ export function MetaScreen({ meta, failed, codeOf, handTraps, yourChanges, oppon
                 {meta.source}
               </a>
             </small>
+            {unmatched.length > 0 && <small className="meta-warn">Not in this card database yet, left out of imports: {unmatched.join(", ")}</small>}
           </div>
 
           <p className="section-label">Top decks</p>
@@ -163,7 +166,7 @@ export function MetaScreen({ meta, failed, codeOf, handTraps, yourChanges, oppon
               </p>
               <Minis cards={handTraps} codeOf={codeOf} />
               <button className="button primary meta-wide" onClick={() => onTraps(handTraps.slice(0, 3).flatMap((one) => codeOf(one.name) ?? []))}>
-                Test my lines against the top 3
+                Use the top 3 as your opponent's hand traps
               </button>
             </>
           )}
