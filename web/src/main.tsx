@@ -886,7 +886,9 @@ function App() {
       let named = 0;
       for (let count = all.length; count >= 1 && !named; count--) if (lower.includes(all.slice(0, count).join(" ")) && !GENERIC.has(all.slice(0, count).join(" "))) named = 10 + count;
       if (!named && words.some((word) => new RegExp(`\\b${word.replace(/[^a-z0-9]/g, "")}`).test(lower))) named = 1;
-      return [{ code, named, level: card.level & 0xff, pct }];
+      // a Link Monster's rating counts three times over against Levels and Ranks (Link-3 ranks with a Level 9)
+      const level = (card.level & 0xff) * (card.type & 0x4000000 ? 3 : 1);
+      return [{ code, named, level, pct }];
     });
     // only cards in every list (99% allows for rounding); a deck with none falls back to its most played monsters
     const top = Math.max(0, ...monsters.map((one) => one.pct));
