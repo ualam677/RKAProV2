@@ -70,6 +70,8 @@ interface Props {
   failed: boolean;
   // card name → passcode (null: not in this card database)
   codeOf: (name: string) => number | null;
+  // the card shown for a deck: its archetype's top monster
+  faceOf: (type: MetaType) => number | null;
   // cards in the decks' lists this card database doesn't know (left out of an import or an opponent)
   unmatched: string[];
   // the hand traps among the field's cards, most played first
@@ -105,7 +107,7 @@ function Minis({ cards, codeOf, sign }: { cards: MetaCard[]; codeOf: (name: stri
   );
 }
 
-export function MetaScreen({ meta, failed, codeOf, unmatched, handTraps, yourChanges, opponent, onImport, onOpponent, onTraps, onBack }: Props) {
+export function MetaScreen({ meta, failed, codeOf, faceOf, unmatched, handTraps, yourChanges, opponent, onImport, onOpponent, onTraps, onBack }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <>
@@ -179,7 +181,7 @@ export function MetaScreen({ meta, failed, codeOf, unmatched, handTraps, yourCha
           <p className="section-label">Top decks</p>
           {meta.types.map((type, rank) => {
             const expanded = open === type.name;
-            const face = codeOf(type.core[0]?.name ?? "");
+            const face = faceOf(type);
             return (
               <div key={type.name} className={`meta-deck ${expanded ? "open" : ""}`}>
                 <button className="meta-deck-head" onClick={() => setOpen(expanded ? null : type.name)} aria-expanded={expanded}>

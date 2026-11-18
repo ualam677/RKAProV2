@@ -857,13 +857,41 @@ function App() {
         const list = [...all];
         const found = await names(list);
         // the passcode the report carries first (a new card's name can differ in this database), then the name
-        setMetaCodes(new Map(list.flatMap((name, at) => { const code = read.codes?.[name] ?? found[at]?.code; return code ? [[name, code] as [string, number]] : []; })));
+        const matched = new Map(list.flatMap((name, at) => { const code = read.codes?.[name] ?? found[at]?.code; return code ? [[name, code] as [string, number]] : []; }));
+        setMetaCodes(matched);
+        // each card's type and Level, for picking each deck's face card
+        void info([...new Set(matched.values())]);
         setMeta(read);
       } catch {
         setMetaFailed(true);
       }
     })();
   }, [screen, ready, meta]);
+  // a deck's face card: a monster carrying the archetype's name (never a Spell, Trap or hand trap), the highest
+  // Level / Rank first, then the most played; with no monster of that name, its highest-Level monster
+  const metaFace = (type: MetaType): number | null => {
+    const GENERIC = new Set(["the", "of", "and", "deck", "ritual", "fusion", "synchro", "xyz", "link", "pendulum"]);
+    const words = type.name.toLowerCase().split(/[\s-]+/).filter((word) => word.length >= 3 && !GENERIC.has(word));
+    const played = new Map<string, number>();
+    for (const one of [...type.core, ...type.flex, ...(type.extra ?? [])]) played.set(one.name, Math.max(played.get(one.name) ?? 0, one.pct));
+    for (const one of type.list ? [...type.list.main, ...type.list.extra] : []) if (!played.has(one.name)) played.set(one.name, 0);
+    const monsters = [...played].flatMap(([name, pct]) => {
+      const code = metaCodes.get(name);
+      const card = code ? cards.get(code) : undefined;
+      if (!code || !card || !(card.type & 1) || isHandTrap(code, card.alias)) return [];
+      const lower = name.toLowerCase();
+      // how much of the deck's name the card carries: the longest run of its first words ("Ars Magna" of "Ars Magna
+      // Chaos Ritual") beats one later word ("Chaos")
+      const all = type.name.toLowerCase().split(/[\s-]+/);
+      let named = 0;
+      for (let count = all.length; count >= 1 && !named; count--) if (lower.includes(all.slice(0, count).join(" ")) && !GENERIC.has(all.slice(0, count).join(" "))) named = 10 + count;
+      if (!named && words.some((word) => new RegExp(`\\b${word.replace(/[^a-z0-9]/g, "")}`).test(lower))) named = 1;
+      return [{ code, named, level: card.level & 0xff, pct }];
+    });
+    // no monster of the deck's name: one of its staples (in 90% of its lists or more) before a less played one
+    const best = monsters.sort((a, b) => b.named - a.named || Number(b.named === 0 && b.pct >= 90) - Number(a.named === 0 && a.pct >= 90) || b.level - a.level || b.pct - a.pct)[0];
+    return best?.code ?? null;
+  };
   const metaHandTraps = useMemo(
     () =>
       meta
@@ -1646,6 +1674,7 @@ function App() {
           meta={meta}
           failed={metaFailed}
           codeOf={(name) => metaCodes.get(name) ?? null}
+          faceOf={metaFace}
           unmatched={meta ? [...new Set(meta.types.flatMap((type) => (type.list ? [...type.list.main, ...type.list.extra, ...type.list.side].map((one) => one.name) : [])))].filter((name) => !metaCodes.has(name)) : []}
           handTraps={metaHandTraps}
           yourChanges={metaYourChanges}
