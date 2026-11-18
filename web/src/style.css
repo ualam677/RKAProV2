@@ -1309,3 +1309,27 @@ html.app main.menu-screen .main-menu > .optimise-tile, html.app main.menu-screen
 .meta-move.down i, .meta-mini b.down { color: #f2b544; }
 .meta-warn { font-size: 12px; line-height: 1.35; }
 .meta-warn summary { cursor: pointer; }
+
+/* ==== The background on every screen: a faint blue grid drifting slowly across very dark navy, a soft glow in the
+   middle that breathes. Transform and opacity only (cheap to animate); still for anyone who asks for less motion. ==== */
+html { background: var(--bg); }
+body { background: transparent; }
+body::before {
+  content: ""; position: fixed; inset: -48px; z-index: -1; pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(61, 127, 214, 0.07) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(90deg, rgba(61, 127, 214, 0.07) 0 1px, transparent 1px 48px);
+  animation: grid-drift 40s linear infinite;
+  will-change: transform;
+}
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(90% 60% at 50% 45%, rgba(29, 78, 160, 0.26), transparent 70%);
+  animation: grid-glow 12s ease-in-out infinite alternate;
+}
+/* one grid cell each loop, so it repeats seamlessly */
+@keyframes grid-drift { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(48px, 48px, 0); } }
+@keyframes grid-glow { from { opacity: 0.55; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body::before, body::after { animation: none; } }
+/* the duel shows it too (its field keeps its own glow on top) */
+.duel { background: transparent; }
